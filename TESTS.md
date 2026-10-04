@@ -13,6 +13,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 | Check | Result | Evidence |
 |---|---|---|
+| Deploy | PASS | `main` at `254ccde`. Live `sw.js` reads `const CACHE_VERSION = 3;` (Last-Modified 04/10/26 2041 hrs SGT), fetched through Apify because this sandbox's egress policy blocks github.io. |
 | Migration needed? | No | Live `tb_capture_upsert` checked against 7.2: updates only when the stored `updated_at` is strictly older, copies every field including `deleted_at` (so Undo back to null propagates), and `tb_captures_since` returns soft-deleted rows. Edit, soft delete, Undo and GPS updates need no server change. No catalogue diff, as nothing was applied. |
 | `checks/static.cjs` | PASS, 53 of 53 | `node checks/static.cjs`. Includes `CACHE_VERSION` 3 equal to `APP_VERSION` 3. |
 | `checks/smoke.sql` | PASS, 24 of 24 | Run through the Supabase connector, rolled back. |
