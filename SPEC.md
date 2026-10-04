@@ -254,22 +254,26 @@ Database `travelboard`, version 1. A small hand-written promise wrapper, no libr
 ### 7.1 Screens
 
 **Home (today):** a large Capture button in thumb reach at the bottom; above it, today's captures for the device's current local date, newest first. Each row: time (24 h), first line of the body, kind chip, a GPS dot if a fix was recorded, sync state. A date header switcher to step back through earlier days.
+- Rows are two lines. Line one: the time in the row's own `tz`, with the city appended when that zone differs from the phone's (for example "0030 hrs Bangkok"), then the kind chip, GPS dot and sync chip. Line two: the first line of the body, cut off with an ellipsis.
+- Switcher label "Sun 04/10/26". The arrows step to the nearest day that has captures, skipping empty days; today is always reachable, even when empty. Tapping the label returns to today.
+- The Capture button reads "draft kept" under its label while a closed new-capture draft exists.
 
-**Capture:** opens full-screen with the textarea focused so the keyboard is already up and the Gboard mic is one tap away. Save top-right. A kind toggle (note / journal), default note. Nothing else on the screen.
+**Capture:** opens full-screen with the textarea focused so the keyboard is already up and the Gboard mic is one tap away. Save top-right. A kind toggle (note / journal), default note. Nothing else on the screen except Close, top-left. Save is disabled while the trimmed body is empty. The viewport sets `interactive-widget=resizes-content` so the screen shrinks above the keyboard. Opening it pushes a history entry, so Android back closes it instead of leaving the app.
 
-**Edit:** tapping a row opens the same screen with the text, kind toggle and a Delete action.
+**Edit:** tapping a row opens the same screen with the text, kind toggle and a Delete action. Delete sits in a bottom bar with the capture's date, time, zone and GPS accuracy. The keyboard is not raised on open.
 
 **Settings line:** sync status, last sync time, storage persistence result, theme toggle, Export, sign in / out.
 
 ### 7.2 Behaviour
 
-- **Entry routes:** in-app button; home-screen shortcut `?new=1`; share target prefill (`title`, `text`, `url` joined into the body).
-- **Drafts:** every input event writes to `drafts`. If the app is killed mid-typing, reopening restores the draft.
+- **Entry routes:** in-app button; home-screen shortcut `?new=1`; share target prefill (`title`, `text`, `url` joined into the body, one per line, dropping any part already contained in another). A prefill is appended to an existing `new` draft, written to the draft at once, and the URL is then cleaned with `replaceState`.
+- **Drafts:** every input event writes to `drafts`. If the app is killed mid-typing, reopening restores the draft. Key `new` for a new capture, the capture id for an edit, each with an `open` flag set while the screen is up. Close on a new capture keeps its draft with `open` false; Close on an edit discards its draft. At boot only a draft with `open` true is reopened automatically (the app was killed mid-typing).
+- **updated_at:** strictly increases on every local change: max(now, previous + 1 ms). The server applies only a strictly newer value, so two changes in one millisecond, or after the clock moves back, still propagate.
 - **On save:** generate uuid (`crypto.randomUUID()`), set `captured_at` and `updated_at` to now, `tz` from `Intl.DateTimeFormat().resolvedOptions().timeZone`, compute `local_date` in that zone with the 0400 rollover, write to IndexedDB with `dirty = 1`, close the screen, then trigger sync. The save never waits on GPS or network.
-- **GPS:** fired at save with `enableHighAccuracy: true`, `timeout: 5000`, `maximumAge: 60000`. If it resolves, update the row's `lat`, `lng`, `accuracy_m`, bump `updated_at`, mark dirty. If it fails or is denied, the capture stays with nulls. Location permission is requested once on first save.
+- **GPS:** fired at save with `enableHighAccuracy: true`, `timeout: 5000`, `maximumAge: 60000`. New captures only, never awaited. If it resolves, update the row's `lat`, `lng`, `accuracy_m`, bump `updated_at`, mark dirty, as a read-modify-write so an edit or push confirmation in between is never overwritten. If it fails or is denied, the capture stays with nulls. Location permission is requested once on first save.
 - **Edit:** changes body or kind, bumps `updated_at`, marks dirty. `captured_at`, `tz` and `local_date` never change on edit.
 - **Delete:** sets `deleted_at`, bumps `updated_at`, marks dirty, hides the row, shows an Undo toast for 5 s. No hard delete anywhere in the client.
-- **Export:** downloads every capture in IndexedDB, deleted ones included and flagged, as one JSON file named `travelboard-captures-ddmmyy-hhmm.json`. Works offline.
+- **Export:** downloads every capture in IndexedDB, deleted ones included and flagged, as one JSON file named `travelboard-captures-ddmmyy-hhmm.json` (device time). Each capture carries its server fields plus `deleted`, `synced` and `server_ts`. Works offline.
 
 ### 7.3 M1 acceptance
 
@@ -429,6 +433,7 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 04/10/26 7.1, 7.2: M1 design details agreed with Gary at the start of M1 written in (row layout and city suffix, date switcher, Close and Android back on the capture screen, draft keys and `open` flag, strictly increasing `updated_at`, GPS merge, share prefill dedupe and append, export fields). No change to the acceptance list.
 - 04/10/26 Principle 8, 6.2, 7.2, 7.3 item 6: the local day rolls over at 0400, not midnight (Gary's decision at the start of M1). Principle 8 already said 0030 belongs to the evening, but 6.2 defined `local_date` as the plain calendar date, and the old acceptance item 6 could not tell Bangkok from Singapore (0030 BKK is 0130 SGT, the same date). No schema change; the column comment changes only.
 
 - 04/10/26 6.6: "checking" status state, a reachability probe before each sync, and a 30 s retry while visible with rows queued or the dot offline. From the M0 Pixel test, where Chrome reported online in airplane mode with a VPN active.

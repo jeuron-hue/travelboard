@@ -8,11 +8,20 @@
   - M0 Foundation: app shell, IndexedDB (captures, drafts, meta), sync engine
     (push dirty rows to tb_captures_upsert, pull by keyset cursor from
     tb_captures_since), sign in with the synthetic login, sync status dot,
-    "update ready" bar, storage persistence, theme toggle, and an "Add test record"
-    button that writes a dummy capture for the M0 acceptance test.
-  - Capture UI, GPS, edit, delete and export arrive in M1.
+    "update ready" bar, storage persistence, theme toggle.
+  - M1 Capture (SPEC.md 7): home lists one local day of captures (day rolls over
+    at 0400 in the capture's zone) with a date switcher; full-screen capture and
+    edit screen with drafts saved on every input; GPS after save, never awaited;
+    soft delete with a 5 s Undo; home-screen shortcut (?new=1) and share target
+    prefill; JSON export of every capture.
 
   Change log (newest first)
+  - 04/10/26 v3. M1 Capture. Capture and edit screen, drafts, 0400 local-day rule, date
+    switcher, row layout (time in the row's zone with a city suffix, kind chip, GPS dot,
+    sync chip), GPS merge, soft delete with Undo, ?new=1 and share target, Export.
+    updated_at strictly increases on every local change. Removed the M0 "Add test record"
+    button and hint. [hidden] now always hides: a display rule was overriding it (the
+    sign-in form showed while signed in).
   - 04/10/26 v2. Status pill fix from the Pixel test: starts as "checking" (or "offline" when
     navigator.onLine is false) instead of "synced"; a 5 s reachability probe runs before each
     sync, because navigator.onLine stayed true in airplane mode with a VPN active; a 30 s
@@ -22,7 +31,7 @@
 <html lang="en-GB">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#12161a">
 <title>travelboard</title>
 <link rel="manifest" href="manifest.webmanifest">
@@ -69,6 +78,7 @@
   }
 
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }   /* hidden always wins over a display rule */
   html, body { margin: 0; height: 100%; }
   body {
     font-family: 'IBM Plex Sans', system-ui, sans-serif;
@@ -77,7 +87,7 @@
     display: flex; flex-direction: column;
     -webkit-tap-highlight-color: transparent;
   }
-  button, input { font: inherit; color: inherit; }
+  button, input, textarea { font: inherit; color: inherit; }
 
   header {
     position: sticky; top: 0; z-index: 2;
@@ -98,19 +108,98 @@
   .dot.offline { background: var(--muted); }
   .dot.error   { background: var(--crit); }
 
-  main { flex: 1; overflow-y: auto; padding: 12px 16px 120px; }
+  .daybar {
+    position: sticky; top: 0; z-index: 1;
+    display: grid; grid-template-columns: 56px 1fr 56px; align-items: center; gap: 8px;
+    padding: 8px 16px; background: var(--ground); border-bottom: 1px solid var(--line);
+  }
+  .daybar button {
+    min-height: 48px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--surface); cursor: pointer; font-size: 20px;
+  }
+  .daybar button:disabled { opacity: 0.35; cursor: default; }
+  .daybar #day-label { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .daybar #day-label.today { color: var(--accent); }
+
+  main { flex: 1; overflow-y: auto; padding: 0 0 140px; }
+  .list { padding: 12px 16px 0; }
   .hint { color: var(--muted); font-size: 15px; margin: 4px 0 12px; }
   ul.records { list-style: none; margin: 0; padding: 0; }
-  ul.records li {
-    display: grid; grid-template-columns: auto 1fr auto; gap: 4px 12px; align-items: baseline;
-    padding: 12px; margin-bottom: 8px; border-radius: 10px;
+  ul.records li { margin-bottom: 8px; }
+  .row {
+    display: block; width: 100%; text-align: left; cursor: pointer;
+    padding: 10px 12px; border-radius: 10px;
     background: var(--surface); border: 1px solid var(--line);
   }
-  .when { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .body { overflow-wrap: anywhere; }
+  .row:active { filter: brightness(0.96); }
+  .line1 { display: flex; align-items: center; gap: 8px; min-height: 26px; }
+  .when { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
+  .city { color: var(--muted); font-weight: 400; }
+  .spacer { flex: 1; }
+  .line2 {
+    color: var(--muted); margin-top: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .gps { width: 10px; height: 10px; border-radius: 50%; background: var(--good); flex: none; }
   .chip { font-size: 13px; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+  .chip.note { background: var(--ground); color: var(--muted); border: 1px solid var(--line); }
+  .chip.journal { background: var(--accent-bg); color: var(--accent); }
   .chip.queued { background: var(--warn-bg); color: var(--warn); }
   .chip.synced { background: var(--good-bg); color: var(--good); }
+  .primary small { display: block; font-size: 14px; font-weight: 400; opacity: 0.9; }
+  .primary:disabled { opacity: 0.4; cursor: default; filter: none; }
+
+  /* Capture and edit screen: a fixed layer over the whole app. With
+     interactive-widget=resizes-content it shrinks above the keyboard. */
+  #cap {
+    position: fixed; inset: 0; z-index: 5;
+    display: flex; flex-direction: column;
+    background: var(--ground);
+  }
+  #cap[hidden] { display: none; }
+  .capbar {
+    display: flex; align-items: center; gap: 8px;
+    padding: calc(env(safe-area-inset-top) + 8px) 12px 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  .capbar .btn { min-width: 72px; }
+  .capbar .save {
+    min-height: 48px; min-width: 84px; padding: 0 16px; border: 0; border-radius: 10px;
+    background: var(--accent); color: var(--on-accent); font-weight: 600; cursor: pointer;
+  }
+  .capbar .save:disabled { opacity: 0.4; cursor: default; }
+  .toggle { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .toggle button {
+    min-height: 46px; padding: 0 14px; border: 0; background: var(--surface); cursor: pointer;
+  }
+  .toggle button[aria-pressed="true"] { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+  #cap-body {
+    flex: 1; width: 100%; resize: none; border: 0; outline: none;
+    padding: 14px 16px; font: inherit; font-size: 19px; line-height: 1.45;
+    background: var(--ground); color: var(--ink);
+  }
+  .capfoot {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 12px calc(env(safe-area-inset-bottom) + 8px);
+    border-top: 1px solid var(--line); color: var(--muted); font-size: 14px;
+  }
+  .capfoot[hidden] { display: none; }
+  .capfoot .info { flex: 1; }
+  .danger { color: var(--crit); border-color: var(--crit); }
+
+  #toast {
+    position: fixed; left: 16px; right: 16px; z-index: 4;
+    bottom: calc(env(safe-area-inset-bottom) + 96px);
+    display: flex; align-items: center; gap: 12px;
+    min-height: 52px; padding: 4px 4px 4px 16px; border-radius: 12px;
+    background: var(--ink); color: var(--ground);
+  }
+  #toast[hidden] { display: none; }
+  #toast span { flex: 1; }
+  #toast button {
+    min-height: 44px; padding: 0 16px; border: 0; border-radius: 10px;
+    background: transparent; color: var(--accent); font-weight: 600; cursor: pointer;
+  }
 
   footer {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 2;
@@ -164,17 +253,44 @@
   </button>
 </header>
 
+<nav class="daybar" aria-label="Day">
+  <button id="day-prev" type="button" aria-label="Earlier day with captures">&#8249;</button>
+  <button id="day-label" type="button" aria-label="Go to today">-</button>
+  <button id="day-next" type="button" aria-label="Later day with captures">&#8250;</button>
+</nav>
+
 <main>
-  <p class="hint">M0 foundation build. Records below are read from this phone's storage.</p>
-  <ul class="records" id="records"></ul>
-  <p class="hint" id="empty" hidden>No records on this phone yet.</p>
+  <div class="list">
+    <ul class="records" id="records"></ul>
+    <p class="hint" id="empty" hidden></p>
+  </div>
 </main>
 
 <button id="update-bar" type="button" hidden>Update ready, tap to reload</button>
 
+<div id="toast" role="status" hidden><span id="toast-text"></span><button id="toast-undo" type="button">Undo</button></div>
+
 <footer>
-  <button class="primary" id="add-test" type="button">Add test record</button>
+  <button class="primary" id="capture" type="button">Capture<small id="draft-note" hidden>draft kept</small></button>
 </footer>
+
+<section id="cap" role="dialog" aria-modal="true" aria-label="Capture" hidden>
+  <div class="capbar">
+    <button class="btn" id="cap-close" type="button">Close</button>
+    <div class="toggle" role="group" aria-label="Kind">
+      <button id="kind-note" type="button" aria-pressed="true">note</button>
+      <button id="kind-journal" type="button" aria-pressed="false">journal</button>
+    </div>
+    <span class="spacer"></span>
+    <button class="save" id="cap-save" type="button" disabled>Save</button>
+  </div>
+  <textarea id="cap-body" maxlength="20000" autocomplete="off" spellcheck="true"
+    enterkeyhint="enter" placeholder="Type, or tap the mic on the keyboard"></textarea>
+  <div class="capfoot" id="cap-foot" hidden>
+    <span class="info" id="cap-info"></span>
+    <button class="btn danger" id="cap-delete" type="button">Delete</button>
+  </div>
+</section>
 
 <dialog id="settings">
   <div class="sheet">
@@ -195,6 +311,7 @@
     </form>
     <div class="actions">
       <button class="btn" id="sync-now" type="button">Sync now</button>
+      <button class="btn" id="export" type="button">Export</button>
       <button class="btn" id="theme" type="button">Theme</button>
       <button class="btn" id="signout" type="button" hidden>Sign out</button>
       <button class="btn" id="close" type="button" autofocus>Close</button>
@@ -207,7 +324,7 @@
 'use strict';
 
 // Bump together with CACHE_VERSION in sw.js on every release.
-const APP_VERSION = 2;
+const APP_VERSION = 3;
 
 const SUPABASE_URL = 'https://nyjsrnntxdgfykkmihpx.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_q75DGiJBda-NwE3tdgPtFg_g3Rasmcg';
@@ -215,6 +332,10 @@ const PUSH_BATCH = 50;
 const FETCH_TIMEOUT_MS = 20000;
 const PROBE_TIMEOUT_MS = 5000;
 const RETRY_MS = 30000;
+const DAY_ROLLOVER_HOUR = 4;        // the local day ends at 0400 (SPEC.md principle 8)
+const BODY_MAX = 20000;             // server check: char_length(body) <= 20000
+const UNDO_MS = 5000;
+const GPS_OPTS = { enableHighAccuracy: true, timeout: 5000, maximumAge: 60000 };
 
 const $ = (id) => document.getElementById(id);
 
@@ -232,6 +353,32 @@ function partsIn(date, tz) {
 function localDateIn(date, tz) {              // 'YYYY-MM-DD', calendar date in tz
   const p = partsIn(date, tz);
   return `${p.year}-${p.month}-${p.day}`;
+}
+// Local day: the calendar date in tz, minus one day when the local time there is before
+// 0400. 0030 hrs in Bangkok belongs to that Bangkok evening. Used for local_date at
+// capture and for "today" on the home screen (SPEC.md principle 8, 6.2, 7.2).
+function localDay(date, tz) {
+  const p = partsIn(date, tz);
+  if (Number(p.hour) >= DAY_ROLLOVER_HOUR) return `${p.year}-${p.month}-${p.day}`;
+  return addDays(`${p.year}-${p.month}-${p.day}`, -1);
+}
+function addDays(ymd, n) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+}
+const todayLocal = () => localDay(new Date(), deviceTz());
+function fmtDayLabel(ymd) {                   // 'Sun 04/10/26'
+  const [y, m, d] = ymd.split('-').map(Number);
+  const wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+  return `${wd} ${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${String(y).slice(2)}`;
+}
+// 'Asia/Bangkok' -> 'Bangkok', 'America/Argentina/Buenos_Aires' -> 'Buenos Aires'
+const cityOf = (tz) => String(tz || '').split('/').pop().replace(/_/g, ' ');
+// updated_at must strictly increase on every local change, even within one millisecond
+// or after the device clock moves back: the server applies only a strictly newer one.
+function nextUpdatedAt(prev) {
+  const p = prev ? Date.parse(prev) : NaN;
+  return new Date(Math.max(Date.now(), Number.isFinite(p) ? p + 1 : 0)).toISOString();
 }
 function fmtDate(iso, tz) {
   const p = partsIn(new Date(iso), tz);
@@ -287,6 +434,35 @@ const idb = (() => {
       const t = db.transaction(store, 'readwrite');
       t.objectStore(store).put(value);
       return done(t);
+    },
+    async del(store, key) {
+      const db = await open();
+      const t = db.transaction(store, 'readwrite');
+      t.objectStore(store).delete(key);
+      return done(t);
+    },
+    // One readwrite transaction over several stores; fn(t) queues its requests
+    // synchronously. Used to write a capture and clear its draft atomically.
+    async tx(stores, fn) {
+      const db = await open();
+      const t = db.transaction(stores, 'readwrite');
+      fn(t);
+      return done(t);
+    },
+    // Read-modify-write one row. fn(existing) returns the row to put, or null to leave it.
+    // Resolves to the row written, or null.
+    async update(store, key, fn) {
+      const db = await open();
+      const t = db.transaction(store, 'readwrite');
+      const s = t.objectStore(store);
+      let out = null;
+      const g = s.get(key);
+      g.onsuccess = () => {
+        const next = fn(g.result);
+        if (next) { s.put(next); out = next; }
+      };
+      await done(t);
+      return out;
     },
     async all(store) {
       const db = await open();
@@ -350,17 +526,19 @@ const SERVER_FIELDS = ['id', 'body', 'kind', 'captured_at', 'tz', 'local_date', 
   'accuracy_m', 'trip_id', 'place_id', 'updated_at', 'deleted_at'];
 const toServer = (row) => Object.fromEntries(SERVER_FIELDS.map((k) => [k, row[k] === undefined ? null : row[k]]));
 
-async function addTestRecord() {
+// ---------- capture rows: save, edit, delete, GPS ----------
+
+function newCaptureRow(body, kind) {
   const now = new Date();
   const iso = now.toISOString();
   const tz = deviceTz();
-  const row = {
+  return {
     id: crypto.randomUUID(),
-    body: `M0 test record ${fmtDate(iso, tz)} ${fmtTime(iso, tz)}`,
-    kind: 'note',
+    body,
+    kind,
     captured_at: iso,
     tz,
-    local_date: localDateIn(now, tz),
+    local_date: localDay(now, tz),
     lat: null, lng: null, accuracy_m: null,
     trip_id: null, place_id: null,
     updated_at: iso,
@@ -368,34 +546,369 @@ async function addTestRecord() {
     server_ts: null,
     dirty: 1
   };
-  await idb.put('captures', row);   // local write first: never waits on network or session
+}
+
+// GPS for a new capture: fired after the row is saved, never awaited. The fix is applied
+// with a read-modify-write, so an edit or a push confirmation in between is never lost.
+// Failure or denial leaves the nulls in place, silently.
+function requestGps(id) {
+  if (!navigator.geolocation) return;
+  try {
+    navigator.geolocation.getCurrentPosition((pos) => {
+      const c = pos.coords;
+      idb.update('captures', id, (row) => row && Object.assign({}, row, {
+        lat: c.latitude,
+        lng: c.longitude,
+        accuracy_m: Number.isFinite(c.accuracy) ? c.accuracy : null,
+        updated_at: nextUpdatedAt(row.updated_at),
+        dirty: 1
+      })).then((r) => { if (r) { render(); sync(); } })
+        .catch((e) => console.warn('gps merge failed', e));
+    }, () => { /* denied, unavailable or timed out: the capture keeps null coordinates */ }, GPS_OPTS);
+  } catch (e) { /* no geolocation: same as denied */ }
+}
+
+// ---------- capture screen ----------
+
+// mode 'new' (draft key "new") or 'edit' (draft key = capture id).
+const cap = { open: false, mode: null, row: null, kind: 'note', busy: false };
+const draftKey = () => (cap.mode === 'new' ? 'new' : cap.row.id);
+const capBody = () => $('cap-body').value.trim().slice(0, BODY_MAX);
+
+function setKind(kind) {
+  cap.kind = kind === 'journal' ? 'journal' : 'note';
+  $('kind-note').setAttribute('aria-pressed', String(cap.kind === 'note'));
+  $('kind-journal').setAttribute('aria-pressed', String(cap.kind === 'journal'));
+}
+function updateSaveEnabled() {
+  $('cap-save').disabled = cap.busy || capBody() === '';
+}
+
+// Every input writes the draft with open: true. Open means the screen is up, so a draft
+// still open at boot means the app was killed mid-typing.
+function writeDraft() {
+  if (!cap.open) return Promise.resolve();
+  return idb.put('drafts', {
+    id: draftKey(), body: $('cap-body').value, kind: cap.kind, open: true,
+    updated_at: new Date().toISOString()
+  }).catch((e) => console.warn('draft write failed', e));
+}
+
+// Android back: opening the screen pushes a history entry, so back pops it and closes the
+// screen instead of leaving the app. Closing from a button pops the entry ourselves.
+let popResolve = null, popWait = null;
+function popCaptureState() {
+  if (!(history.state && history.state.tbCap)) return;
+  popWait = new Promise((resolve) => {
+    popResolve = resolve;
+    setTimeout(resolve, 600);   // never wait forever on a lost popstate
+  }).then(() => { popResolve = null; popWait = null; });
+  history.back();
+}
+window.addEventListener('popstate', () => {
+  if (popResolve) { popResolve(); return; }
+  if (cap.open) closeCapture('back');
+});
+
+async function openCapture(mode, row, draft) {
+  if (popWait) await popWait;
+  cap.mode = mode;
+  cap.row = row || null;
+  cap.busy = false;
+  const ta = $('cap-body');
+  ta.value = draft ? draft.body : row ? row.body : '';
+  setKind(draft ? draft.kind : row ? row.kind : 'note');
+  if (mode === 'edit') {
+    const parts = [`Captured ${fmtDate(row.captured_at, row.tz)} ${fmtTime(row.captured_at, row.tz)}`];
+    if (row.tz !== deviceTz()) parts.push(cityOf(row.tz));
+    parts.push(row.lat != null ? `GPS ${Math.round(row.accuracy_m || 0)} m` : 'no GPS');
+    $('cap-info').textContent = parts.join(', ');
+  }
+  $('cap-foot').hidden = mode !== 'edit';
+  $('cap').setAttribute('aria-label', mode === 'edit' ? 'Edit capture' : 'New capture');
+  $('cap').hidden = false;
+  cap.open = true;
+  history.pushState({ tbCap: true }, '');
+  updateSaveEnabled();
+  if (draft) writeDraft();            // re-mark an existing draft as open
+  if (mode === 'new') {
+    // On a launch with no user gesture (home-screen shortcut) Android may not raise the
+    // keyboard for this focus; checked on the device, not assumed.
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  }
+}
+
+async function openNew() {
+  const draft = await idb.get('drafts', 'new');
+  await openCapture('new', null, draft);
+}
+async function openEdit(id) {
+  const row = await idb.get('captures', id);
+  if (!row || row.deleted_at) return;
+  const draft = await idb.get('drafts', id);
+  await openCapture('edit', row, draft);
+}
+
+// how: 'close' (button), 'back' (Android back), 'saved', 'deleted'.
+async function closeCapture(how) {
+  if (!cap.open) return;
+  cap.open = false;
+  const key = draftKey();
+  const body = $('cap-body').value;
+  const kind = cap.kind;
+  $('cap-body').blur();
+  $('cap').hidden = true;
+  if (how !== 'back') popCaptureState();
+  if (how === 'close' || how === 'back') {
+    // New: keep the draft, closed. Edit: discard it.
+    if (cap.mode === 'new' && body.trim()) {
+      await idb.put('drafts', { id: 'new', body, kind, open: false, updated_at: new Date().toISOString() });
+    } else {
+      await idb.del('drafts', key);
+    }
+  }
+  await updateDraftNote();
+}
+
+async function updateDraftNote() {
+  const d = await idb.get('drafts', 'new');
+  const kept = !!(d && d.body && d.body.trim());
+  $('draft-note').hidden = !kept;
+  $('capture').setAttribute('aria-label', kept ? 'Capture, draft kept' : 'Capture');
+}
+
+async function saveCapture() {
+  const body = capBody();
+  if (!cap.open || cap.busy || !body) return;
+  cap.busy = true;
+  updateSaveEnabled();
+  try {
+    if (cap.mode === 'new') {
+      const row = newCaptureRow(body, cap.kind);
+      // Local write first, atomically with clearing the draft. Never waits on GPS or network.
+      await idb.tx(['captures', 'drafts'], (t) => {
+        t.objectStore('captures').put(row);
+        t.objectStore('drafts').delete('new');
+      });
+      followToday = true;
+      await closeCapture('saved');
+      await render();
+      requestGps(row.id);
+    } else {
+      const id = cap.row.id, kind = cap.kind;
+      // Body and kind only; captured_at, tz and local_date never change on edit.
+      await idb.tx(['captures', 'drafts'], (t) => {
+        const s = t.objectStore('captures');
+        const g = s.get(id);
+        g.onsuccess = () => {
+          const row = g.result;
+          if (!row || (row.body === body && row.kind === kind)) return;
+          s.put(Object.assign({}, row, { body, kind, updated_at: nextUpdatedAt(row.updated_at), dirty: 1 }));
+        };
+        t.objectStore('drafts').delete(id);
+      });
+      await closeCapture('saved');
+      await render();
+    }
+    sync();
+  } catch (e) {
+    cap.busy = false;
+    updateSaveEnabled();
+    alert('Save failed: ' + ((e && e.message) || e));
+  }
+}
+
+async function deleteCapture() {
+  if (!cap.open || cap.mode !== 'edit' || cap.busy) return;
+  cap.busy = true;
+  const id = cap.row.id;
+  try {
+    // Soft delete only: deleted_at set, row kept and synced so the delete propagates.
+    await idb.tx(['captures', 'drafts'], (t) => {
+      const s = t.objectStore('captures');
+      const g = s.get(id);
+      g.onsuccess = () => {
+        const row = g.result;
+        if (!row || row.deleted_at) return;
+        const ts = nextUpdatedAt(row.updated_at);
+        s.put(Object.assign({}, row, { deleted_at: ts, updated_at: ts, dirty: 1 }));
+      };
+      t.objectStore('drafts').delete(id);
+    });
+    await closeCapture('deleted');
+    await render();
+    showToast('Capture deleted', () => undoDelete(id));
+    sync();
+  } catch (e) {
+    cap.busy = false;
+    alert('Delete failed: ' + ((e && e.message) || e));
+  }
+}
+
+async function undoDelete(id) {
+  await idb.update('captures', id, (row) => row && row.deleted_at ? Object.assign({}, row, {
+    deleted_at: null, updated_at: nextUpdatedAt(row.updated_at), dirty: 1
+  }) : null);
   await render();
   sync();
 }
 
+let toastTimer = null;
+function showToast(text, onUndo) {
+  clearTimeout(toastTimer);
+  $('toast-text').textContent = text;
+  $('toast-undo').hidden = !onUndo;
+  $('toast-undo').onclick = onUndo ? () => { hideToast(); onUndo(); } : null;
+  $('toast').hidden = false;
+  toastTimer = setTimeout(hideToast, UNDO_MS);
+}
+function hideToast() {
+  clearTimeout(toastTimer);
+  $('toast').hidden = true;
+  $('toast-undo').onclick = null;
+}
+
+// ---------- entry routes: ?new=1 shortcut, share target, killed mid-typing ----------
+
+// title, text and url joined into the body, dropping any part already contained in
+// another (Maps often repeats the link inside text). Never parsed into fields.
+function buildPrefill(title, text, url) {
+  const parts = [title, text, url].map((s) => (s || '').trim()).filter(Boolean);
+  return parts.filter((p, i) => !parts.some((q, j) => j !== i && q.includes(p) && (q.length > p.length || j < i)))
+    .join('\n');
+}
+
+async function handleEntry() {
+  const q = new URLSearchParams(location.search);
+  const shared = q.has('title') || q.has('text') || q.has('url');
+  if (q.get('new') === '1' || shared) {
+    const prefill = buildPrefill(q.get('title'), q.get('text'), q.get('url'));
+    if (prefill) {
+      const old = await idb.get('drafts', 'new');
+      let body = old && old.body ? old.body : '';
+      if (!body.includes(prefill)) body = body.trim() ? body.replace(/\s+$/, '') + '\n' + prefill : prefill;
+      await idb.put('drafts', {
+        id: 'new', body: body.slice(0, BODY_MAX), kind: old ? old.kind : 'note', open: true,
+        updated_at: new Date().toISOString()
+      });
+    }
+    // Clean URL, so a reload or a later launch does not apply the same entry twice.
+    history.replaceState(null, '', location.pathname);
+    await openNew();
+    return;
+  }
+  // Auto-reopen only a draft left open, i.e. the app was killed mid-typing.
+  const open = (await idb.all('drafts')).filter((d) => d.open)
+    .sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
+  for (const d of open) {
+    if (d.id === 'new') { await openNew(); return; }
+    const row = await idb.get('captures', d.id);
+    if (row && !row.deleted_at) { await openCapture('edit', row, d); return; }
+    await idb.del('drafts', d.id);
+  }
+}
+
+// ---------- export ----------
+
+async function exportCaptures() {
+  const rows = (await idb.all('captures')).sort((a, b) => (a.captured_at < b.captured_at ? -1 : 1));
+  const captures = rows.map((r) => Object.assign(toServer(r), {
+    deleted: !!r.deleted_at,
+    synced: !r.dirty,
+    server_ts: r.server_ts || null
+  }));
+  const now = new Date();
+  const p = partsIn(now, deviceTz());
+  const name = `travelboard-captures-${p.day}${p.month}${p.year.slice(2)}-${p.hour}${p.minute}.json`;
+  const json = JSON.stringify({
+    app: 'travelboard', app_version: APP_VERSION, exported_at: now.toISOString(),
+    device_tz: deviceTz(), count: captures.length, captures
+  }, null, 2);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+  a.download = name;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  showToast(`Exported ${captures.length} captures`, null);
+}
+
 // ---------- rendering: IndexedDB only ----------
 
+// The home screen shows one local day. It follows "today" (0400 rollover, device zone)
+// until the user steps to another day; tapping the date label returns to today.
+let viewDay = null;
+let followToday = true;
+
 async function render() {
-  const rows = (await idb.all('captures'))
-    .filter((r) => !r.deleted_at)
-    .sort((a, b) => (a.captured_at < b.captured_at ? 1 : -1))
-    .slice(0, 50);
+  const live = (await idb.all('captures')).filter((r) => !r.deleted_at);
+  const today = todayLocal();
+  if (followToday || !viewDay) viewDay = today;
+  if (viewDay === today) followToday = true;
+
+  // Arrows step to the nearest day with captures; today is always reachable.
+  const days = [...new Set(live.map((r) => r.local_date).concat([today]))].sort();
+  const prev = days.filter((d) => d < viewDay).pop();
+  const next = days.find((d) => d > viewDay);
+  $('day-prev').disabled = !prev;
+  $('day-next').disabled = !next;
+  $('day-prev').dataset.day = prev || '';
+  $('day-next').dataset.day = next || '';
+  $('day-label').textContent = fmtDayLabel(viewDay);
+  $('day-label').classList.toggle('today', viewDay === today);
+
+  const here = deviceTz();
+  const rows = live.filter((r) => r.local_date === viewDay)
+    .sort((a, b) => (a.captured_at < b.captured_at ? 1 : a.captured_at > b.captured_at ? -1 : 0));
   const ul = $('records');
   ul.replaceChildren();
   for (const r of rows) {
     const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'row';
+    btn.dataset.id = r.id;
+
+    const l1 = document.createElement('div');
+    l1.className = 'line1';
     const when = document.createElement('span');
     when.className = 'when';
-    when.textContent = `${fmtDate(r.captured_at, r.tz)} ${fmtTime(r.captured_at, r.tz)}`;
-    const body = document.createElement('span');
-    body.className = 'body';
-    body.textContent = (r.body || '').split('\n')[0] || '(empty)';
+    when.textContent = fmtTime(r.captured_at, r.tz);
+    if (r.tz !== here) {
+      const city = document.createElement('span');
+      city.className = 'city';
+      city.textContent = ' ' + cityOf(r.tz);
+      when.append(city);
+    }
+    const spacer = document.createElement('span');
+    spacer.className = 'spacer';
+    const kind = document.createElement('span');
+    kind.className = 'chip ' + (r.kind === 'journal' ? 'journal' : 'note');
+    kind.textContent = r.kind === 'journal' ? 'journal' : 'note';
+    l1.append(when, spacer, kind);
+    if (r.lat != null && r.lng != null) {
+      const gps = document.createElement('span');
+      gps.className = 'gps';
+      gps.title = 'GPS fix recorded';
+      gps.setAttribute('aria-label', 'GPS fix recorded');
+      l1.append(gps);
+    }
     const chip = document.createElement('span');
     chip.className = 'chip ' + (r.dirty ? 'queued' : 'synced');
     chip.textContent = r.dirty ? 'queued' : 'synced';
-    li.append(when, body, chip);
+    l1.append(chip);
+
+    const l2 = document.createElement('div');
+    l2.className = 'line2';
+    l2.textContent = (r.body || '').split('\n').find((s) => s.trim()) || '(empty)';
+
+    btn.append(l1, l2);
+    li.append(btn);
     ul.append(li);
   }
+  $('empty').textContent = viewDay === today ? 'Nothing captured today yet.' : 'No captures on this day.';
   $('empty').hidden = rows.length > 0;
   await renderStatus();
 }
@@ -645,7 +1158,32 @@ if ('serviceWorker' in navigator) {
 
 // ---------- wiring ----------
 
-$('add-test').addEventListener('click', () => { addTestRecord().catch((e) => alert('Save failed: ' + e.message)); });
+const fail = (what) => (e) => { console.error(what, e); alert(what + ': ' + ((e && e.message) || e)); };
+$('capture').addEventListener('click', () => { if (!cap.open) openNew().catch(fail('Could not open capture')); });
+$('cap-close').addEventListener('click', () => { closeCapture('close').catch(fail('Close failed')); });
+$('cap-save').addEventListener('click', () => { saveCapture(); });
+$('cap-delete').addEventListener('click', () => { deleteCapture(); });
+$('cap-body').addEventListener('input', () => { updateSaveEnabled(); writeDraft(); });
+$('kind-note').addEventListener('click', () => { setKind('note'); writeDraft(); });
+$('kind-journal').addEventListener('click', () => { setKind('journal'); writeDraft(); });
+$('records').addEventListener('click', (ev) => {
+  const row = ev.target.closest('.row');
+  if (row && !cap.open) openEdit(row.dataset.id).catch(fail('Could not open capture'));
+});
+$('day-prev').addEventListener('click', () => {
+  const d = $('day-prev').dataset.day;
+  if (d) { viewDay = d; followToday = false; render(); }
+});
+$('day-next').addEventListener('click', () => {
+  const d = $('day-next').dataset.day;
+  if (d) { viewDay = d; followToday = false; render(); }
+});
+$('day-label').addEventListener('click', () => { followToday = true; render(); });
+$('export').addEventListener('click', () => { exportCaptures().catch(fail('Export failed')); });
+// "Today" rolls over at 0400 while the app sits open.
+setInterval(() => {
+  if (document.visibilityState === 'visible' && followToday && viewDay !== todayLocal()) render();
+}, 60000);
 $('status').addEventListener('click', () => { renderAuth(); $('settings').showModal(); });
 $('close').addEventListener('click', () => $('settings').close());
 $('sync-now').addEventListener('click', () => sync());
@@ -661,6 +1199,12 @@ if (sb) sb.auth.onAuthStateChange(() => { renderAuth(); });
   $('s-version').textContent = 'v' + APP_VERSION;
   await idb.open();
   if ((await meta.get('schema_version')) === undefined) await meta.set('schema_version', 1);
+  // A reload while the capture screen was up leaves its history entry on top: pop it.
+  popCaptureState();
+  if (popWait) await popWait;
+  // Entry route first, so a shortcut or share opens straight into capture.
+  await handleEntry().catch((e) => console.error('entry route failed', e));
+  await updateDraftNote();
   await render();
   renderAuth();
   initPersistence().catch(() => { $('s-persist').textContent = 'unknown'; });
