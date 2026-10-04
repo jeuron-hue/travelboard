@@ -1,7 +1,7 @@
 # travelboard: specification
 
 Owner: Gary Chan. Repo: `jeuron-hue/travelboard` (public). Written 04/10/26.
-Status: documentation only. No code, no schema, no repo created yet.
+Status: M0 Foundation done 04/10/26. M1 Capture in build.
 
 This file is the source of record for what travelboard is and how it is built. M0, M1 and M2 are specified in full because they ship before Bangkok (09/11/26). M3 to M8 are skeletons, to be expanded one at a time after Bangkok using the friction log from that trip.
 
@@ -49,7 +49,7 @@ These bind every module.
 5. **Plain-language answer on top, detail behind.** Glanceable first, structure underneath, never one instead of the other.
 6. **Every fact carries its source and its age.** Places hours, a blog post and a photo of the door sign are not equal. Unverified facts are flagged, not presented as fact.
 7. **Store identity, not text.** A place is stored by `place_id` and coordinates from the source at add time, never by a typed address.
-8. **Local day, not Singapore day.** A capture at 0030 hrs in Bangkok belongs to that Bangkok evening.
+8. **Local day, not Singapore day, and the day ends at 0400.** The day is taken in the zone where the capture was made, and it rolls over at 0400 local, not midnight: a capture at 0030 hrs in Bangkok belongs to that Bangkok evening.
 9. **Ugly is fine. Friction is not.** One user. Spend effort on taps saved, not polish.
 
 ## 4. Architecture
@@ -163,7 +163,7 @@ create table travel.captures (
   kind         text not null default 'note' check (kind in ('note','journal')),
   captured_at  timestamptz not null,             -- device clock, UTC
   tz           text not null,                    -- IANA zone at capture, e.g. Asia/Bangkok
-  local_date   date not null,                    -- calendar date in tz at capture
+  local_date   date not null,                    -- local day in tz at capture, rolling over at 0400 (principle 8)
   lat          double precision,
   lng          double precision,
   accuracy_m   real,
@@ -184,7 +184,7 @@ commit;
 
 Notes:
 - `server_ts` exists because device clocks are unreliable for pull cursors. `updated_at` (device) decides conflicts; `server_ts` (server) decides what to pull.
-- `local_date` is computed on the phone at capture time from `tz` and stored, so grouping never depends on where the server or the viewer is.
+- `local_date` is computed on the phone at capture time from `tz` and stored, so grouping never depends on where the server or the viewer is. It is the calendar date in `tz`, minus one day when the local time is before 0400 (principle 8). The same rule decides "today" in the UI and, in M2, the journal thread a message belongs to.
 - RLS is enabled on the table as defence in depth even though no role has table grants.
 
 ### 6.3 RPCs (migration 0002)
@@ -265,7 +265,7 @@ Database `travelboard`, version 1. A small hand-written promise wrapper, no libr
 
 - **Entry routes:** in-app button; home-screen shortcut `?new=1`; share target prefill (`title`, `text`, `url` joined into the body).
 - **Drafts:** every input event writes to `drafts`. If the app is killed mid-typing, reopening restores the draft.
-- **On save:** generate uuid (`crypto.randomUUID()`), set `captured_at` and `updated_at` to now, `tz` from `Intl.DateTimeFormat().resolvedOptions().timeZone`, compute `local_date` in that zone, write to IndexedDB with `dirty = 1`, close the screen, then trigger sync. The save never waits on GPS or network.
+- **On save:** generate uuid (`crypto.randomUUID()`), set `captured_at` and `updated_at` to now, `tz` from `Intl.DateTimeFormat().resolvedOptions().timeZone`, compute `local_date` in that zone with the 0400 rollover, write to IndexedDB with `dirty = 1`, close the screen, then trigger sync. The save never waits on GPS or network.
 - **GPS:** fired at save with `enableHighAccuracy: true`, `timeout: 5000`, `maximumAge: 60000`. If it resolves, update the row's `lat`, `lng`, `accuracy_m`, bump `updated_at`, mark dirty. If it fails or is denied, the capture stays with nulls. Location permission is requested once on first save.
 - **Edit:** changes body or kind, bumps `updated_at`, marks dirty. `captured_at`, `tz` and `local_date` never change on edit.
 - **Delete:** sets `deleted_at`, bumps `updated_at`, marks dirty, hides the row, shows an Undo toast for 5 s. No hard delete anywhere in the client.
@@ -278,7 +278,7 @@ Database `travelboard`, version 1. A small hand-written promise wrapper, no libr
 3. Edit after sync propagates; an edit made offline wins over the older server copy.
 4. Delete hides the row locally and sets `deleted_at` on the server; Undo within 5 s restores it.
 5. Location denied: captures save with null coordinates and no error.
-6. Phone timezone set to Asia/Bangkok, capture at 0030 hrs local: `local_date` is the Bangkok date.
+6. Phone timezone set to Asia/Bangkok: a capture at 0030 hrs local gets the previous Bangkok date (that evening's), and its time shows as 0030 hrs with "Bangkok"; a capture at 0400 hrs or later gets the same day's date. The rule must use Bangkok time, not Singapore time.
 7. Share a Google Maps link from Maps into travelboard: a prefilled capture opens.
 8. Home-screen shortcut opens straight into capture.
 9. Export produces a valid JSON file offline containing every capture.
@@ -428,6 +428,8 @@ Each skeleton is expanded to full spec before its module starts.
 - A module is done when its acceptance list passes. No mutation testing.
 
 ## 12. Change log
+
+- 04/10/26 Principle 8, 6.2, 7.2, 7.3 item 6: the local day rolls over at 0400, not midnight (Gary's decision at the start of M1). Principle 8 already said 0030 belongs to the evening, but 6.2 defined `local_date` as the plain calendar date, and the old acceptance item 6 could not tell Bangkok from Singapore (0030 BKK is 0130 SGT, the same date). No schema change; the column comment changes only.
 
 - 04/10/26 6.6: "checking" status state, a reachability probe before each sync, and a 30 s retry while visible with rows queued or the dot offline. From the M0 Pixel test, where Chrome reported online in airplane mode with a VPN active.
 - 04/10/26 6.4: `persist()` is also called on later launches while storage is not yet persistent.
