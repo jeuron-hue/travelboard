@@ -1,5 +1,6 @@
 -- travelboard migration 0001: schema travel and travel.captures (SPEC.md 6.2)
 -- Touches only schema travel. No grants to anon or authenticated.
+-- Applied 04/10/26 as Supabase migration 20261004090608 tb_0001_travel_schema_captures.
 begin;
 
 create schema if not exists travel;

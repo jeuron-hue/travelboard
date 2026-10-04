@@ -174,6 +174,8 @@ create table travel.captures (
   server_ts    timestamptz not null default now()-- set by server on every write, pull cursor
 );
 
+alter table travel.captures enable row level security;
+
 create index captures_owner_day on travel.captures (owner, local_date);
 create index captures_owner_server_ts on travel.captures (owner, server_ts);
 
@@ -424,4 +426,5 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 04/10/26 Migration 0001 SQL in 6.2 now enables RLS on `travel.captures`, matching the 6.2 notes (the line was missing from the block).
 - 04/10/26 First version. M0 to M2 full, M3 to M8 skeletons. Backend moved into the existing weatherboard project under a `travel` schema (separate project and separate organisation both considered and dropped). Repo name travelboard.
