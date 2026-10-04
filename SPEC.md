@@ -230,10 +230,11 @@ Database `travelboard`, version 1. A small hand-written promise wrapper, no libr
 
 ### 6.6 Sync engine
 
-- Triggers: app open, `visibilitychange` to visible, the `online` event, and after every local save. One sync at a time (a simple in-memory lock).
+- Triggers: app open, `visibilitychange` to visible, the `online` event, after every local save, and a 30 s retry. The retry runs only while the app is visible and rows are queued or the pill reads offline; it stops when the app is hidden, or when synced with an empty queue. One sync at a time (a simple in-memory lock).
+- Reachability: `navigator.onLine` is not trusted alone (Chrome on Android can report online in airplane mode, for example with a VPN active). Before each sync, one request to the Supabase host with a 5 s timeout; if it fails, or any request in the sync fails at the network level (including a timeout), the state is offline.
 - Push: read all `dirty = 1` captures, send in batches of 50 to `tb_captures_upsert`, mark each `dirty = 0` only on a confirming response. Any failure leaves rows dirty for the next trigger.
 - Pull: `tb_captures_since(pull_cursor.server_ts, pull_cursor.id)`, merge by last-write-wins on `updated_at`, advance `pull_cursor` to `next_cursor`, repeat until a page comes back empty. `pull_cursor` is the `{server_ts, id}` pair, starting as nulls. Keep `server_ts` as the exact string the server returned: it has microsecond precision, and converting it to a JS `Date` truncates to milliseconds, which moves the cursor backwards and re-pulls the same page forever.
-- No session or no network: skip silently, record `last_sync_error`, show a small status dot (synced / queued n / sign in / offline).
+- No session or no network: skip silently, record `last_sync_error`, show a small status dot (checking / synced / queued n / sign in / offline). "checking" is the state at launch, and after an `online` event, until a sync attempt settles; the dot never shows synced before a sync has succeeded in the current session. At launch with `navigator.onLine` false it starts as offline.
 - Single user, so last-write-wins is the whole conflict policy.
 
 ### 6.7 M0 acceptance
@@ -428,6 +429,7 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 04/10/26 6.6: "checking" status state, a reachability probe before each sync, and a 30 s retry while visible with rows queued or the dot offline. From the M0 Pixel test, where Chrome reported online in airplane mode with a VPN active.
 - 04/10/26 6.4: `persist()` is also called on later launches while storage is not yet persistent.
 - 04/10/26 Pull cursor changed from `server_ts` alone to the keyset `(server_ts, id)` in 6.3 and 6.6. `server_ts` is shared by every row in a batch transaction, so paging on it alone could skip rows at a page boundary.
 - 04/10/26 Migration 0001 SQL in 6.2 now enables RLS on `travel.captures`, matching the 6.2 notes (the line was missing from the block).

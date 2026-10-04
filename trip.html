@@ -15,7 +15,8 @@
   Change log (newest first)
   - 04/10/26 v2. Status pill fix from the Pixel test: starts as "checking" (or "offline" when
     navigator.onLine is false) instead of "synced"; a 5 s reachability probe runs before each
-    sync, because navigator.onLine stayed true in airplane mode with a VPN active.
+    sync, because navigator.onLine stayed true in airplane mode with a VPN active; a 30 s
+    retry runs while visible with rows queued or the pill offline.
   - 04/10/26 v1. M0 Foundation first build.
 -->
 <html lang="en-GB">
@@ -213,6 +214,7 @@ const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_q75DGiJBda-NwE3tdgPtFg_g3Rasmcg
 const PUSH_BATCH = 50;
 const FETCH_TIMEOUT_MS = 20000;
 const PROBE_TIMEOUT_MS = 5000;
+const RETRY_MS = 30000;
 
 const $ = (id) => document.getElementById(id);
 
@@ -404,8 +406,9 @@ const syncState = { phase: navigator.onLine ? 'checking' : 'offline', error: nul
 
 async function renderStatus() {
   const queued = await idb.countByIndex('captures', 'dirty', 1);
+  const offline = !navigator.onLine || syncState.phase === 'offline';
   let cls, text;
-  if (!navigator.onLine || syncState.phase === 'offline') {
+  if (offline) {
     cls = 'offline'; text = queued ? `offline, ${queued} queued` : 'offline';
   } else if (syncState.phase === 'checking') {
     cls = 'offline'; text = queued ? `checking, ${queued} queued` : 'checking';
@@ -421,6 +424,7 @@ async function renderStatus() {
   $('status-dot').className = 'dot ' + cls;
   $('status-text').textContent = text;
   $('s-sync').textContent = text;
+  setRetry(queued > 0 || offline);
 
   const last = await meta.get('last_sync_ok');
   $('s-last').textContent = last ? `${fmtDate(last, deviceTz())} ${fmtTime(last, deviceTz())}` : 'never';
@@ -429,6 +433,20 @@ async function renderStatus() {
 }
 
 // ---------- sync engine (SPEC.md 6.6) ----------
+
+// 30 s retry: runs only while the app is visible and rows are queued or the pill reads
+// offline; stops when hidden, or when synced with an empty queue. Covers reconnects that
+// fire no online event (navigator.onLine never went false).
+let retryTimer = null;
+function setRetry(wanted) {
+  const on = wanted && document.visibilityState === 'visible';
+  if (on && !retryTimer) {
+    retryTimer = setInterval(() => { if (document.visibilityState === 'visible') sync(); }, RETRY_MS);
+  } else if (!on && retryTimer) {
+    clearInterval(retryTimer);
+    retryTimer = null;
+  }
+}
 
 let syncing = false, syncAgain = false;
 
@@ -633,7 +651,10 @@ $('close').addEventListener('click', () => $('settings').close());
 $('sync-now').addEventListener('click', () => sync());
 window.addEventListener('online', () => { syncState.phase = 'checking'; renderStatus(); sync(); });
 window.addEventListener('offline', () => { syncState.phase = 'offline'; renderStatus(); });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sync(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') sync();
+  else setRetry(false);
+});
 if (sb) sb.auth.onAuthStateChange(() => { renderAuth(); });
 
 (async function boot() {

@@ -23,7 +23,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 | # | Item | Status |
 |---|---|---|
 | 1 | Installs from Chrome on the Pixel, opens standalone with its own icon | PASS 04/10/26 (Pixel) |
-| 2 | Airplane mode on, the installed app opens and renders | PASS 04/10/26 (Pixel). Pill defect fixed in v2, device re-test pending |
+| 2 | Airplane mode on, the installed app opens and renders | PASS 04/10/26 (Pixel). Pill defect fixed in v2; v2 device re-test pending |
 | 3 | Dummy record in airplane mode shows queued; on reconnect it lands in `travel.captures` and the dot turns synced | PASS 04/10/26 (Pixel, row at 1912 hrs landed 1913:39). Pill wording fixed in v2, device re-test pending |
 | 4 | Same `id` twice gives one row; older `updated_at` does not overwrite newer | PASS 04/10/26, smoke tests 9 to 12 and 18 |
 | 5 | Anonymous calls to every `tb_` function fail; direct REST access to `travel.captures` fails | SQL level PASS 04/10/26, smoke tests 1 to 7. REST level: step 9 |
@@ -71,8 +71,22 @@ Report back the step number and what you saw for any step that does not match.
 
 Defect (steps 5 and 6): the pill code already put `navigator.onLine === false` first, so the readings mean Chrome reported online in airplane mode. A VPN was active (key icon in the status bar), which commonly keeps Chrome on Android reporting online. The pill also showed the "synced" default before the first sync attempt had settled.
 
-Fix in v2 (`trip.html` APP_VERSION 2, `sw.js` CACHE_VERSION 2): the pill starts as "checking" (or "offline" when `navigator.onLine` is false at launch) and never shows "synced" until a sync has succeeded. Each sync first makes a 5 s reachability probe to the Supabase host, and any network failure reads as offline. The `online` and `offline` events still drive the pill.
+Fix in v2 (`trip.html` APP_VERSION 2, `sw.js` CACHE_VERSION 2; SPEC.md 6.6 updated): the pill starts as "checking" (or "offline" when `navigator.onLine` is false at launch) and never shows "synced" until a sync has succeeded. Each sync first makes a 5 s reachability probe to the Supabase host, and any network failure reads as offline. A 30 s retry runs while the app is visible and rows are queued or the pill reads offline, and stops when hidden or when synced with an empty queue. The `online` and `offline` events still drive the pill.
 
-Headless re-test of v2, 04/10/26: 31 of 31 PASS. New cases: with `navigator.onLine` true and Supabase unreachable, the pill goes "checking" to "offline" and never shows "synced"; a save then shows "offline, 1 queued", never "queued 1"; launching with `navigator.onLine` false shows "offline, 1 queued" from the first paint; the network dropping while `navigator.onLine` stays true shows "offline, n queued", and Sync now after it returns lands the rows. `checks/static.cjs` 53 of 53 PASS.
+Headless re-test of v2, 04/10/26: 37 of 37 PASS. New cases:
+- With `navigator.onLine` true and Supabase unreachable, the pill goes "checking" to "offline" and never shows "synced"; a save then shows "offline, 1 queued", never "queued 1".
+- Launching with `navigator.onLine` false shows "offline, 1 queued" from the first paint.
+- The network dropping while `navigator.onLine` stays true shows "offline, n queued"; Sync now after it returns lands the rows.
+- Retry, on a fake clock: no retry while synced with an empty queue (95 s); the network returning with no `online` event is picked up by the retry and the pill turns synced; the retry stops once synced; no retry while hidden with a queued row; it resumes every 30 s when visible again.
 
-Device re-test of v2 (after it is live, `sw.js` reads `CACHE_VERSION = 2`): open the app, tap "Update ready, tap to reload" if shown, then repeat steps 5 to 7 with the VPN on as before. Pass: the pill reads "offline" on open (it may show "checking" for up to 5 s first), "offline, 1 queued" after the save, and "synced" after reconnecting. If the pill stays "offline" after reconnecting, switch to another app and back, or tap the pill and then "Sync now", and report which one was needed.
+`checks/static.cjs` 53 of 53 PASS.
+
+### v2 device re-test (Pixel, VPN on as before)
+
+1. Open `https://jeuron-hue.github.io/travelboard/sw.js` in Chrome. It should read `const CACHE_VERSION = 2;`. If it still shows 1, wait a few minutes and reload; GitHub's CDN can hold the old copy for up to 10 minutes.
+2. Open travelboard from the home-screen icon. An "Update ready, tap to reload" bar should appear above the button within a few seconds (if not, swipe the app away and reopen it). Tap it. The app reloads; tap the pill and check Version reads v2. Your M0 test record from 1912 hrs should still be listed. Close.
+3. Turn airplane mode on (Wi-Fi off). Swipe travelboard away from recents and open it from the icon. The pill may read "checking" for up to 5 s, then must read "offline". It must not show "synced" at any point.
+4. Still in airplane mode, tap "Add test record". The pill must read "offline, 1 queued"; the new row has a yellow "queued" chip. Note the row's time.
+5. Pull down the quick settings and turn airplane mode off without leaving the app. Within about 35 s the pill should turn green "synced" and the chip "synced", with no tap from you. Report roughly how long it took.
+6. Optional hidden check: airplane mode on, add a record, press Home so the app is in the background, turn airplane mode off, wait a minute, then reopen the app. The record should sync within a few seconds of reopening (the retry does not run in the background, but reopening triggers a sync).
+7. Tell Claude the time from step 4 (and step 6 if run). Claude confirms the rows in `travel.captures`.
