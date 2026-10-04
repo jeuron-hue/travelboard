@@ -1,0 +1,630 @@
+<!doctype html>
+<!--
+  SOURCE OF RECORD: trip.html, travelboard phone app (jeuron-hue/travelboard).
+
+  What it does
+  - Installed PWA for the Pixel. The UI reads IndexedDB only; Supabase is a sync
+    target, never a render source (SPEC.md D8, 6.5, 6.6).
+  - M0 Foundation: app shell, IndexedDB (captures, drafts, meta), sync engine
+    (push dirty rows to tb_captures_upsert, pull by keyset cursor from
+    tb_captures_since), sign in with the synthetic login, sync status dot,
+    "update ready" bar, storage persistence, theme toggle, and an "Add test record"
+    button that writes a dummy capture for the M0 acceptance test.
+  - Capture UI, GPS, edit, delete and export arrive in M1.
+
+  Change log (newest first)
+  - 04/10/26 v1. M0 Foundation first build.
+-->
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#12161a">
+<title>travelboard</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<script>
+  // Apply the theme before first paint. Choice persisted in localStorage.
+  (function () {
+    var t = null;
+    try { t = localStorage.getItem('tb-theme'); } catch (e) {}
+    if (t !== 'light' && t !== 'dark') {
+      t = window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    }
+    document.documentElement.setAttribute('data-theme', t);
+  })();
+</script>
+<style>
+  @font-face {
+    font-family: 'IBM Plex Sans';
+    font-style: normal; font-weight: 400; font-display: swap;
+    src: url('vendor/fonts/ibm-plex-sans-latin-400-normal.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'IBM Plex Sans';
+    font-style: normal; font-weight: 600; font-display: swap;
+    src: url('vendor/fonts/ibm-plex-sans-latin-600-normal.woff2') format('woff2');
+  }
+
+  :root, [data-theme="light"] {
+    --ground: #f5f3ef;  --surface: #ffffff; --ink: #1a1d21; --muted: #5f6b75; --line: #dcd8d0;
+    --accent: #c2531b;  --accent-bg: #fbe8dc;
+    --good: #1f7a4d;    --good-bg: #dcf1e5;
+    --warn: #8a6200;    --warn-bg: #faefd2;
+    --crit: #b42318;    --crit-bg: #fbe0dd;
+    --on-accent: #ffffff;
+  }
+  [data-theme="dark"] {
+    --ground: #12161a;  --surface: #1b2127; --ink: #e8ecef; --muted: #93a0ab; --line: #2c343c;
+    --accent: #e06a2b;  --accent-bg: #3a2216;
+    --good: #3fb07a;    --good-bg: #15301f;
+    --warn: #e0a92b;    --warn-bg: #3a2f12;
+    --crit: #e5534b;    --crit-bg: #3d1a18;
+    --on-accent: #12161a;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+    font-size: 17px; line-height: 1.4;
+    background: var(--ground); color: var(--ink);
+    display: flex; flex-direction: column;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button, input { font: inherit; color: inherit; }
+
+  header {
+    position: sticky; top: 0; z-index: 2;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: calc(env(safe-area-inset-top) + 10px) 16px 10px;
+    background: var(--ground); border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 20px; font-weight: 600; margin: 0; }
+  .status {
+    display: inline-flex; align-items: center; gap: 8px;
+    min-height: 44px; padding: 0 14px; border-radius: 22px;
+    border: 1px solid var(--line); background: var(--surface); cursor: pointer;
+  }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.synced  { background: var(--good); }
+  .dot.queued  { background: var(--warn); }
+  .dot.signin  { background: var(--accent); }
+  .dot.offline { background: var(--muted); }
+  .dot.error   { background: var(--crit); }
+
+  main { flex: 1; overflow-y: auto; padding: 12px 16px 120px; }
+  .hint { color: var(--muted); font-size: 15px; margin: 4px 0 12px; }
+  ul.records { list-style: none; margin: 0; padding: 0; }
+  ul.records li {
+    display: grid; grid-template-columns: auto 1fr auto; gap: 4px 12px; align-items: baseline;
+    padding: 12px; margin-bottom: 8px; border-radius: 10px;
+    background: var(--surface); border: 1px solid var(--line);
+  }
+  .when { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .body { overflow-wrap: anywhere; }
+  .chip { font-size: 13px; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+  .chip.queued { background: var(--warn-bg); color: var(--warn); }
+  .chip.synced { background: var(--good-bg); color: var(--good); }
+
+  footer {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 2;
+    padding: 12px 16px calc(env(safe-area-inset-bottom) + 12px);
+    background: linear-gradient(to top, var(--ground) 70%, transparent);
+  }
+  .primary {
+    width: 100%; min-height: 60px; border: 0; border-radius: 14px;
+    background: var(--accent); color: var(--on-accent); font-size: 19px; font-weight: 600; cursor: pointer;
+  }
+  .primary:active { filter: brightness(0.92); }
+
+  #update-bar {
+    position: fixed; left: 16px; right: 16px; z-index: 3;
+    bottom: calc(env(safe-area-inset-bottom) + 88px);
+    min-height: 52px; border-radius: 12px; border: 1px solid var(--accent);
+    background: var(--accent-bg); color: var(--ink); font-weight: 600; cursor: pointer;
+  }
+  #update-bar[hidden] { display: none; }
+
+  dialog {
+    width: 100%; max-width: 560px; margin: auto auto 0; padding: 0;
+    border: 1px solid var(--line); border-radius: 16px 16px 0 0;
+    background: var(--surface); color: var(--ink);
+  }
+  dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+  .sheet { padding: 16px 16px calc(env(safe-area-inset-bottom) + 16px); }
+  .sheet h2 { font-size: 18px; margin: 0 0 8px; }
+  .rows { margin: 0 0 12px; }
+  .rows div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .rows dt { color: var(--muted); }
+  .rows dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+  .btn {
+    min-height: 48px; padding: 0 16px; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--ground);
+  }
+  form.signin { display: grid; gap: 8px; margin: 12px 0; }
+  form.signin input {
+    min-height: 48px; padding: 0 12px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--ground);
+  }
+  .err { color: var(--crit); font-size: 15px; min-height: 1.2em; margin: 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>travelboard</h1>
+  <button class="status" id="status" type="button" aria-label="Sync status and settings">
+    <span class="dot" id="status-dot"></span><span id="status-text">starting</span>
+  </button>
+</header>
+
+<main>
+  <p class="hint">M0 foundation build. Records below are read from this phone's storage.</p>
+  <ul class="records" id="records"></ul>
+  <p class="hint" id="empty" hidden>No records on this phone yet.</p>
+</main>
+
+<button id="update-bar" type="button" hidden>Update ready, tap to reload</button>
+
+<footer>
+  <button class="primary" id="add-test" type="button">Add test record</button>
+</footer>
+
+<dialog id="settings">
+  <div class="sheet">
+    <h2>Settings</h2>
+    <dl class="rows">
+      <div><dt>Sync</dt><dd id="s-sync">-</dd></div>
+      <div><dt>Last sync</dt><dd id="s-last">never</dd></div>
+      <div><dt>Last error</dt><dd id="s-error">none</dd></div>
+      <div><dt>Storage</dt><dd id="s-persist">-</dd></div>
+      <div><dt>Signed in</dt><dd id="s-user">no</dd></div>
+      <div><dt>Version</dt><dd id="s-version">-</dd></div>
+    </dl>
+    <form class="signin" id="signin" hidden>
+      <input id="email" type="email" autocomplete="username" placeholder="Email" required>
+      <input id="password" type="password" autocomplete="current-password" placeholder="Password" required>
+      <button class="primary" type="submit">Sign in to sync</button>
+      <p class="err" id="signin-err"></p>
+    </form>
+    <div class="actions">
+      <button class="btn" id="sync-now" type="button">Sync now</button>
+      <button class="btn" id="theme" type="button">Theme</button>
+      <button class="btn" id="signout" type="button" hidden>Sign out</button>
+      <button class="btn" id="close" type="button" autofocus>Close</button>
+    </div>
+  </div>
+</dialog>
+
+<script src="vendor/supabase-js-2.117.2.umd.js"></script>
+<script>
+'use strict';
+
+// Bump together with CACHE_VERSION in sw.js on every release.
+const APP_VERSION = 1;
+
+const SUPABASE_URL = 'https://nyjsrnntxdgfykkmihpx.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_q75DGiJBda-NwE3tdgPtFg_g3Rasmcg';
+const PUSH_BATCH = 50;
+const FETCH_TIMEOUT_MS = 20000;
+
+const $ = (id) => document.getElementById(id);
+
+// ---------- dates: dd/mm/yy, 24-hour "0901 hrs", local day in the record's zone ----------
+
+function partsIn(date, tz) {
+  const fmt = new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  });
+  const p = {};
+  for (const x of fmt.formatToParts(date)) p[x.type] = x.value;
+  return p;
+}
+function localDateIn(date, tz) {              // 'YYYY-MM-DD', calendar date in tz
+  const p = partsIn(date, tz);
+  return `${p.year}-${p.month}-${p.day}`;
+}
+function fmtDate(iso, tz) {
+  const p = partsIn(new Date(iso), tz);
+  return `${p.day}/${p.month}/${p.year.slice(2)}`;
+}
+function fmtTime(iso, tz) {
+  const p = partsIn(new Date(iso), tz);
+  return `${p.hour}${p.minute} hrs`;
+}
+const deviceTz = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+// ---------- IndexedDB: database travelboard v1, small promise wrapper ----------
+
+const idb = (() => {
+  let dbp = null;
+  function open() {
+    if (dbp) return dbp;
+    dbp = new Promise((resolve, reject) => {
+      const r = indexedDB.open('travelboard', 1);
+      r.onupgradeneeded = () => {
+        const db = r.result;
+        if (!db.objectStoreNames.contains('captures')) {
+          const s = db.createObjectStore('captures', { keyPath: 'id' });
+          s.createIndex('local_date', 'local_date');
+          s.createIndex('dirty', 'dirty');
+        }
+        if (!db.objectStoreNames.contains('drafts')) db.createObjectStore('drafts', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'key' });
+      };
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+      r.onblocked = () => reject(new Error('IndexedDB upgrade blocked by another tab'));
+    });
+    return dbp;
+  }
+  const done = (t) => new Promise((resolve, reject) => {
+    t.oncomplete = () => resolve();
+    t.onerror = () => reject(t.error);
+    t.onabort = () => reject(t.error || new Error('transaction aborted'));
+  });
+  const result = (r) => new Promise((resolve, reject) => {
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+  return {
+    open,
+    async get(store, key) {
+      const db = await open();
+      return result(db.transaction(store).objectStore(store).get(key));
+    },
+    async put(store, value) {
+      const db = await open();
+      const t = db.transaction(store, 'readwrite');
+      t.objectStore(store).put(value);
+      return done(t);
+    },
+    async all(store) {
+      const db = await open();
+      return result(db.transaction(store).objectStore(store).getAll());
+    },
+    async byIndex(store, index, value) {
+      const db = await open();
+      return result(db.transaction(store).objectStore(store).index(index).getAll(value));
+    },
+    async countByIndex(store, index, value) {
+      const db = await open();
+      return result(db.transaction(store).objectStore(store).index(index).count(value));
+    },
+    // Read-modify-write many rows in one transaction. fn(existing, item) returns the row
+    // to put, or null to leave it alone.
+    async merge(store, items, keyOf, fn) {
+      const db = await open();
+      const t = db.transaction(store, 'readwrite');
+      const s = t.objectStore(store);
+      for (const item of items) {
+        const g = s.get(keyOf(item));
+        g.onsuccess = () => {
+          const next = fn(g.result, item);
+          if (next) s.put(next);
+        };
+      }
+      return done(t);
+    }
+  };
+})();
+
+const meta = {
+  async get(key) { const r = await idb.get('meta', key); return r ? r.value : undefined; },
+  set(key, value) { return idb.put('meta', { key, value }); }
+};
+
+// ---------- Supabase client: sync target only ----------
+
+function fetchWithTimeout(input, init) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
+  if (init && init.signal) init.signal.addEventListener('abort', () => ctl.abort());
+  return fetch(input, Object.assign({}, init, { signal: ctl.signal }))
+    .finally(() => clearTimeout(timer));
+}
+
+let sb = null;
+try {
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storageKey: 'tb-auth' },
+    global: { fetch: fetchWithTimeout }
+  });
+} catch (e) {
+  // The app still works from IndexedDB without the client; sync just stays paused.
+  console.error('supabase client failed to load', e);
+}
+
+// ---------- captures ----------
+
+const SERVER_FIELDS = ['id', 'body', 'kind', 'captured_at', 'tz', 'local_date', 'lat', 'lng',
+  'accuracy_m', 'trip_id', 'place_id', 'updated_at', 'deleted_at'];
+const toServer = (row) => Object.fromEntries(SERVER_FIELDS.map((k) => [k, row[k] === undefined ? null : row[k]]));
+
+async function addTestRecord() {
+  const now = new Date();
+  const iso = now.toISOString();
+  const tz = deviceTz();
+  const row = {
+    id: crypto.randomUUID(),
+    body: `M0 test record ${fmtDate(iso, tz)} ${fmtTime(iso, tz)}`,
+    kind: 'note',
+    captured_at: iso,
+    tz,
+    local_date: localDateIn(now, tz),
+    lat: null, lng: null, accuracy_m: null,
+    trip_id: null, place_id: null,
+    updated_at: iso,
+    deleted_at: null,
+    server_ts: null,
+    dirty: 1
+  };
+  await idb.put('captures', row);   // local write first: never waits on network or session
+  await render();
+  sync();
+}
+
+// ---------- rendering: IndexedDB only ----------
+
+async function render() {
+  const rows = (await idb.all('captures'))
+    .filter((r) => !r.deleted_at)
+    .sort((a, b) => (a.captured_at < b.captured_at ? 1 : -1))
+    .slice(0, 50);
+  const ul = $('records');
+  ul.replaceChildren();
+  for (const r of rows) {
+    const li = document.createElement('li');
+    const when = document.createElement('span');
+    when.className = 'when';
+    when.textContent = `${fmtDate(r.captured_at, r.tz)} ${fmtTime(r.captured_at, r.tz)}`;
+    const body = document.createElement('span');
+    body.className = 'body';
+    body.textContent = (r.body || '').split('\n')[0] || '(empty)';
+    const chip = document.createElement('span');
+    chip.className = 'chip ' + (r.dirty ? 'queued' : 'synced');
+    chip.textContent = r.dirty ? 'queued' : 'synced';
+    li.append(when, body, chip);
+    ul.append(li);
+  }
+  $('empty').hidden = rows.length > 0;
+  await renderStatus();
+}
+
+const syncState = { phase: 'idle', error: null };   // phase: idle | offline | signin | error
+
+async function renderStatus() {
+  const queued = await idb.countByIndex('captures', 'dirty', 1);
+  let cls, text;
+  if (!navigator.onLine || syncState.phase === 'offline') {
+    cls = 'offline'; text = queued ? `offline, ${queued} queued` : 'offline';
+  } else if (syncState.phase === 'signin') {
+    cls = 'signin'; text = queued ? `sign in, ${queued} queued` : 'sign in';
+  } else if (queued) {
+    cls = syncState.phase === 'error' ? 'error' : 'queued'; text = `queued ${queued}`;
+  } else if (syncState.phase === 'error') {
+    cls = 'error'; text = 'sync error';
+  } else {
+    cls = 'synced'; text = 'synced';
+  }
+  $('status-dot').className = 'dot ' + cls;
+  $('status-text').textContent = text;
+  $('s-sync').textContent = text;
+
+  const last = await meta.get('last_sync_ok');
+  $('s-last').textContent = last ? `${fmtDate(last, deviceTz())} ${fmtTime(last, deviceTz())}` : 'never';
+  const err = await meta.get('last_sync_error');
+  $('s-error').textContent = err ? err.message : 'none';
+}
+
+// ---------- sync engine (SPEC.md 6.6) ----------
+
+let syncing = false, syncAgain = false;
+
+async function session() {
+  if (!sb) return null;
+  const { data, error } = await sb.auth.getSession();
+  if (error) throw error;
+  return data.session;
+}
+
+function isNetworkError(e) {
+  const s = (e && e.name || '') + ' ' + (e && e.message || '') + ' ' + (e && e.details || '');
+  return /Failed to fetch|NetworkError|AbortError|aborted|Load failed|network/i.test(s);
+}
+
+function isAuthError(e) {
+  const s = (e && (e.status || e.code || '')) + ' ' + (e && e.message || '');
+  return /\b401\b|JWT|PGRST30[0-3]|not authenticated|42501/i.test(s);
+}
+
+async function push() {
+  const dirty = await idb.byIndex('captures', 'dirty', 1);
+  for (let i = 0; i < dirty.length; i += PUSH_BATCH) {
+    const batch = dirty.slice(i, i + PUSH_BATCH).map(toServer);
+    const { data, error } = await sb.rpc('tb_captures_upsert', { p: batch });
+    if (error) throw error;
+    if (!Array.isArray(data) || data.length !== batch.length) throw new Error('unexpected upsert response');
+    const sent = new Map(batch.map((b) => [b.id, b.updated_at]));
+    // Confirmed (applied or already as new on the server): clear dirty, unless the row
+    // was edited locally while the request was in flight.
+    await idb.merge('captures', data, (r) => r.id, (local, r) => {
+      if (!local || local.updated_at !== sent.get(r.id)) return null;
+      return Object.assign({}, local, { dirty: 0, server_ts: r.server_ts });
+    });
+  }
+}
+
+async function pull() {
+  // pull_cursor is {server_ts, id}. server_ts stays the exact string the server returned:
+  // turning it into a Date would drop the microseconds and replay the same page.
+  let cursor = (await meta.get('pull_cursor')) || { server_ts: null, id: null };
+  for (let page = 0; page < 1000; page++) {
+    const { data, error } = await sb.rpc('tb_captures_since', {
+      p_since_ts: cursor.server_ts, p_since_id: cursor.id
+    });
+    if (error) throw error;
+    const rows = (data && data.rows) || [];
+    if (rows.length === 0) break;
+    await idb.merge('captures', rows, (r) => r.id, (local, r) => {
+      if (!local) return Object.assign({}, r, { dirty: 0 });
+      const incoming = Date.parse(r.updated_at), mine = Date.parse(local.updated_at);
+      if (local.dirty && mine >= incoming) return null;      // local edit not yet pushed wins
+      if (incoming >= mine) return Object.assign({}, r, { dirty: 0 });
+      return null;
+    });
+    cursor = { server_ts: data.next_cursor.server_ts, id: data.next_cursor.id };
+    await meta.set('pull_cursor', cursor);
+  }
+}
+
+async function sync() {
+  if (syncing) { syncAgain = true; return; }
+  syncing = true;
+  try {
+    if (!navigator.onLine) {
+      syncState.phase = 'offline';
+      await meta.set('last_sync_error', { at: new Date().toISOString(), message: 'offline' });
+      return;
+    }
+    let s = null;
+    try { s = await session(); } catch (e) { /* treated as no session below */ }
+    if (!s) {
+      syncState.phase = 'signin';
+      await meta.set('last_sync_error', { at: new Date().toISOString(), message: 'not signed in' });
+      return;
+    }
+    await push();
+    await pull();
+    syncState.phase = 'idle';
+    await meta.set('last_sync_ok', new Date().toISOString());
+    await meta.set('last_sync_error', null);
+  } catch (e) {
+    console.warn('sync failed', e);
+    syncState.phase = !navigator.onLine || isNetworkError(e) ? 'offline' : isAuthError(e) ? 'signin' : 'error';
+    const message = (e && e.message) || String(e);
+    await meta.set('last_sync_error', { at: new Date().toISOString(), message }).catch(() => {});
+  } finally {
+    syncing = false;
+    await render().catch(() => {});
+    renderAuth();
+    if (syncAgain) { syncAgain = false; sync(); }
+  }
+}
+
+// ---------- auth UI ----------
+
+async function renderAuth() {
+  let s = null;
+  try { s = await session(); } catch (e) {}
+  $('s-user').textContent = s ? (s.user && s.user.email) || 'yes' : 'no';
+  $('signin').hidden = !!s;
+  $('signout').hidden = !s;
+}
+
+$('signin').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  $('signin-err').textContent = '';
+  if (!sb) { $('signin-err').textContent = 'Sync library failed to load.'; return; }
+  if (!navigator.onLine) { $('signin-err').textContent = 'Offline. Sign in when you have signal.'; return; }
+  const { error } = await sb.auth.signInWithPassword({
+    email: $('email').value.trim(), password: $('password').value
+  });
+  if (error) { $('signin-err').textContent = error.message; return; }
+  $('password').value = '';
+  await renderAuth();
+  sync();
+});
+
+$('signout').addEventListener('click', async () => {
+  if (sb) await sb.auth.signOut({ scope: 'local' }).catch(() => {});
+  syncState.phase = 'signin';
+  await renderAuth();
+  await renderStatus();
+});
+
+// ---------- storage persistence (SPEC.md 6.4) ----------
+
+async function initPersistence() {
+  if (!navigator.storage || !navigator.storage.persisted) {
+    $('s-persist').textContent = 'not supported';
+    return;
+  }
+  let persisted = await navigator.storage.persisted();
+  if (!persisted) {
+    // Asked on first run; asked again on later launches while still not granted, because
+    // Chrome may grant it only once the app is installed. Chrome never prompts for this.
+    persisted = await navigator.storage.persist();
+    await meta.set('persist_result', { at: new Date().toISOString(), persisted });
+  }
+  $('s-persist').textContent = persisted ? 'persistent' : 'not persistent (may be evicted)';
+}
+
+// ---------- theme ----------
+
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  try { localStorage.setItem('tb-theme', t); } catch (e) {}
+  document.querySelector('meta[name="theme-color"]').content = t === 'light' ? '#f5f3ef' : '#12161a';
+}
+$('theme').addEventListener('click', () => {
+  applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
+});
+
+// ---------- service worker: install in background, reload only on tap ----------
+
+let updateRequested = false;
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').then((reg) => {
+    const offer = () => {
+      if (reg.waiting && navigator.serviceWorker.controller) $('update-bar').hidden = false;
+    };
+    offer();
+    reg.addEventListener('updatefound', () => {
+      const w = reg.installing;
+      if (w) w.addEventListener('statechange', () => { if (w.state === 'installed') offer(); });
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') reg.update().catch(() => {});
+    });
+    $('update-bar').addEventListener('click', () => {
+      if (!reg.waiting) return;
+      updateRequested = true;
+      reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+    });
+  }).catch((e) => console.warn('service worker registration failed', e));
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (updateRequested) location.reload();   // first install's claim does not reload
+  });
+}
+
+// ---------- wiring ----------
+
+$('add-test').addEventListener('click', () => { addTestRecord().catch((e) => alert('Save failed: ' + e.message)); });
+$('status').addEventListener('click', () => { renderAuth(); $('settings').showModal(); });
+$('close').addEventListener('click', () => $('settings').close());
+$('sync-now').addEventListener('click', () => sync());
+window.addEventListener('online', () => sync());
+window.addEventListener('offline', () => { syncState.phase = 'offline'; renderStatus(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sync(); });
+if (sb) sb.auth.onAuthStateChange(() => { renderAuth(); });
+
+(async function boot() {
+  $('s-version').textContent = 'v' + APP_VERSION;
+  await idb.open();
+  if ((await meta.get('schema_version')) === undefined) await meta.set('schema_version', 1);
+  await render();
+  renderAuth();
+  initPersistence().catch(() => { $('s-persist').textContent = 'unknown'; });
+  sync();
+})().catch((e) => {
+  console.error('boot failed', e);
+  $('status-text').textContent = 'storage error';
+  $('status-dot').className = 'dot error';
+});
+</script>
+</body>
+</html>
