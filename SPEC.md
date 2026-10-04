@@ -216,7 +216,7 @@ Pull cursor: `server_ts` is `now()`, the transaction start time, so every row in
 - New version: install in the background, then show an "update ready, tap to reload" bar. Never `skipWaiting` automatically, so an update never interrupts a capture in progress.
 
 **Storage durability**
-- On first run call `navigator.storage.persist()` so Chrome does not evict IndexedDB under storage pressure. Show the result once in a settings line.
+- On first run call `navigator.storage.persist()` so Chrome does not evict IndexedDB under storage pressure, and call it again on later launches while `navigator.storage.persisted()` is still false (Chrome may grant it only once the app is installed; it never prompts). Show the result in a settings line.
 
 ### 6.5 IndexedDB
 
@@ -428,6 +428,7 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 04/10/26 6.4: `persist()` is also called on later launches while storage is not yet persistent.
 - 04/10/26 Pull cursor changed from `server_ts` alone to the keyset `(server_ts, id)` in 6.3 and 6.6. `server_ts` is shared by every row in a batch transaction, so paging on it alone could skip rows at a page boundary.
 - 04/10/26 Migration 0001 SQL in 6.2 now enables RLS on `travel.captures`, matching the 6.2 notes (the line was missing from the block).
 - 04/10/26 First version. M0 to M2 full, M3 to M8 skeletons. Backend moved into the existing weatherboard project under a `travel` schema (separate project and separate organisation both considered and dropped). Repo name travelboard.

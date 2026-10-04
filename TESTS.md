@@ -32,8 +32,8 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ### Before the device test (Gary, dashboard)
 
-A. Supabase dashboard, project weatherboard: Authentication, Sign In / Providers, turn off "Allow new users to sign up". Leave everything else as it is.
-B. GitHub, `jeuron-hue/travelboard`: Settings, Pages, Source "Deploy from a branch", branch `main`, folder `/ (root)`. Skip if already set.
+A. Supabase self-signup off. Done (Gary, set when the user was created; confirmed 04/10/26).
+B. GitHub Pages on, deploying from `main`, root. Done (Gary, 04/10/26).
 
 ### Device steps (Pixel, Chrome)
 
