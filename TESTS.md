@@ -23,8 +23,8 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 | # | Item | Status |
 |---|---|---|
 | 1 | Installs from Chrome on the Pixel, opens standalone with its own icon | PASS 04/10/26 (Pixel) |
-| 2 | Airplane mode on, the installed app opens and renders | PASS 04/10/26 (Pixel). Pill defect fixed in v2; v2 device re-test pending |
-| 3 | Dummy record in airplane mode shows queued; on reconnect it lands in `travel.captures` and the dot turns synced | PASS 04/10/26 (Pixel, row at 1912 hrs landed 1913:39). Pill wording fixed in v2, device re-test pending |
+| 2 | Airplane mode on, the installed app opens and renders | PASS 04/10/26 (Pixel, v1 and v2; pill correct in v2) |
+| 3 | Dummy record in airplane mode shows queued; on reconnect it lands in `travel.captures` and the dot turns synced | PASS 04/10/26 (Pixel, v2: row at 1954 hrs shown "offline, 1 queued", landed 1955:07, dot synced without a tap) |
 | 4 | Same `id` twice gives one row; older `updated_at` does not overwrite newer | PASS 04/10/26, smoke tests 9 to 12 and 18 |
 | 5 | Anonymous calls to every `tb_` function fail; direct REST access to `travel.captures` fails | SQL level PASS 04/10/26, smoke tests 1 to 7. REST level: step 9 |
 | 6 | `checks/static.cjs` passes; `checks/smoke.sql` passes | PASS 04/10/26 |
@@ -90,3 +90,15 @@ Headless re-test of v2, 04/10/26: 37 of 37 PASS. New cases:
 5. Pull down the quick settings and turn airplane mode off without leaving the app. Within about 35 s the pill should turn green "synced" and the chip "synced", with no tap from you. Report roughly how long it took.
 6. Optional hidden check: airplane mode on, add a record, press Home so the app is in the background, turn airplane mode off, wait a minute, then reopen the app. The record should sync within a few seconds of reopening (the retry does not run in the background, but reopening triggers a sync).
 7. Tell Claude the time from step 4 (and step 6 if run). Claude confirms the rows in `travel.captures`.
+
+**04/10/26, Pixel, v2 re-test (Gary, VPN on)**
+
+| Step | Result |
+|---|---|
+| 1 | PASS. Live `sw.js` reads `CACHE_VERSION = 2` at 1949 hrs (deploy of `a6b66d2`). |
+| 2 | v2 running: the pill showed "checking", which exists only in v2. No "update ready" bar was seen: v2 took over while the app was fully closed, which needs no bar. The bar itself (a new version arriving while the app is open) was not exercised on the device; it passed headless (A7) and will be checked on the next release. The 1912 hrs record was still listed. |
+| 3 | PASS. Airplane mode: pill read "offline", never "synced". |
+| 4 | PASS. Record at 1954 hrs: pill "offline, 1 queued", chip "queued". |
+| 5 | PASS. Airplane mode off without leaving the app: at 1955 hrs the pill still read "offline, 1 queued" on 5G, then turned "synced" with no tap. The retry picked up the reconnect. |
+| 6 | Not run (optional). |
+| 7 | PASS. `travel.captures`: 1954 hrs record captured 1954:05, landed 1955:07 (`tz` Asia/Singapore, `local_date` 2026-10-04). Also present: 1912 hrs (landed 1913:39) and 1952 hrs (saved online, landed 0.17 s after capture). |
