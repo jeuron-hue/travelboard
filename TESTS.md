@@ -7,6 +7,8 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ## M0 Foundation (SPEC.md 6.7)
 
+**Status 04/10/26: all seven acceptance items PASS. M0 done.** Open for the next release: see the "update ready" bar on the device (headless A7 passed; on the Pixel v2 took over while the app was closed, so the bar never appeared).
+
 ### Automated results, 04/10/26
 
 | Check | Result | Evidence |
@@ -26,7 +28,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 | 2 | Airplane mode on, the installed app opens and renders | PASS 04/10/26 (Pixel, v1 and v2; pill correct in v2) |
 | 3 | Dummy record in airplane mode shows queued; on reconnect it lands in `travel.captures` and the dot turns synced | PASS 04/10/26 (Pixel, v2: row at 1954 hrs shown "offline, 1 queued", landed 1955:07, dot synced without a tap) |
 | 4 | Same `id` twice gives one row; older `updated_at` does not overwrite newer | PASS 04/10/26, smoke tests 9 to 12 and 18 |
-| 5 | Anonymous calls to every `tb_` function fail; direct REST access to `travel.captures` fails | SQL level PASS 04/10/26, smoke tests 1 to 7. REST level: step 9 |
+| 5 | Anonymous calls to every `tb_` function fail; direct REST access to `travel.captures` fails | PASS 04/10/26. SQL level: smoke tests 1 to 7. REST level: device step 9 (42501 on the RPC, PGRST106 on the table) |
 | 6 | `checks/static.cjs` passes; `checks/smoke.sql` passes | PASS 04/10/26 |
 | 7 | Nothing outside `travel`, `public.tb_*` and `tb-*` created or altered | PASS 04/10/26, catalogue diffs above |
 
@@ -67,7 +69,7 @@ Report back the step number and what you saw for any step that does not match.
 | 6 | PASS for the record: row shown at 1912 hrs with a "queued" chip. FAIL for the pill: "queued 1" instead of "offline, 1 queued". |
 | 7 | PASS. On reconnect the pill and chip turned "synced". |
 | 8 | PASS. Row captured at 1912 hrs landed in `travel.captures` at 1913:39 (confirmed by Gary). |
-| 9 | Not yet run (Gary, from the rig). |
+| 9 | PASS 04/10/26 (Gary, rig). Anonymous `rpc/tb_whoami`: `{"code":"42501",...,"message":"permission denied for function tb_whoami"}`. Direct `captures` with `Accept-Profile: travel`: `{"code":"PGRST106",...,"hint":"Only the following schemas are exposed: public, graphql_public","message":"Invalid schema: travel"}`. |
 
 Defect (steps 5 and 6): the pill code already put `navigator.onLine === false` first, so the readings mean Chrome reported online in airplane mode. A VPN was active (key icon in the status bar), which commonly keeps Chrome on Android reporting online. The pill also showed the "synced" default before the first sync attempt had settled.
 
