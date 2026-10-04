@@ -13,6 +13,9 @@
   - Capture UI, GPS, edit, delete and export arrive in M1.
 
   Change log (newest first)
+  - 04/10/26 v2. Status pill fix from the Pixel test: starts as "checking" (or "offline" when
+    navigator.onLine is false) instead of "synced"; a 5 s reachability probe runs before each
+    sync, because navigator.onLine stayed true in airplane mode with a VPN active.
   - 04/10/26 v1. M0 Foundation first build.
 -->
 <html lang="en-GB">
@@ -203,12 +206,13 @@
 'use strict';
 
 // Bump together with CACHE_VERSION in sw.js on every release.
-const APP_VERSION = 1;
+const APP_VERSION = 2;
 
 const SUPABASE_URL = 'https://nyjsrnntxdgfykkmihpx.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_q75DGiJBda-NwE3tdgPtFg_g3Rasmcg';
 const PUSH_BATCH = 50;
 const FETCH_TIMEOUT_MS = 20000;
+const PROBE_TIMEOUT_MS = 5000;
 
 const $ = (id) => document.getElementById(id);
 
@@ -394,13 +398,17 @@ async function render() {
   await renderStatus();
 }
 
-const syncState = { phase: 'idle', error: null };   // phase: idle | offline | signin | error
+// phase: checking | idle | offline | signin | error. "checking" until a sync attempt in this
+// session has settled, so the pill never claims "synced" before the network has been tried.
+const syncState = { phase: navigator.onLine ? 'checking' : 'offline', error: null };
 
 async function renderStatus() {
   const queued = await idb.countByIndex('captures', 'dirty', 1);
   let cls, text;
   if (!navigator.onLine || syncState.phase === 'offline') {
     cls = 'offline'; text = queued ? `offline, ${queued} queued` : 'offline';
+  } else if (syncState.phase === 'checking') {
+    cls = 'offline'; text = queued ? `checking, ${queued} queued` : 'checking';
   } else if (syncState.phase === 'signin') {
     cls = 'signin'; text = queued ? `sign in, ${queued} queued` : 'sign in';
   } else if (queued) {
@@ -429,6 +437,22 @@ async function session() {
   const { data, error } = await sb.auth.getSession();
   if (error) throw error;
   return data.session;
+}
+
+// navigator.onLine can stay true with no usable network (seen on the Pixel in airplane mode
+// with a VPN active), so before syncing make one short request to the Supabase host.
+// no-cors: an opaque response is enough to prove the host answered.
+async function reachable() {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), PROBE_TIMEOUT_MS);
+  try {
+    await fetch(SUPABASE_URL + '/auth/v1/health', { mode: 'no-cors', cache: 'no-store', signal: ctl.signal });
+    return true;
+  } catch (e) {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function isNetworkError(e) {
@@ -485,7 +509,7 @@ async function sync() {
   if (syncing) { syncAgain = true; return; }
   syncing = true;
   try {
-    if (!navigator.onLine) {
+    if (!navigator.onLine || !(await reachable())) {
       syncState.phase = 'offline';
       await meta.set('last_sync_error', { at: new Date().toISOString(), message: 'offline' });
       return;
@@ -607,7 +631,7 @@ $('add-test').addEventListener('click', () => { addTestRecord().catch((e) => ale
 $('status').addEventListener('click', () => { renderAuth(); $('settings').showModal(); });
 $('close').addEventListener('click', () => $('settings').close());
 $('sync-now').addEventListener('click', () => sync());
-window.addEventListener('online', () => sync());
+window.addEventListener('online', () => { syncState.phase = 'checking'; renderStatus(); sync(); });
 window.addEventListener('offline', () => { syncState.phase = 'offline'; renderStatus(); });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sync(); });
 if (sb) sb.auth.onAuthStateChange(() => { renderAuth(); });

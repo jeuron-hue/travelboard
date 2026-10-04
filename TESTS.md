@@ -22,9 +22,9 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 | # | Item | Status |
 |---|---|---|
-| 1 | Installs from Chrome on the Pixel, opens standalone with its own icon | Device: steps 1 to 3 |
-| 2 | Airplane mode on, the installed app opens and renders | Device: step 5 |
-| 3 | Dummy record in airplane mode shows queued; on reconnect it lands in `travel.captures` and the dot turns synced | Device: steps 6 and 7, then Claude checks the table |
+| 1 | Installs from Chrome on the Pixel, opens standalone with its own icon | PASS 04/10/26 (Pixel) |
+| 2 | Airplane mode on, the installed app opens and renders | PASS 04/10/26 (Pixel). Pill defect fixed in v2, device re-test pending |
+| 3 | Dummy record in airplane mode shows queued; on reconnect it lands in `travel.captures` and the dot turns synced | PASS 04/10/26 (Pixel, row at 1912 hrs landed 1913:39). Pill wording fixed in v2, device re-test pending |
 | 4 | Same `id` twice gives one row; older `updated_at` does not overwrite newer | PASS 04/10/26, smoke tests 9 to 12 and 18 |
 | 5 | Anonymous calls to every `tb_` function fail; direct REST access to `travel.captures` fails | SQL level PASS 04/10/26, smoke tests 1 to 7. REST level: step 9 |
 | 6 | `checks/static.cjs` passes; `checks/smoke.sql` passes | PASS 04/10/26 |
@@ -56,4 +56,23 @@ Report back the step number and what you saw for any step that does not match.
 
 ### Device results
 
-Not yet run.
+**04/10/26, Pixel, v1 (Gary)**
+
+| Step | Result |
+|---|---|
+| 1 | PASS. Live `sw.js` served after Pages was switched on (first deploy 0949 hrs, commit `cc3599d`). |
+| 2, 3 | PASS. Installed from Chrome, opens standalone with the pin icon. |
+| 4 | PASS. Sign in works; Storage reads "persistent". |
+| 5 | PASS for rendering: opens and renders in airplane mode. FAIL for the pill: it read "synced" on open. |
+| 6 | PASS for the record: row shown at 1912 hrs with a "queued" chip. FAIL for the pill: "queued 1" instead of "offline, 1 queued". |
+| 7 | PASS. On reconnect the pill and chip turned "synced". |
+| 8 | PASS. Row captured at 1912 hrs landed in `travel.captures` at 1913:39 (confirmed by Gary). |
+| 9 | Not yet run (Gary, from the rig). |
+
+Defect (steps 5 and 6): the pill code already put `navigator.onLine === false` first, so the readings mean Chrome reported online in airplane mode. A VPN was active (key icon in the status bar), which commonly keeps Chrome on Android reporting online. The pill also showed the "synced" default before the first sync attempt had settled.
+
+Fix in v2 (`trip.html` APP_VERSION 2, `sw.js` CACHE_VERSION 2): the pill starts as "checking" (or "offline" when `navigator.onLine` is false at launch) and never shows "synced" until a sync has succeeded. Each sync first makes a 5 s reachability probe to the Supabase host, and any network failure reads as offline. The `online` and `offline` events still drive the pill.
+
+Headless re-test of v2, 04/10/26: 31 of 31 PASS. New cases: with `navigator.onLine` true and Supabase unreachable, the pill goes "checking" to "offline" and never shows "synced"; a save then shows "offline, 1 queued", never "queued 1"; launching with `navigator.onLine` false shows "offline, 1 queued" from the first paint; the network dropping while `navigator.onLine` stays true shows "offline, n queued", and Sync now after it returns lands the rows. `checks/static.cjs` 53 of 53 PASS.
+
+Device re-test of v2 (after it is live, `sw.js` reads `CACHE_VERSION = 2`): open the app, tap "Update ready, tap to reload" if shown, then repeat steps 5 to 7 with the VPN on as before. Pass: the pill reads "offline" on open (it may show "checking" for up to 5 s first), "offline, 1 queued" after the save, and "synced" after reconnecting. If the pill stays "offline" after reconnecting, switch to another app and back, or tap the pill and then "Sync now", and report which one was needed.
