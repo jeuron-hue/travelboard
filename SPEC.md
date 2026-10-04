@@ -196,9 +196,11 @@ All `SECURITY DEFINER`, `set search_path = travel, public`, `revoke all ... from
 | `tb_whoami()` | none | Gate check for the client | `{uid, email}` |
 | `tb_capture_upsert(p jsonb)` | one capture as JSON | Insert, or on conflict `id` update only if incoming `updated_at` is newer (last-write-wins). Validates `kind`, body length, `tz` non-empty. Sets `owner = auth.uid()`, `server_ts = now()`. Rejects rows whose existing `owner` differs | `{id, applied: bool, server_ts}` |
 | `tb_captures_upsert(p jsonb)` | JSON array | Batch wrapper over the single upsert, one transaction | array of the above |
-| `tb_captures_since(p_since timestamptz)` | cursor | Rows for `auth.uid()` with `server_ts > p_since`, including soft-deleted rows so deletes propagate, ordered by `server_ts`, limit 500 | `{rows, next_cursor}` |
+| `tb_captures_since(p_since_ts timestamptz, p_since_id uuid)` | keyset cursor; both null means from the start | Rows for `auth.uid()` with `(server_ts, id) > (p_since_ts, p_since_id)`, including soft-deleted rows so deletes propagate, ordered by `server_ts, id`, limit 500 | `{rows, next_cursor: {server_ts, id}}` from the last row; echoes the input cursor when there are no rows |
 
 Idempotency: retrying the same capture any number of times produces one row. That is the property the whole offline design rests on.
+
+Pull cursor: `server_ts` is `now()`, the transaction start time, so every row in one batch shares it. The cursor is therefore the pair `(server_ts, id)`, which is unique, so a page boundary inside a batch never skips rows.
 
 ### 6.4 PWA shell
 
@@ -230,7 +232,7 @@ Database `travelboard`, version 1. A small hand-written promise wrapper, no libr
 
 - Triggers: app open, `visibilitychange` to visible, the `online` event, and after every local save. One sync at a time (a simple in-memory lock).
 - Push: read all `dirty = 1` captures, send in batches of 50 to `tb_captures_upsert`, mark each `dirty = 0` only on a confirming response. Any failure leaves rows dirty for the next trigger.
-- Pull: `tb_captures_since(pull_cursor)`, merge by last-write-wins on `updated_at`, advance `pull_cursor` to `next_cursor`, repeat until empty.
+- Pull: `tb_captures_since(pull_cursor.server_ts, pull_cursor.id)`, merge by last-write-wins on `updated_at`, advance `pull_cursor` to `next_cursor`, repeat until a page comes back empty. `pull_cursor` is the `{server_ts, id}` pair, starting as nulls. Keep `server_ts` as the exact string the server returned: it has microsecond precision, and converting it to a JS `Date` truncates to milliseconds, which moves the cursor backwards and re-pulls the same page forever.
 - No session or no network: skip silently, record `last_sync_error`, show a small status dot (synced / queued n / sign in / offline).
 - Single user, so last-write-wins is the whole conflict policy.
 
@@ -426,5 +428,6 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 04/10/26 Pull cursor changed from `server_ts` alone to the keyset `(server_ts, id)` in 6.3 and 6.6. `server_ts` is shared by every row in a batch transaction, so paging on it alone could skip rows at a page boundary.
 - 04/10/26 Migration 0001 SQL in 6.2 now enables RLS on `travel.captures`, matching the 6.2 notes (the line was missing from the block).
 - 04/10/26 First version. M0 to M2 full, M3 to M8 skeletons. Backend moved into the existing weatherboard project under a `travel` schema (separate project and separate organisation both considered and dropped). Repo name travelboard.
