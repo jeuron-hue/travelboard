@@ -20,6 +20,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 | `checks/headless/fn.test.cjs` | PASS, 25 of 25 | The real `index.ts` under Deno 2.9.4 against local fakes of PostgREST and the Anthropic API. Request to Claude: model `claude-sonnet-5-5`, `max_tokens` 1500, thinking `between_tools`, effort low, key from `TB_ANTHROPIC_API_KEY`; system prompt is `prompts/journal.md` then the day and its live captures with local times and coordinates, deleted captures and other days left out. Retry of an answered turn: stored reply, no second API call. Anthropic 401 gives `anthropic_auth` with a message naming the secret, the turn kept and no reply stored. Refusal, missing secret, bad JWT, bad body. Two failed turns join into one user message when the next goes through. A 51-message thread is capped to 40. Also `deno check` clean. |
 | `checks/headless/m2.test.cjs` | PASS, 62 of 62 | Below. |
 | `checks/headless/m1.test.cjs` on v4 | PASS, 103 of 103 | M1 capture unchanged by M2. |
+| Deploy | PASS | `main` at `8cb1891`. Live `sw.js` reads `const CACHE_VERSION = 4;` (Last-Modified 10/10/26 1557 hrs SGT), fetched through Apify because this sandbox cannot reach github.io. |
 | `tb-journal` deployed | Version 1, `verify_jwt` on | Deployed source read back and matches the repo. Not yet called with a real key: device step 2 is the key check. |
 
 Headless M2 groups (`m2.test.cjs`, phone in Asia/Bangkok on a fake clock unless noted):
