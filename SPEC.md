@@ -27,13 +27,13 @@ Wanderlog was used for Switzerland (Jan 2025) and liked, but its AI layer and jo
 | D2 | Two frontends over one backend: `trip.html` (phone, installed PWA, offline) and `planner.html` (rig/laptop browser, online only, from M3) | 04/10/26 |
 | D3 | Backend in the existing Supabase project `weatherboard` (ref `nyjsrnntxdgfykkmihpx`, org `jeuron`, ap-southeast-1). All travelboard tables in a dedicated `travel` schema | 04/10/26 |
 | D4 | Tables are never exposed through the API. The client reaches data only through SECURITY DEFINER RPCs in `public` prefixed `tb_` | 04/10/26 |
-| D5 | Server-side secrets (Anthropic key, later Google key) live in Supabase Edge Functions prefixed `tb-` | 04/10/26 |
+| D5 | Server-side secrets (Anthropic key, later Google key) live in Supabase Edge Functions prefixed `tb-`, as secrets named with a `TB_` prefix | 04/10/26, prefix 10/10/26 |
 | D6 | Hosting on GitHub Pages from a public repo. No build step, vanilla JS, libraries vendored into the repo | 04/10/26 |
 | D7 | Auth: one synthetic login created from the dashboard, `signInWithPassword`, self-signup off | 04/10/26 |
 | D8 | Offline-first on the phone: the UI reads IndexedDB, never Supabase directly. Supabase is the sync target | 04/10/26 |
 | D9 | Captures: GPS on by default, editable, soft delete, default kind `note` | 04/10/26 |
 | D10 | Voice v1 is Gboard voice typing into a plain textarea, with the on-device English speech pack so it works offline. No in-app speech recognition before Bangkok. (SwiftKey's voice input needs a connection, so it does not qualify; found 10/10/26) | 04/10/26 |
-| D11 | Journal with Claude via the Anthropic API from an Edge Function, Sonnet-class model, hard monthly spend limit in the Anthropic console, one thread per local day | 04/10/26 |
+| D11 | Journal with Claude via the Anthropic API from an Edge Function, Sonnet-class model, one thread per local day. Billing: a `travelboard` workspace in the same Console org as weather's `weather` workspace (both draw on the USD 100 monthly subscriber API credit), with its own key and a hard monthly spend limit of USD 30, auto-reload off | 04/10/26, workspace 10/10/26 |
 | D12 | Lighter test regime than house standard: static checks, SQL smoke script, written manual test scripts. No mutation testing | 04/10/26 |
 | D13 | Map layer is locate-and-reach only: day map, coordinates, copyable address, deep link to Google Maps. No offline vector tiles | 04/10/26 |
 | D14 | Apify is a plan-time enrichment tool only, never in a street-time path | 04/10/26 |
@@ -68,7 +68,7 @@ Supabase project "weatherboard" (nyjsrnntxdgfykkmihpx)
   auth      one user, synthetic login
   public    tb_* SECURITY DEFINER RPCs  (the only client entry point)
   travel    tables (not exposed to the API)
-  edge fn   tb-journal  (holds ANTHROPIC_API_KEY)   [M2]
+  edge fn   tb-journal  (holds TB_ANTHROPIC_API_KEY)   [M2]
             tb-places   (holds Google key)          [M3]
   |
   v
@@ -81,7 +81,8 @@ The `weatherboard` project already runs the East Sky Board: 20 tables in `public
 
 - travelboard objects: schema `travel`, functions `public.tb_*`, Edge Functions `tb-*`, nothing else.
 - Turning self-signup off in Auth settings is project-wide. Safe, because weatherboard uses no auth.
-- Edge Function secrets are project-wide, so weatherboard's functions can read `ANTHROPIC_API_KEY`. Accepted: both are Gary's.
+- Edge Function secrets are project-wide, so weatherboard's functions can read travelboard's secrets and the reverse. Accepted: both are Gary's. travelboard secrets carry a `TB_` prefix (`TB_ANTHROPIC_API_KEY`) so they can never collide with a weatherboard secret, for example if weather later moves its own Anthropic key into Supabase.
+- Anthropic billing is shared too: weather's API twin and travelboard's journal draw on the same USD 100 monthly subscriber credit, in separate Console workspaces (`weather` capped at USD 70, `travelboard` at USD 30) so neither can starve the other.
 - Keep-alive: weatherboard's cron activity keeps the project from pausing. Nothing extra needed.
 - **Storage risk (see section 10):** the database was 237 MB of the 500 MB free cap on 04/10/26, mostly `public.station_obs` (142 MB) and `public.frame_cells` (43 MB), growing every 5 minutes.
 
@@ -324,7 +325,7 @@ RPCs: `tb_journal_day(p_local_date date)` returns the thread; `tb_journal_days(p
 
 ### 8.3 Edge Function `tb-journal`
 
-- `verify_jwt` on. Secret `ANTHROPIC_API_KEY` set in the dashboard.
+- `verify_jwt` on. Secret `TB_ANTHROPIC_API_KEY` set by Gary in the dashboard, holding a key from the Console workspace `travelboard`.
 - Request: `{ local_date, message_id, content, created_at }`.
 - Steps:
   1. Resolve the user from the JWT.
@@ -352,7 +353,7 @@ The file is plain text in the repo so Gary edits it without touching code. The t
 
 ### 8.6 Cost control
 
-- Hard monthly spend limit set in the Anthropic console before first deploy.
+- Before first deploy: Console workspace `travelboard` in the org that holds `weather`, monthly spend limit USD 30, auto-reload off, its own key. Never weather's key.
 - `max_tokens` 1500 and the 40-turn cap per call.
 - Token counts stored per reply, so monthly usage is a SQL query away.
 
@@ -362,7 +363,7 @@ The file is plain text in the repo so Gary edits it without touching code. The t
 2. A message sent in airplane mode queues, sends on reconnect, and produces exactly one reply.
 3. Retrying a message that already has a reply returns the stored reply without a second API call (check token rows).
 4. The Anthropic key appears nowhere in the repo or client.
-5. Spend limit confirmed set in the console.
+5. Spend limit confirmed set in the console on the `travelboard` workspace (USD 30, auto-reload off), and the key in `TB_ANTHROPIC_API_KEY` belongs to that workspace.
 
 ---
 
@@ -437,6 +438,7 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 10/10/26 D5, D11, 4 diagram, 4.1, 8.3, 8.6, 8.7: Anthropic billing and key for M2 (Gary's decision before the M2 go). Journal key comes from its own Console workspace `travelboard` (USD 30 monthly limit, auto-reload off) in the org that holds weather's `weather` workspace (USD 70); both share the USD 100 monthly subscriber API credit. Edge Function secret renamed `ANTHROPIC_API_KEY` to `TB_ANTHROPIC_API_KEY`, because secrets are project-wide in weatherboard. Model string `claude-sonnet-5-5` confirmed in the API model list on 10/10/26 (weather project).
 - 10/10/26 4.2, 11: headless test harness committed under `checks/headless/` (Gary's decision), dev dependency pinned, no `node_modules` in the repo.
 - 10/10/26 Status: M1 done. D10: Gboard with the on-device English pack; SwiftKey voice needs a connection. 7.1 Capture: one tap to raise the keyboard after a shortcut launch. Section 10: offline voice and Wi-Fi auto-on rows. From the M1 Pixel run.
 - 04/10/26 7.1, 7.2: M1 design details agreed with Gary at the start of M1 written in (row layout and city suffix, date switcher, Close and Android back on the capture screen, draft keys and `open` flag, strictly increasing `updated_at`, GPS merge, share prefill dedupe and append, export fields). No change to the acceptance list.
