@@ -103,6 +103,7 @@ travelboard/
   checks/
     static.cjs          parse inline scripts, validate manifest, sw cache list matches files
     smoke.sql           RPC and grant smoke tests
+    headless/           Playwright tests of trip.html against an RPC mock (dev only, never shipped)
   TESTS.md              manual test scripts, run on the Pixel
   SPEC.md               this file
   CLAUDE.md             standing brief for Claude Code
@@ -430,11 +431,13 @@ Each skeleton is expanded to full spec before its module starts.
 
 - `checks/static.cjs`: parses every inline script in the HTML files, validates `manifest.webmanifest`, checks the `sw.js` precache list against files on disk, fails on any `service_role` string in static files.
 - `checks/smoke.sql`: run through the Supabase connector after each migration. Anonymous calls rejected, idempotent upsert, last-write-wins ordering, pull cursor behaviour.
+- `checks/headless/`: `m1.test.cjs` drives `trip.html` in headless Chromium against `harness.cjs`, a mock of the `tb_*` RPCs that mirrors migration 0002. Run it before every release that touches the client or the sync engine. Its one dev dependency (Playwright, pinned in its `package.json`) is never committed or shipped; `static.cjs` scans these files for secrets like every other file.
 - `TESTS.md`: the acceptance lists above as numbered manual steps, run on the Pixel, results dated.
 - A module is done when its acceptance list passes. No mutation testing.
 
 ## 12. Change log
 
+- 10/10/26 4.2, 11: headless test harness committed under `checks/headless/` (Gary's decision), dev dependency pinned, no `node_modules` in the repo.
 - 10/10/26 Status: M1 done. D10: Gboard with the on-device English pack; SwiftKey voice needs a connection. 7.1 Capture: one tap to raise the keyboard after a shortcut launch. Section 10: offline voice and Wi-Fi auto-on rows. From the M1 Pixel run.
 - 04/10/26 7.1, 7.2: M1 design details agreed with Gary at the start of M1 written in (row layout and city suffix, date switcher, Close and Android back on the capture screen, draft keys and `open` flag, strictly increasing `updated_at`, GPS merge, share prefill dedupe and append, export fields). No change to the acceptance list.
 - 04/10/26 Principle 8, 6.2, 7.2, 7.3 item 6: the local day rolls over at 0400, not midnight (Gary's decision at the start of M1). Principle 8 already said 0030 belongs to the evening, but 6.2 defined `local_date` as the plain calendar date, and the old acceptance item 6 could not tell Bangkok from Singapore (0030 BKK is 0130 SGT, the same date). No schema change; the column comment changes only.
