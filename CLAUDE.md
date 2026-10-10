@@ -8,7 +8,7 @@ travelboard is Gary Chan's personal travel app: a phone PWA (`trip.html`) for ca
 
 ## Current module
 
-**M1 Capture** (Gary's go 04/10/26). M0 Foundation is done. Do not start M2 or any later module until Gary says go. If you finish early, stop and report.
+**None in build.** M0 Foundation done 04/10/26; M1 Capture done 10/10/26. Do not start M2 or any later module until Gary says go. If you finish early, stop and report.
 
 ## Hard rules
 

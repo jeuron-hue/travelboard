@@ -7,7 +7,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ## M1 Capture (SPEC.md 7.3)
 
-**Status 04/10/26: built and deployed as v3. All automated checks pass. All nine acceptance items await the Pixel run below.**
+**Status 10/10/26: all nine acceptance items PASS on the Pixel. `checks/static.cjs` and `checks/smoke.sql` pass. M1 done.** Device results and findings are at the end of this section.
 
 ### Automated results, 04/10/26
 
@@ -42,15 +42,15 @@ Found and fixed during the build: `.primary small { display: block }` overrode t
 
 | # | Item | Status |
 |---|---|---|
-| 1 | 20 airplane-mode captures, mixed, all arrive intact with correct `local_date` | Headless PASS. Pixel pending (step 4) |
-| 2 | Force-closed mid-typing: draft restored on reopen | Headless PASS. Pixel pending (step 3) |
-| 3 | Edit after sync propagates; offline edit wins over the older server copy | Headless PASS. Pixel pending (step 6) |
-| 4 | Delete hides locally, sets `deleted_at` on the server; Undo within 5 s restores | Headless PASS. Pixel pending (step 7) |
-| 5 | Location denied: saves with null coordinates and no error | Headless PASS. Pixel pending (step 2) |
-| 6 | Asia/Bangkok: 0030 gets the previous Bangkok date and shows "0030 hrs" with "Bangkok"; 0400 or later gets the same day | Headless PASS. Pixel pending (step 9) |
-| 7 | Share a Google Maps link into travelboard: prefilled capture opens | Headless PASS (simulated URL). Pixel pending (step 8) |
-| 8 | Home-screen shortcut opens straight into capture | Headless PASS (simulated URL). Pixel pending (step 5) |
-| 9 | Export produces a valid JSON file offline containing every capture | Headless PASS. Pixel pending (step 10) |
+| 1 | 20 airplane-mode captures, mixed, all arrive intact with correct `local_date` | PASS 10/10/26 (Pixel step 4; 19 made in airplane mode, AP06 with signal) |
+| 2 | Force-closed mid-typing: draft restored on reopen | PASS 10/10/26 (Pixel step 3) |
+| 3 | Edit after sync propagates; offline edit wins over the older server copy | PASS 10/10/26 (Pixel step 6; offline edit is AP04) |
+| 4 | Delete hides locally, sets `deleted_at` on the server; Undo within 5 s restores | PASS 10/10/26 (Pixel step 7; AP03 deleted, AP05 undone) |
+| 5 | Location denied: saves with null coordinates and no error | PASS 04/10/26 (Pixel step 2) |
+| 6 | Asia/Bangkok: 0030 gets the previous Bangkok date and shows "0030 hrs" with "Bangkok"; 0400 or later gets the same day | PASS 10/10/26 (Pixel step 9) |
+| 7 | Share a Google Maps link into travelboard: prefilled capture opens | PASS 10/10/26 (Pixel step 8) |
+| 8 | Home-screen shortcut opens straight into capture | PASS 10/10/26 (Pixel step 5; keyboard needs one tap, see findings) |
+| 9 | Export produces a valid JSON file offline containing every capture | PASS 10/10/26 (Pixel step 10; file matches the server row for row) |
 
 ### Device steps (Pixel, Chrome), v3
 
@@ -66,6 +66,29 @@ Report back the step number and what you saw for any step that does not match. N
 8. **Share a Google Maps link (item 7).** In Google Maps, open any place, tap Share, and choose travelboard from the share sheet (it may be under "More"). travelboard should open on the capture screen with the place name and a `maps.app.goo.gl` link filled in, each once. Save. If travelboard is not in the share sheet at all, report that; Chrome may need to refresh the installed app.
 9. **Bangkok time and the 0400 rollover (item 6).** Turn airplane mode on first, so nothing tries to sync while the clock is wrong. Android Settings, System, Date and time: turn off "Set time automatically" and "Set time zone automatically" (on some versions "Use network-provided time" and "Use location to set time zone"). Set the time zone to Bangkok (Thailand, GMT+07:00) and set the time to 0030. Note the date the phone shows. Swipe travelboard away and reopen it so it picks up the new zone. The home label should show the day before the phone's date. Capture `BKK 0030`. The row reads "0030 hrs" with no city, because the phone itself is now on Bangkok time. Now set the time to 0400 or later on the same date, swipe the app away and reopen: the label should now show the phone's date and the `BKK 0030` row should be one day back. Capture `BKK 0400`. Then turn automatic time and time zone back on, turn airplane mode off, swipe the app away, reopen, and wait for "synced". Step back to the day before the date you noted: `BKK 0030` should read "0030 hrs Bangkok". `BKK 0400` should read "0400 hrs Bangkok" on the date you noted. Tell Claude the date you noted; Claude checks both rows have `tz` Asia/Bangkok and the two `local_date` values.
 10. **Export offline (item 9).** Turn airplane mode on. Tap the status pill, then Export. A file named `travelboard-captures-ddmmyy-hhmm.json` (today's date and the current time) should download, and a bar reads "Exported n captures". Note n. Find the file in Files, Downloads. Upload it to Claude in chat, or report n; Claude checks it holds every capture, AP04 flagged `"deleted": true`. Turn airplane mode off.
+
+### Device results, v3 (Pixel, Gary), 04/10/26 and 10/10/26
+
+Checked against `travel.captures` through the Supabase connector after each step. Times SGT unless marked.
+
+| Step | Result |
+|---|---|
+| 1 | PASS 04/10/26. Live `sw.js` at `CACHE_VERSION = 3`. The "Update ready, tap to reload" bar appeared on the device (closes the M0 open item); Version v3. M0 records listed on 04/10. |
+| 2 | PASS 04/10/26. Location denied: "loc test denied" 2116:07, null coordinates, `updated_at` never bumped, no error. Allowed: "Love test allowed" 2118:11 with a fix (21.071 m), `updated_at` bumped by the GPS merge, synced. The permission prompt appeared over an already saved row, so save did not wait on GPS. |
+| 3 | PASS 10/10/26. Draft reopened after a force-close; Close kept it ("draft kept"); a relaunch went to home; Capture restored it; Save cleared it ("Draft test save" 1156:18). |
+| 4 | PASS 10/10/26. 20 captures AP01 to AP20, 16 note and 4 journal, all intact on the server with `local_date` 2026-10-10 and a GPS fix. AP01 to AP05 made in airplane mode 1201:48 to 1203:50, landed together 1204:35. AP06 1248:23 made with signal. 14 more in airplane mode 1357:05 to 1401:11, landed together 1401:26. AP13 and AP17 dictated offline with Gboard. |
+| 5 | PASS 10/10/26. Long-press "New capture" opens straight into the capture screen. The keyboard did not come up on its own; one tap on the text area raised it. Back: first press closes the keyboard (Android), second closes the capture screen and stays in the app, third leaves the app. |
+| 6 | PASS 10/10/26. AP01 edited online and switched to journal, landed at once (1411:38). AP04 edited offline at 1412:42, held, landed 1413:00 on reconnect. AP02 was meant as the offline edit but Wi-Fi came back on by itself before Save, so it synced at once; Gary repeated it as AP04. |
+| 7 | PASS 10/10/26. AP03 deleted and left: `deleted_at` 1413:22 on the server. AP05 deleted and undone within 5 s: `deleted_at` null, `updated_at` bumped 1413:42. |
+| 8 | PASS 10/10/26. Shared Tampines Mall from Google Maps: body "Tampines Mall" plus the `maps.app.goo.gl` link, each once (1421:01). |
+| 9 | PASS 10/10/26. Phone on Asia/Bangkok, automatic time off, airplane mode. "Bkk 0030" captured 10/10 0031 Bangkok time: `local_date` 2026-10-09, shown on Fri 09/10. "Bkk0400" captured 10/10 0415 Bangkok time: `local_date` 2026-10-10. Both `tz` Asia/Bangkok, landed 1429:38 after the clock was restored. Back on Singapore time they read "0031 hrs Bangkok" and "0415 hrs Bangkok". Wi-Fi switched itself back on when the app was reopened with the clock changed; Gary turned it off and continued. |
+| 10 | PASS 10/10/26. `travelboard-captures-101026-1433.json`, `exported_at` 0633Z (1433 SGT, matching the name). 30 captures, 1 flagged deleted (AP03), all `synced` true, each with `server_ts`. A digest over id, body, kind, `local_date`, `tz`, `updated_at`, deleted and `lat` matches `travel.captures` exactly (30 rows, md5 `ec9f33c3...`). |
+
+Findings from the device run:
+- **Voice offline (Bangkok readiness).** Microsoft SwiftKey's voice input needs a connection ("Language not available offline") even with the on-device English packs installed. Gboard's mic uses those packs and worked in airplane mode. Use Gboard for dictation. SPEC D10 and section 10 updated.
+- **Wi-Fi turning itself back on.** Twice Android re-enabled Wi-Fi during airplane-mode steps (after a Save in step 6, and on reopening the app with the clock changed in step 9), once with "Turn on Wi-Fi automatically" off. A web app cannot switch Wi-Fi, so this is the phone. When an offline step matters, check the pill reads "offline" before saving.
+- **Shortcut and keyboard.** Android does not raise the keyboard for a page launched with no tap. The textarea is focused and fills the screen, so one tap anywhere brings the keyboard. Accepted as a platform limit.
+- **Device clock** runs about 1 s ahead of the server, so `updated_at` can read later than `server_ts` on the same write. Harmless: conflicts compare `updated_at` with `updated_at`, and pulls use `server_ts` only.
 
 ---
 

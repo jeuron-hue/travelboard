@@ -1,7 +1,7 @@
 # travelboard: specification
 
 Owner: Gary Chan. Repo: `jeuron-hue/travelboard` (public). Written 04/10/26.
-Status: M0 Foundation done 04/10/26. M1 Capture in build.
+Status: M0 Foundation done 04/10/26. M1 Capture done 10/10/26. M2 awaits Gary's go.
 
 This file is the source of record for what travelboard is and how it is built. M0, M1 and M2 are specified in full because they ship before Bangkok (09/11/26). M3 to M8 are skeletons, to be expanded one at a time after Bangkok using the friction log from that trip.
 
@@ -32,7 +32,7 @@ Wanderlog was used for Switzerland (Jan 2025) and liked, but its AI layer and jo
 | D7 | Auth: one synthetic login created from the dashboard, `signInWithPassword`, self-signup off | 04/10/26 |
 | D8 | Offline-first on the phone: the UI reads IndexedDB, never Supabase directly. Supabase is the sync target | 04/10/26 |
 | D9 | Captures: GPS on by default, editable, soft delete, default kind `note` | 04/10/26 |
-| D10 | Voice v1 is Gboard voice typing into a plain textarea. No in-app speech recognition before Bangkok | 04/10/26 |
+| D10 | Voice v1 is Gboard voice typing into a plain textarea, with the on-device English speech pack so it works offline. No in-app speech recognition before Bangkok. (SwiftKey's voice input needs a connection, so it does not qualify; found 10/10/26) | 04/10/26 |
 | D11 | Journal with Claude via the Anthropic API from an Edge Function, Sonnet-class model, hard monthly spend limit in the Anthropic console, one thread per local day | 04/10/26 |
 | D12 | Lighter test regime than house standard: static checks, SQL smoke script, written manual test scripts. No mutation testing | 04/10/26 |
 | D13 | Map layer is locate-and-reach only: day map, coordinates, copyable address, deep link to Google Maps. No offline vector tiles | 04/10/26 |
@@ -258,7 +258,7 @@ Database `travelboard`, version 1. A small hand-written promise wrapper, no libr
 - Switcher label "Sun 04/10/26". The arrows step to the nearest day that has captures, skipping empty days; today is always reachable, even when empty. Tapping the label returns to today.
 - The Capture button reads "draft kept" under its label while a closed new-capture draft exists.
 
-**Capture:** opens full-screen with the textarea focused so the keyboard is already up and the Gboard mic is one tap away. Save top-right. A kind toggle (note / journal), default note. Nothing else on the screen except Close, top-left. Save is disabled while the trimmed body is empty. The viewport sets `interactive-widget=resizes-content` so the screen shrinks above the keyboard. Opening it pushes a history entry, so Android back closes it instead of leaving the app.
+**Capture:** opens full-screen with the textarea focused so the keyboard is already up and the Gboard mic is one tap away. Exception: on a launch with no tap (home-screen shortcut) Android does not raise the keyboard; the textarea fills the screen, so one tap anywhere brings it up. Save top-right. A kind toggle (note / journal), default note. Nothing else on the screen except Close, top-left. Save is disabled while the trimmed body is empty. The viewport sets `interactive-widget=resizes-content` so the screen shrinks above the keyboard. Opening it pushes a history entry, so Android back closes it instead of leaving the app.
 
 **Edit:** tapping a row opens the same screen with the text, kind toggle and a Delete action. Delete sits in a bottom bar with the capture's date, time, zone and GPS accuracy. The keyboard is not raised on open.
 
@@ -417,6 +417,8 @@ Each skeleton is expanded to full spec before its module starts.
 | Shared database size | 237 MB of 500 MB on 04/10/26, mostly weatherboard's `station_obs` (142 MB) growing every 5 min. Reaching the free cap would stop writes for travelboard too. Captures stay safe locally, but sync would stop | Gary: decide a retention policy for `station_obs` on the weatherboard side before Bangkok |
 | Offline is new skill | No prior service worker or IndexedDB work | M0 is deliberately the smallest possible surface for it |
 | Gboard on foreign names | Lebuh Keng Kwee, Teluk Bahang and similar will be mangled | Accepted. Transcripts are for Gary; never parsed |
+| Offline voice | Voice only works offline with Gboard plus the on-device English pack (Settings, System, Languages, Speech, On-device recognition). SwiftKey's voice needs a connection | Gary: Gboard as the keyboard for the trip; check dictation in airplane mode before flying |
+| Offline testing on the Pixel | Android sometimes turns Wi-Fi back on during airplane mode, even with "Turn on Wi-Fi automatically" off | Check the pill reads "offline" before relying on an offline result |
 | Google billing | No hard cap by default | Per-API quota caps on day one of M3 |
 | M7 calendar choice | Dedicated vs Life Shared | Decide at M7 |
 | Wanderlog seed | Export past trips or not | Decide at M3 |
@@ -433,6 +435,7 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 10/10/26 Status: M1 done. D10: Gboard with the on-device English pack; SwiftKey voice needs a connection. 7.1 Capture: one tap to raise the keyboard after a shortcut launch. Section 10: offline voice and Wi-Fi auto-on rows. From the M1 Pixel run.
 - 04/10/26 7.1, 7.2: M1 design details agreed with Gary at the start of M1 written in (row layout and city suffix, date switcher, Close and Android back on the capture screen, draft keys and `open` flag, strictly increasing `updated_at`, GPS merge, share prefill dedupe and append, export fields). No change to the acceptance list.
 - 04/10/26 Principle 8, 6.2, 7.2, 7.3 item 6: the local day rolls over at 0400, not midnight (Gary's decision at the start of M1). Principle 8 already said 0030 belongs to the evening, but 6.2 defined `local_date` as the plain calendar date, and the old acceptance item 6 could not tell Bangkok from Singapore (0030 BKK is 0130 SGT, the same date). No schema change; the column comment changes only.
 
