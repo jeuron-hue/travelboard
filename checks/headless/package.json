@@ -3,7 +3,8 @@
   "private": true,
   "description": "Dev-only headless tests for trip.html. Not part of the shipped site.",
   "scripts": {
-    "test": "node m1.test.cjs"
+    "test": "node m1.test.cjs && node m2.test.cjs",
+    "test:fn": "node fn.test.cjs"
   },
   "devDependencies": {
     "playwright": "1.56.1"

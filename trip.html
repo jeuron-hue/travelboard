@@ -14,8 +14,18 @@
     edit screen with drafts saved on every input; GPS after save, never awaited;
     soft delete with a 5 s Undo; home-screen shortcut (?new=1) and share target
     prefill; JSON export of every capture.
+  - M2 Journal (SPEC.md 8): Journal tab with one thread per local day and a day list;
+    the same full-screen textarea as capture for writing; a turn is stored locally as
+    pending and sent to the tb-journal Edge Function by the sync engine, so it queues
+    offline and sends on reconnect; Claude's reply is stored once per turn; journal-kind
+    captures show inline in the day's thread; optional title suffix per day.
 
   Change log (newest first)
+  - 10/10/26 v4. M2 Journal. Captures and Journal tabs in the header. IndexedDB version 2
+    adds stores journal and jdays. Sync order: push captures, push day suffixes, send
+    queued journal turns oldest first (stops at the first failure, which shows Retry),
+    pull captures, pull journal days whose message count or latest server_ts changed.
+    The status pill counts queued journal turns with queued captures.
   - 04/10/26 v3. M1 Capture. Capture and edit screen, drafts, 0400 local-day rule, date
     switcher, row layout (time in the row's zone with a city suffix, kind chip, GPS dot,
     sync chip), GPS merge, soft delete with Undo, ?new=1 and share target, Export.
@@ -243,26 +253,72 @@
     border: 1px solid var(--line); background: var(--ground);
   }
   .err { color: var(--crit); font-size: 15px; min-height: 1.2em; margin: 0; }
+
+  /* Tabs in the header: Captures | Journal */
+  .tabs { display: flex; border: 1px solid var(--line); border-radius: 22px; overflow: hidden; }
+  .tabs button {
+    min-height: 44px; padding: 0 14px; border: 0; background: var(--surface); cursor: pointer; font-weight: 600;
+  }
+  .tabs button[aria-pressed="true"] { background: var(--accent-bg); color: var(--accent); }
+
+  /* Journal */
+  .jbar { grid-template-columns: auto 1fr; }
+  .jbar #j-days { padding: 0 14px; font-size: 17px; }
+  .jbar #j-title { font-weight: 600; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 10px; font-size: 17px; }
+  .jbar #j-title.today { color: var(--accent); }
+  .thread { list-style: none; margin: 0; padding: 12px 16px 0; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 88%; padding: 10px 12px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg.user { align-self: flex-end; background: var(--accent-bg); color: var(--ink); border-bottom-right-radius: 4px; }
+  .msg.assistant { align-self: flex-start; background: var(--surface); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+  .msg .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; font-size: 13px; color: var(--muted); white-space: normal; }
+  .msg .meta .chip.failed { background: var(--crit-bg); color: var(--crit); }
+  .msg .retry { min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--crit); background: var(--surface); color: var(--crit); font-weight: 600; cursor: pointer; }
+  .quote {
+    align-self: stretch; padding: 8px 12px; border-left: 4px solid var(--accent);
+    background: var(--surface); border-radius: 4px 10px 10px 4px; white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  .quote .meta { display: block; font-size: 13px; color: var(--muted); margin-bottom: 2px; }
+  .typing { align-self: flex-start; color: var(--muted); font-size: 15px; padding: 0 4px; }
+  ul.days { list-style: none; margin: 0; padding: 12px 16px 0; }
+  ul.days li { margin-bottom: 8px; }
+  .dayrow .line1 .when.today { color: var(--accent); }
+  #suffix-dlg input {
+    width: 100%; min-height: 48px; padding: 0 12px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--ground); margin: 4px 0 8px;
+  }
 </style>
 </head>
 <body>
 <header>
-  <h1>travelboard</h1>
+  <nav class="tabs" aria-label="Section">
+    <button id="tab-captures" type="button" aria-pressed="true">Captures</button>
+    <button id="tab-journal" type="button" aria-pressed="false">Journal</button>
+  </nav>
   <button class="status" id="status" type="button" aria-label="Sync status and settings">
     <span class="dot" id="status-dot"></span><span id="status-text">starting</span>
   </button>
 </header>
 
-<nav class="daybar" aria-label="Day">
+<nav class="daybar" id="daybar" aria-label="Day">
   <button id="day-prev" type="button" aria-label="Earlier day with captures">&#8249;</button>
   <button id="day-label" type="button" aria-label="Go to today">-</button>
   <button id="day-next" type="button" aria-label="Later day with captures">&#8250;</button>
 </nav>
 
+<nav class="daybar jbar" id="jbar" aria-label="Journal day" hidden>
+  <button id="j-days" type="button">Days</button>
+  <button id="j-title" type="button" aria-label="Day title, tap to add a title">-</button>
+</nav>
+
 <main>
-  <div class="list">
+  <div class="list" id="captures-view">
     <ul class="records" id="records"></ul>
     <p class="hint" id="empty" hidden></p>
+  </div>
+  <div id="journal-view" hidden>
+    <ul class="days" id="j-daylist" hidden></ul>
+    <ul class="thread" id="j-thread"></ul>
+    <p class="hint list" id="j-empty" hidden></p>
   </div>
 </main>
 
@@ -271,13 +327,13 @@
 <div id="toast" role="status" hidden><span id="toast-text"></span><button id="toast-undo" type="button">Undo</button></div>
 
 <footer>
-  <button class="primary" id="capture" type="button">Capture<small id="draft-note" hidden>draft kept</small></button>
+  <button class="primary" id="capture" type="button"><span id="primary-label">Capture</span><small id="draft-note" hidden>draft kept</small></button>
 </footer>
 
 <section id="cap" role="dialog" aria-modal="true" aria-label="Capture" hidden>
   <div class="capbar">
     <button class="btn" id="cap-close" type="button">Close</button>
-    <div class="toggle" role="group" aria-label="Kind">
+    <div class="toggle" id="kind-group" role="group" aria-label="Kind">
       <button id="kind-note" type="button" aria-pressed="true">note</button>
       <button id="kind-journal" type="button" aria-pressed="false">journal</button>
     </div>
@@ -291,6 +347,17 @@
     <button class="btn danger" id="cap-delete" type="button">Delete</button>
   </div>
 </section>
+
+<dialog id="suffix-dlg">
+  <form class="sheet" id="suffix-form" method="dialog">
+    <h2 id="suffix-head">Day title</h2>
+    <input id="suffix-input" type="text" maxlength="200" autocomplete="off" placeholder="For example: Bangkok day 1">
+    <div class="actions">
+      <button class="btn" id="suffix-save" type="submit" value="save">Save</button>
+      <button class="btn" id="suffix-cancel" type="submit" value="cancel" formnovalidate>Cancel</button>
+    </div>
+  </form>
+</dialog>
 
 <dialog id="settings">
   <div class="sheet">
@@ -324,7 +391,7 @@
 'use strict';
 
 // Bump together with CACHE_VERSION in sw.js on every release.
-const APP_VERSION = 3;
+const APP_VERSION = 4;
 
 const SUPABASE_URL = 'https://nyjsrnntxdgfykkmihpx.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_q75DGiJBda-NwE3tdgPtFg_g3Rasmcg';
@@ -336,6 +403,9 @@ const DAY_ROLLOVER_HOUR = 4;        // the local day ends at 0400 (SPEC.md princ
 const BODY_MAX = 20000;             // server check: char_length(body) <= 20000
 const UNDO_MS = 5000;
 const GPS_OPTS = { enableHighAccuracy: true, timeout: 5000, maximumAge: 60000 };
+const JOURNAL_URL = SUPABASE_URL + '/functions/v1/tb-journal';
+const JOURNAL_TIMEOUT_MS = 120000;  // tb-journal gives Claude 90 s; a retry after a timeout is free
+const JOURNAL_DAYS_LIMIT = 400;
 
 const $ = (id) => document.getElementById(id);
 
@@ -390,14 +460,17 @@ function fmtTime(iso, tz) {
 }
 const deviceTz = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
-// ---------- IndexedDB: database travelboard v1, small promise wrapper ----------
+// ---------- IndexedDB: database travelboard v2, small promise wrapper ----------
+// v1 (M0): captures, drafts, meta. v2 (M2): journal (turns and replies, by id) and jdays
+// (one row per local day: title suffix, and the server's message count and latest
+// server_ts from the last pull, used to skip unchanged days).
 
 const idb = (() => {
   let dbp = null;
   function open() {
     if (dbp) return dbp;
     dbp = new Promise((resolve, reject) => {
-      const r = indexedDB.open('travelboard', 1);
+      const r = indexedDB.open('travelboard', 2);
       r.onupgradeneeded = () => {
         const db = r.result;
         if (!db.objectStoreNames.contains('captures')) {
@@ -407,10 +480,23 @@ const idb = (() => {
         }
         if (!db.objectStoreNames.contains('drafts')) db.createObjectStore('drafts', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'key' });
+        if (!db.objectStoreNames.contains('journal')) {
+          const j = db.createObjectStore('journal', { keyPath: 'id' });
+          j.createIndex('local_date', 'local_date');
+          j.createIndex('state', 'state');
+        }
+        if (!db.objectStoreNames.contains('jdays')) db.createObjectStore('jdays', { keyPath: 'local_date' });
       };
-      r.onsuccess = () => resolve(r.result);
+      r.onsuccess = () => {
+        const db = r.result;
+        // A newer version opening elsewhere (an update in another tab) must not be blocked by us.
+        db.onversionchange = () => db.close();
+        resolve(db);
+      };
       r.onerror = () => reject(r.error);
-      r.onblocked = () => reject(new Error('IndexedDB upgrade blocked by another tab'));
+      // An older copy open in another tab holds the upgrade until it closes; the open then
+      // completes by itself, so wait rather than fail.
+      r.onblocked = () => console.warn('IndexedDB upgrade waiting for another travelboard tab to close');
     });
     return dbp;
   }
@@ -570,9 +656,10 @@ function requestGps(id) {
 
 // ---------- capture screen ----------
 
-// mode 'new' (draft key "new") or 'edit' (draft key = capture id).
-const cap = { open: false, mode: null, row: null, kind: 'note', busy: false };
-const draftKey = () => (cap.mode === 'new' ? 'new' : cap.row.id);
+// mode 'new' (draft key "new"), 'edit' (draft key = capture id) or 'journal' (the same
+// screen as the journal composer, draft key "journal:<local_date>", Save reads Send).
+const cap = { open: false, mode: null, row: null, kind: 'note', busy: false, jdate: null };
+const draftKey = () => (cap.mode === 'new' ? 'new' : cap.mode === 'journal' ? 'journal:' + cap.jdate : cap.row.id);
 const capBody = () => $('cap-body').value.trim().slice(0, BODY_MAX);
 
 function setKind(kind) {
@@ -625,13 +712,19 @@ async function openCapture(mode, row, draft) {
     $('cap-info').textContent = parts.join(', ');
   }
   $('cap-foot').hidden = mode !== 'edit';
-  $('cap').setAttribute('aria-label', mode === 'edit' ? 'Edit capture' : 'New capture');
+  $('kind-group').hidden = mode === 'journal';
+  $('cap-save').textContent = mode === 'journal' ? 'Send' : 'Save';
+  ta.placeholder = mode === 'journal'
+    ? 'Tell Claude about the day. Tap the mic on the keyboard to talk.'
+    : 'Type, or tap the mic on the keyboard';
+  $('cap').setAttribute('aria-label',
+    mode === 'edit' ? 'Edit capture' : mode === 'journal' ? 'Journal, ' + jTitleText(cap.jdate) : 'New capture');
   $('cap').hidden = false;
   cap.open = true;
   history.pushState({ tbCap: true }, '');
   updateSaveEnabled();
   if (draft) writeDraft();            // re-mark an existing draft as open
-  if (mode === 'new') {
+  if (mode === 'new' || mode === 'journal') {
     // On a launch with no user gesture (home-screen shortcut) Android may not raise the
     // keyboard for this focus; checked on the device, not assumed.
     ta.focus();
@@ -642,6 +735,11 @@ async function openCapture(mode, row, draft) {
 async function openNew() {
   const draft = await idb.get('drafts', 'new');
   await openCapture('new', null, draft);
+}
+async function openJournalComposer(date) {
+  cap.jdate = date;
+  const draft = await idb.get('drafts', 'journal:' + date);
+  await openCapture('journal', null, draft);
 }
 async function openEdit(id) {
   const row = await idb.get('captures', id);
@@ -661,9 +759,9 @@ async function closeCapture(how) {
   $('cap').hidden = true;
   if (how !== 'back') popCaptureState();
   if (how === 'close' || how === 'back') {
-    // New: keep the draft, closed. Edit: discard it.
-    if (cap.mode === 'new' && body.trim()) {
-      await idb.put('drafts', { id: 'new', body, kind, open: false, updated_at: new Date().toISOString() });
+    // New capture or journal turn: keep the draft, closed. Edit: discard it.
+    if ((cap.mode === 'new' || cap.mode === 'journal') && body.trim()) {
+      await idb.put('drafts', { id: key, body, kind, open: false, updated_at: new Date().toISOString() });
     } else {
       await idb.del('drafts', key);
     }
@@ -671,14 +769,20 @@ async function closeCapture(how) {
   await updateDraftNote();
 }
 
+// The bottom button: Capture on the Captures tab, Write on the Journal tab (for the day on
+// screen). "draft kept" shows while that button's closed draft exists.
 async function updateDraftNote() {
-  const d = await idb.get('drafts', 'new');
+  const journal = tab === 'journal';
+  const label = journal ? 'Write' : 'Capture';
+  const d = await idb.get('drafts', journal ? 'journal:' + jDay : 'new');
   const kept = !!(d && d.body && d.body.trim());
+  $('primary-label').textContent = label;
   $('draft-note').hidden = !kept;
-  $('capture').setAttribute('aria-label', kept ? 'Capture, draft kept' : 'Capture');
+  $('capture').setAttribute('aria-label', kept ? label + ', draft kept' : label);
 }
 
 async function saveCapture() {
+  if (cap.mode === 'journal') return sendTurn();
   const body = capBody();
   if (!cap.open || cap.busy || !body) return;
   cap.busy = true;
@@ -803,6 +907,12 @@ async function handleEntry() {
     .sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
   for (const d of open) {
     if (d.id === 'new') { await openNew(); return; }
+    if (d.id.startsWith('journal:')) {
+      setTab('journal');
+      jDay = d.id.slice(8); jView = 'thread'; jFollowToday = jDay === todayLocal();
+      await openJournalComposer(jDay);
+      return;
+    }
     const row = await idb.get('captures', d.id);
     if (row && !row.deleted_at) { await openCapture('edit', row, d); return; }
     await idb.del('drafts', d.id);
@@ -842,7 +952,13 @@ async function exportCaptures() {
 let viewDay = null;
 let followToday = true;
 
+// Renders the tab on screen, then the status pill. IndexedDB only.
 async function render() {
+  if (tab === 'journal') await renderJournal(); else await renderCaptures();
+  await renderStatus();
+}
+
+async function renderCaptures() {
   const live = (await idb.all('captures')).filter((r) => !r.deleted_at);
   const today = todayLocal();
   if (followToday || !viewDay) viewDay = today;
@@ -910,7 +1026,204 @@ async function render() {
   }
   $('empty').textContent = viewDay === today ? 'Nothing captured today yet.' : 'No captures on this day.';
   $('empty').hidden = rows.length > 0;
-  await renderStatus();
+}
+
+// ---------- journal (SPEC.md 8): one thread per local day ----------
+
+let tab = 'captures';             // 'captures' | 'journal'
+let jView = 'thread';             // 'thread' | 'days'
+let jDay = null;                  // local day of the thread on screen
+let jFollowToday = true;          // the thread follows "today" (0400 rollover) until another day is picked
+let jScrollToEnd = true;
+const jInflight = new Set();      // ids of turns being sent right now
+const jSuffixes = new Map();      // local_date -> title suffix, refreshed on every journal render
+
+function setTab(t) {
+  tab = t === 'journal' ? 'journal' : 'captures';
+  $('tab-captures').setAttribute('aria-pressed', String(tab === 'captures'));
+  $('tab-journal').setAttribute('aria-pressed', String(tab === 'journal'));
+  $('daybar').hidden = tab !== 'captures';
+  $('captures-view').hidden = tab !== 'captures';
+  $('jbar').hidden = tab !== 'journal';
+  $('journal-view').hidden = tab !== 'journal';
+}
+
+// 'Sat 10/10/26 Bangkok day 1'
+const jTitleText = (d) => fmtDayLabel(d) + (jSuffixes.get(d) ? ' ' + jSuffixes.get(d) : '');
+
+// Thread order (SPEC.md 8.2): user turns by (created_at, id), each reply straight after the
+// turn it answers. The server and tb-journal use the same order.
+function threadOrder(msgs) {
+  const byId = new Map(msgs.map((m) => [m.id, m]));
+  const key = (m) => {
+    const u = m.role === 'assistant' && byId.get(m.reply_to);
+    return u ? [Date.parse(u.created_at), u.id, 1] : [Date.parse(m.created_at), m.id, 0];
+  };
+  return msgs.slice().sort((a, b) => {
+    const x = key(a), y = key(b);
+    if (x[0] !== y[0]) return x[0] - y[0];
+    if (x[1] !== y[1]) return x[1] < y[1] ? -1 : 1;
+    return x[2] - y[2];
+  });
+}
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+async function renderJournal() {
+  const today = todayLocal();
+  if (jFollowToday || !jDay) jDay = today;
+  if (jDay === today) jFollowToday = true;
+  jSuffixes.clear();
+  for (const d of await idb.all('jdays')) if (d.suffix) jSuffixes.set(d.local_date, d.suffix);
+  $('j-daylist').hidden = jView !== 'days';
+  $('j-thread').hidden = jView !== 'thread';
+  const here = deviceTz();
+
+  if (jView === 'days') {
+    // Every day with messages, captures or a title, plus today; newest first.
+    $('j-days').textContent = 'Today';
+    $('j-title').textContent = 'Journal days';
+    $('j-title').classList.remove('today');
+    const days = new Map();
+    const add = (d) => { if (!days.has(d)) days.set(d, { m: 0, c: 0, q: 0 }); return days.get(d); };
+    add(today);
+    for (const m of await idb.all('journal')) { const x = add(m.local_date); x.m++; if (m.state === 'pending' || m.state === 'error') x.q++; }
+    for (const c of await idb.all('captures')) if (!c.deleted_at) add(c.local_date).c++;
+    for (const d of jSuffixes.keys()) add(d);
+    const ul = $('j-daylist');
+    ul.replaceChildren();
+    for (const d of [...days.keys()].sort().reverse()) {
+      const x = days.get(d);
+      const li = el('li');
+      const btn = el('button', 'row dayrow');
+      btn.type = 'button';
+      btn.dataset.day = d;
+      const l1 = el('div', 'line1');
+      const when = el('span', 'when' + (d === today ? ' today' : ''), jTitleText(d));
+      l1.append(when, el('span', 'spacer'));
+      if (x.q) l1.append(el('span', 'chip queued', `${x.q} not sent`));
+      const parts = [x.m ? `${x.m} message${x.m === 1 ? '' : 's'}` : 'No messages yet',
+        `${x.c} capture${x.c === 1 ? '' : 's'}`];
+      btn.append(l1, el('div', 'line2', parts.join(', ')));
+      li.append(btn);
+      ul.append(li);
+    }
+    $('j-empty').hidden = true;
+    return;
+  }
+
+  $('j-days').textContent = 'Days';
+  $('j-title').textContent = jTitleText(jDay);
+  $('j-title').classList.toggle('today', jDay === today);
+  const msgs = threadOrder(await idb.byIndex('journal', 'local_date', jDay));
+  const caps = (await idb.byIndex('captures', 'local_date', jDay)).filter((r) => !r.deleted_at);
+  // Captures tagged journal show inline as quoted context, placed by time.
+  const quotes = caps.filter((r) => r.kind === 'journal').sort((a, b) => (a.captured_at < b.captured_at ? -1 : 1));
+  const items = [];
+  let qi = 0;
+  const byId = new Map(msgs.map((m) => [m.id, m]));
+  for (const m of msgs) {
+    const t = Date.parse(m.role === 'assistant' && byId.get(m.reply_to) ? byId.get(m.reply_to).created_at : m.created_at);
+    while (qi < quotes.length && Date.parse(quotes[qi].captured_at) <= t && m.role === 'user') items.push(quotes[qi++]);
+    items.push(m);
+  }
+  while (qi < quotes.length) items.push(quotes[qi++]);
+
+  const ul = $('j-thread');
+  ul.replaceChildren();
+  for (const it of items) {
+    if (it.role === undefined) {
+      const li = el('li', 'quote');
+      li.dataset.capture = it.id;
+      li.append(el('span', 'meta', `journal capture, ${fmtTime(it.captured_at, it.tz)}${it.tz !== here ? ' ' + cityOf(it.tz) : ''}`),
+        document.createTextNode(it.body || ''));
+      ul.append(li);
+      continue;
+    }
+    const li = el('li', 'msg ' + (it.role === 'assistant' ? 'assistant' : 'user'));
+    li.dataset.id = it.id;
+    li.append(el('div', 'text', it.content));
+    const meta = el('div', 'meta');
+    meta.append(el('span', null, fmtTime(it.created_at, here)));
+    if (it.role === 'user') {
+      if (jInflight.has(it.id)) meta.append(el('span', 'chip queued', 'sending'));
+      else if (it.state === 'pending') meta.append(el('span', 'chip queued', 'queued'));
+      else if (it.state === 'error') {
+        meta.append(el('span', 'chip failed', 'not sent'), el('span', 'errtext', it.error || 'failed'));
+        const b = el('button', 'retry', 'Retry');
+        b.type = 'button';
+        b.dataset.retry = it.id;
+        meta.append(b);
+      }
+    }
+    li.append(meta);
+    ul.append(li);
+    if (it.role === 'user' && jInflight.has(it.id)) ul.append(el('li', 'typing', 'Claude is replying'));
+  }
+  if (!items.length) {
+    $('j-empty').textContent = 'No messages yet. Tap Write to tell Claude about the day. ' + (caps.length
+      ? `It will see your ${caps.length} capture${caps.length === 1 ? '' : 's'} from this day.`
+      : 'Nothing was captured on this day.');
+  }
+  $('j-empty').hidden = items.length > 0;
+  if (jScrollToEnd) {
+    jScrollToEnd = false;
+    const main = document.querySelector('main');
+    main.scrollTop = main.scrollHeight;
+  }
+}
+
+// Send: the turn is written locally as pending, then the sync engine sends it (now if
+// online, on reconnect if not). Never waits on the network.
+async function sendTurn() {
+  const content = capBody();
+  if (!cap.open || cap.busy || !content) return;
+  cap.busy = true;
+  updateSaveEnabled();
+  try {
+    const date = cap.jdate;
+    const row = {
+      id: crypto.randomUUID(), local_date: date, role: 'user', content, reply_to: null,
+      model: null, input_tokens: null, output_tokens: null,
+      created_at: new Date().toISOString(), server_ts: null, state: 'pending', error: null
+    };
+    await idb.tx(['journal', 'drafts'], (t) => {
+      t.objectStore('journal').put(row);
+      t.objectStore('drafts').delete('journal:' + date);
+    });
+    jDay = date;
+    jFollowToday = date === todayLocal();
+    jView = 'thread';
+    jScrollToEnd = true;
+    await closeCapture('saved');
+    await render();
+    sync();
+  } catch (e) {
+    cap.busy = false;
+    updateSaveEnabled();
+    alert('Send failed: ' + ((e && e.message) || e));
+  }
+}
+
+async function retryTurn(id) {
+  await idb.update('journal', id, (r) => r && r.state === 'error' ? Object.assign({}, r, { state: 'pending', error: null }) : null);
+  jScrollToEnd = true;
+  await render();
+  sync();
+}
+
+async function openJournalDay(d) {
+  jDay = d;
+  jFollowToday = d === todayLocal();
+  jView = 'thread';
+  jScrollToEnd = true;
+  await render();
+  await updateDraftNote();
 }
 
 // phase: checking | idle | offline | signin | error. "checking" until a sync attempt in this
@@ -918,7 +1231,7 @@ async function render() {
 const syncState = { phase: navigator.onLine ? 'checking' : 'offline', error: null };
 
 async function renderStatus() {
-  const queued = await idb.countByIndex('captures', 'dirty', 1);
+  const queued = (await idb.countByIndex('captures', 'dirty', 1)) + (await idb.countByIndex('journal', 'state', 'pending'));
   const offline = !navigator.onLine || syncState.phase === 'offline';
   let cls, text;
   if (offline) {
@@ -1036,6 +1349,100 @@ async function pull() {
   }
 }
 
+// ---------- journal sync (SPEC.md 8.3, 8.5) ----------
+
+// Day title suffixes edited locally: push, then clear the flag unless edited again meanwhile.
+async function pushSuffixes() {
+  for (const d of (await idb.all('jdays')).filter((x) => x.suffix_dirty)) {
+    const { error } = await sb.rpc('tb_journal_day_suffix', { p_local_date: d.local_date, p_suffix: d.suffix });
+    if (error) throw error;
+    await idb.update('jdays', d.local_date, (l) => l && l.suffix === d.suffix ? Object.assign({}, l, { suffix_dirty: 0 }) : null);
+  }
+}
+
+// One turn to tb-journal. Resolves { ok, body } or { ok: false, message }; throws on a
+// network failure or timeout (the turn stays pending) and on 401 (sign in).
+async function callJournal(row, s) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), JOURNAL_TIMEOUT_MS);
+  try {
+    const res = await fetch(JOURNAL_URL, {
+      method: 'POST', cache: 'no-store', signal: ctl.signal,
+      headers: { Authorization: 'Bearer ' + s.access_token, apikey: SUPABASE_PUBLISHABLE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ local_date: row.local_date, message_id: row.id, content: row.content, created_at: row.created_at })
+    });
+    let body = null;
+    try { body = await res.json(); } catch (e) { if (ctl.signal.aborted) throw e; }
+    if (res.status === 401) {
+      const e = new Error('tb-journal 401: ' + ((body && (body.message || body.msg)) || 'not authenticated'));
+      e.status = 401;
+      throw e;
+    }
+    if (res.ok && body && body.reply && body.user) return { ok: true, body };
+    return { ok: false, message: (body && body.message) || `tb-journal returned HTTP ${res.status}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Queued turns, oldest first. A reply (new or already stored) marks the turn sent. A
+// failure the server reports marks it "not sent" with the message and a Retry button, and
+// stops this pass so later turns keep their order.
+async function sendJournal(s) {
+  const pending = (await idb.byIndex('journal', 'state', 'pending'))
+    .sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id < b.id ? -1 : 1));
+  for (const row of pending) {
+    jInflight.add(row.id);
+    if (tab === 'journal') render().catch(() => {});
+    let r;
+    try { r = await callJournal(row, s); } finally { jInflight.delete(row.id); }
+    if (r.ok) {
+      const { user, reply } = r.body;
+      await idb.tx(['journal'], (t) => {
+        const st = t.objectStore('journal');
+        st.put(Object.assign({}, row, user, { state: 'sent', error: null }));
+        st.put(Object.assign({}, reply, { state: 'sent', error: null }));
+      });
+      if (tab === 'journal' && jDay === row.local_date) jScrollToEnd = true;
+    } else {
+      await idb.update('journal', row.id, (x) => x && x.state === 'pending'
+        ? Object.assign({}, x, { state: 'error', error: r.message }) : null);
+      if (tab === 'journal' && jDay === row.local_date) jScrollToEnd = true;   // keep Retry in view
+      if (tab === 'journal') await render().catch(() => {});
+      break;
+    }
+    if (tab === 'journal') await render().catch(() => {});
+  }
+}
+
+// Pull: list days, re-fetch only those whose message count or latest server_ts changed.
+async function pullJournal() {
+  const { data, error } = await sb.rpc('tb_journal_days', { p_limit: JOURNAL_DAYS_LIMIT });
+  if (error) throw error;
+  const local = new Map((await idb.all('jdays')).map((d) => [d.local_date, d]));
+  for (const d of data || []) {
+    const l = local.get(d.local_date);
+    if (l && l.server_last_ts === d.last_server_ts && l.server_messages === d.messages) continue;
+    const res = await sb.rpc('tb_journal_day', { p_local_date: d.local_date });
+    if (res.error) throw res.error;
+    const day = res.data;
+    const replied = new Set(day.messages.filter((m) => m.role === 'assistant').map((m) => m.reply_to));
+    await idb.merge('journal', day.messages, (m) => m.id, (mine, m) => {
+      if (m.role === 'assistant' || replied.has(m.id)) return Object.assign({}, mine || {}, m, { state: 'sent', error: null });
+      if (mine) return mine.server_ts === m.server_ts ? null : Object.assign({}, mine, { server_ts: m.server_ts });
+      // A turn stored on the server with no reply, unknown here: show it with Retry.
+      return Object.assign({}, m, { state: 'error', error: 'No reply was stored. Tap Retry.' });
+    });
+    await idb.update('jdays', d.local_date, (x) => {
+      const base = x || { local_date: d.local_date, suffix: '', suffix_dirty: 0 };
+      return Object.assign({}, base, {
+        suffix: base.suffix_dirty ? base.suffix : day.suffix,
+        server_last_ts: d.last_server_ts, server_messages: d.messages
+      });
+    });
+  }
+}
+
 async function sync() {
   if (syncing) { syncAgain = true; return; }
   syncing = true;
@@ -1052,8 +1459,11 @@ async function sync() {
       await meta.set('last_sync_error', { at: new Date().toISOString(), message: 'not signed in' });
       return;
     }
-    await push();
+    await push();                 // captures first, so tb-journal sees the day's latest notes
+    await pushSuffixes();
+    await sendJournal(s);
     await pull();
+    await pullJournal();
     syncState.phase = 'idle';
     await meta.set('last_sync_ok', new Date().toISOString());
     await meta.set('last_sync_error', null);
@@ -1159,7 +1569,55 @@ if ('serviceWorker' in navigator) {
 // ---------- wiring ----------
 
 const fail = (what) => (e) => { console.error(what, e); alert(what + ': ' + ((e && e.message) || e)); };
-$('capture').addEventListener('click', () => { if (!cap.open) openNew().catch(fail('Could not open capture')); });
+$('capture').addEventListener('click', () => {
+  if (cap.open) return;
+  if (tab === 'journal') {
+    if (jView === 'days') { jDay = todayLocal(); jFollowToday = true; jView = 'thread'; jScrollToEnd = true; render(); }
+    openJournalComposer(jDay).catch(fail('Could not open the journal'));
+  } else {
+    openNew().catch(fail('Could not open capture'));
+  }
+});
+async function showTab(t) {
+  if (cap.open) return;
+  setTab(t);
+  if (t === 'journal') jScrollToEnd = true;
+  await render();
+  await updateDraftNote();
+}
+$('tab-captures').addEventListener('click', () => { showTab('captures'); });
+$('tab-journal').addEventListener('click', () => { showTab('journal'); });
+$('j-days').addEventListener('click', async () => {
+  if (jView === 'thread') { jView = 'days'; await render(); await updateDraftNote(); }
+  else await openJournalDay(todayLocal());
+});
+$('j-daylist').addEventListener('click', (ev) => {
+  const row = ev.target.closest('.dayrow');
+  if (row) openJournalDay(row.dataset.day);
+});
+$('j-thread').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-retry]');
+  if (b) retryTurn(b.dataset.retry);
+});
+$('j-title').addEventListener('click', () => {
+  if (jView !== 'thread') return;
+  const dlg = $('suffix-dlg');
+  $('suffix-head').textContent = 'Title for ' + fmtDayLabel(jDay);
+  $('suffix-input').value = jSuffixes.get(jDay) || '';
+  dlg.dataset.day = jDay;
+  dlg.returnValue = '';
+  dlg.showModal();
+});
+$('suffix-dlg').addEventListener('close', async () => {
+  const dlg = $('suffix-dlg');
+  if (dlg.returnValue !== 'save') return;
+  const day = dlg.dataset.day;
+  const suffix = $('suffix-input').value.trim().slice(0, 200);
+  await idb.update('jdays', day, (l) => Object.assign({ local_date: day, server_last_ts: null, server_messages: null },
+    l || {}, { suffix, suffix_dirty: 1 }));
+  await render();
+  sync();
+});
 $('cap-close').addEventListener('click', () => { closeCapture('close').catch(fail('Close failed')); });
 $('cap-save').addEventListener('click', () => { saveCapture(); });
 $('cap-delete').addEventListener('click', () => { deleteCapture(); });
@@ -1182,7 +1640,10 @@ $('day-label').addEventListener('click', () => { followToday = true; render(); }
 $('export').addEventListener('click', () => { exportCaptures().catch(fail('Export failed')); });
 // "Today" rolls over at 0400 while the app sits open.
 setInterval(() => {
-  if (document.visibilityState === 'visible' && followToday && viewDay !== todayLocal()) render();
+  if (document.visibilityState !== 'visible') return;
+  if (tab === 'captures' ? followToday && viewDay !== todayLocal() : jFollowToday && jDay !== todayLocal()) {
+    render().then(updateDraftNote);
+  }
 }, 60000);
 $('status').addEventListener('click', () => { renderAuth(); $('settings').showModal(); });
 $('close').addEventListener('click', () => $('settings').close());
@@ -1198,7 +1659,7 @@ if (sb) sb.auth.onAuthStateChange(() => { renderAuth(); });
 (async function boot() {
   $('s-version').textContent = 'v' + APP_VERSION;
   await idb.open();
-  if ((await meta.get('schema_version')) === undefined) await meta.set('schema_version', 1);
+  if ((await meta.get('schema_version')) !== 2) await meta.set('schema_version', 2);
   // A reload while the capture screen was up leaves its history entry on top: pop it.
   popCaptureState();
   if (popWait) await popWait;

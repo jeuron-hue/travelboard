@@ -1,7 +1,7 @@
 # travelboard: specification
 
 Owner: Gary Chan. Repo: `jeuron-hue/travelboard` (public). Written 04/10/26.
-Status: M0 Foundation done 04/10/26. M1 Capture done 10/10/26. M2 awaits Gary's go.
+Status: M0 Foundation done 04/10/26. M1 Capture done 10/10/26. M2 Journal in build from 10/10/26.
 
 This file is the source of record for what travelboard is and how it is built. M0, M1 and M2 are specified in full because they ship before Bangkok (09/11/26). M3 to M8 are skeletons, to be expanded one at a time after Bangkok using the friction log from that trip.
 
@@ -100,7 +100,10 @@ travelboard/
   prompts/journal.md    journal system prompt, bundled into tb-journal at deploy
   supabase/
     migrations/         numbered SQL files, one per applied block
-    functions/tb-journal/index.ts
+    functions/tb-journal/
+      index.ts          the function
+      context.mjs       system prompt and thread building, shared with the checks
+      prompt.ts         generated from prompts/journal.md by bundle-prompt.cjs
   checks/
     static.cjs          parse inline scripts, validate manifest, sw cache list matches files
     smoke.sql           RPC and grant smoke tests
@@ -321,7 +324,13 @@ create index journal_owner_day on travel.journal_messages (owner, local_date, cr
 
 Day titles: an optional free-text suffix per day lives in `travel.journal_days (owner, local_date, suffix)`, primary key `(owner, local_date)`.
 
-RPCs: `tb_journal_day(p_local_date date)` returns the thread; `tb_journal_days(p_limit int)` lists days with message counts; `tb_journal_day_suffix(p_local_date, p_suffix)` sets the title suffix.
+Both tables get RLS enabled and no grants, like `travel.captures` (6.2). Migration 0003 is wrapped in a transaction.
+
+Thread order: each user turn by `(created_at, id)`, its assistant reply straight after it. The server, the function and the client all use this order, so a reply written later never lands after a newer user turn.
+
+Client RPCs (migration 0004): `tb_journal_day(p_local_date date)` returns the thread; `tb_journal_days(p_limit int)` lists days with message counts and the latest `server_ts`, so the client re-fetches only days that changed; `tb_journal_day_suffix(p_local_date, p_suffix)` sets the title suffix.
+
+Function RPCs (migration 0004, Gary's decision 10/10/26): `tb-journal` reaches the database as the signed-in user, never with a service key. It forwards the caller's JWT and calls two more `tb_` RPCs with the same guardrails as the rest (rule 3 of `CLAUDE.md`): `tb_journal_turn(p jsonb)` does steps 2 to 4 of 8.3 in one call (upsert the user turn, return any stored reply, else the thread up to that turn and the day's non-deleted captures); `tb_journal_reply(p jsonb)` does step 7 (store the reply once per user turn; a second insert for the same turn returns the stored one). Single user, so the client being able to call them too is accepted.
 
 ### 8.3 Edge Function `tb-journal`
 
@@ -350,6 +359,8 @@ The file is plain text in the repo so Gary edits it without touching code. The t
 - Composer is the same big textarea as capture, so Gboard voice works identically.
 - Send: write the user turn to IndexedDB with state `pending`, render it, call `tb-journal` if online. Offline, it stays `pending` and is sent by the sync engine on reconnect.
 - The day defaults to today's local date. Captures tagged `journal` appear inline in that day's thread as quoted context.
+- Detail agreed at build (10/10/26): Captures and Journal tabs sit in the header; the bottom button reads Capture or Write. A Days button lists every day with messages, captures or a title, plus today, newest first. Tapping the day title sets its suffix. The composer is the capture screen in a journal mode (Send instead of Save, no kind toggle), with a draft per day kept like capture drafts.
+- Sync order: push captures (so the function sees the latest notes), push day suffixes, send pending turns oldest first, pull captures, pull journal days whose message count or latest `server_ts` changed. A network failure or timeout (120 s) leaves a turn pending for the next sync; a 401 leaves it pending and asks to sign in; any other failure the function reports marks the turn "not sent" with its message and a Retry button, and stops that pass so later turns keep their order. A failed turn is never resent automatically.
 
 ### 8.6 Cost control
 
@@ -432,12 +443,14 @@ Each skeleton is expanded to full spec before its module starts.
 
 - `checks/static.cjs`: parses every inline script in the HTML files, validates `manifest.webmanifest`, checks the `sw.js` precache list against files on disk, fails on any `service_role` string in static files.
 - `checks/smoke.sql`: run through the Supabase connector after each migration. Anonymous calls rejected, idempotent upsert, last-write-wins ordering, pull cursor behaviour.
-- `checks/headless/`: `m1.test.cjs` drives `trip.html` in headless Chromium against `harness.cjs`, a mock of the `tb_*` RPCs that mirrors migration 0002. Run it before every release that touches the client or the sync engine. Its one dev dependency (Playwright, pinned in its `package.json`) is never committed or shipped; `static.cjs` scans these files for secrets like every other file.
+- `checks/headless/`: `m1.test.cjs` and `m2.test.cjs` drive `trip.html` in headless Chromium against `harness.cjs`, a mock of the `tb_*` RPCs that mirrors migrations 0002 and 0004 and of `tb-journal`. Run both before every release that touches the client or the sync engine. `fn.test.cjs` runs the real `tb-journal` under Deno against local fakes of PostgREST and the Anthropic API; run it before every deploy of the function. Its one dev dependency (Playwright, pinned in its `package.json`) is never committed or shipped; `static.cjs` scans these files for secrets like every other file.
 - `TESTS.md`: the acceptance lists above as numbered manual steps, run on the Pixel, results dated.
 - A module is done when its acceptance list passes. No mutation testing.
 
 ## 12. Change log
 
+- 10/10/26 4.2, 8.5, 11: M2 client details agreed at build (tabs, day list, title suffix, composer mode, sync order and failure handling) written into 8.5; `tb-journal` file layout in 4.2; `m2.test.cjs` and `fn.test.cjs` in 11. No change to the acceptance list.
+- 10/10/26 Status, 8.2: M2 started on Gary's go. 8.2 gains RLS on both journal tables, the canonical thread order, the latest `server_ts` per day in `tb_journal_days`, and two function RPCs (`tb_journal_turn`, `tb_journal_reply`) so `tb-journal` works as the signed-in user with no service key (Gary's decision; 8.3 named the steps but not how the function reaches the database).
 - 10/10/26 D5, D11, 4 diagram, 4.1, 8.3, 8.6, 8.7: Anthropic billing and key for M2 (Gary's decision before the M2 go). Journal key comes from its own Console workspace `travelboard` (USD 30 monthly limit, auto-reload off) in the org that holds weather's `weather` workspace (USD 70); both share the USD 100 monthly subscriber API credit. Edge Function secret renamed `ANTHROPIC_API_KEY` to `TB_ANTHROPIC_API_KEY`, because secrets are project-wide in weatherboard. Model string `claude-sonnet-5-5` confirmed in the API model list on 10/10/26 (weather project).
 - 10/10/26 4.2, 11: headless test harness committed under `checks/headless/` (Gary's decision), dev dependency pinned, no `node_modules` in the repo.
 - 10/10/26 Status: M1 done. D10: Gboard with the on-device English pack; SwiftKey voice needs a connection. 7.1 Capture: one tap to raise the keyboard after a shortcut launch. Section 10: offline voice and Wi-Fi auto-on rows. From the M1 Pixel run.

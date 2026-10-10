@@ -5,6 +5,68 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ---
 
+## M2 Journal (SPEC.md 8.7)
+
+**Status 10/10/26: built and deployed; automated checks pass; device steps below are for Gary.** Items 4 and 5 pass; items 1 to 3 need the Pixel.
+
+### Automated results, 10/10/26
+
+| Check | Result | Evidence |
+|---|---|---|
+| Migration 0003 (`travel.journal_messages`, `travel.journal_days`) | Applied | Supabase migration `tb_0003_journal_tables`. Catalogue diff: 13 new objects, all in `travel` (2 tables with RLS on and no grants, 4 indexes including `journal_one_reply`, 7 constraints). Nothing else added, removed or changed. |
+| Migration 0004 (journal RPCs) | Applied | Supabase migration `tb_0004_journal_rpcs`. Catalogue diff: 5 new functions, all `public.tb_journal_*`. Nothing else changed. |
+| `checks/smoke.sql` | PASS, 53 of 53 | 24 M0 tests plus J1 to J12: anon denied on all 5 journal functions; no direct table reads; definer, `search_path` and grants on all 5; a new turn returns the thread and only live captures; a retried turn leaves one unchanged row; a reply is stored once and a second returns the first; a retried turn with a reply returns it with no context; thread order (a turn sent late sorts by its own time; each reply right after its turn); day list and trimmed suffix; validation; a reply cannot answer a reply; token sum by day. One transaction, rolled back. |
+| `checks/static.cjs` | PASS, 64 of 64 | Adds: no Anthropic key anywhere in the repo; `prompt.ts` current with `prompts/journal.md` (fails when stale, checked); key read only from `TB_ANTHROPIC_API_KEY`; no service key in the function; model `claude-sonnet-5-5`, `max_tokens` 1500, 40-turn cap. `CACHE_VERSION` 4 equals `APP_VERSION` 4. |
+| `checks/headless/fn.test.cjs` | PASS, 25 of 25 | The real `index.ts` under Deno 2.9.4 against local fakes of PostgREST and the Anthropic API. Request to Claude: model `claude-sonnet-5-5`, `max_tokens` 1500, thinking `between_tools`, effort low, key from `TB_ANTHROPIC_API_KEY`; system prompt is `prompts/journal.md` then the day and its live captures with local times and coordinates, deleted captures and other days left out. Retry of an answered turn: stored reply, no second API call. Anthropic 401 gives `anthropic_auth` with a message naming the secret, the turn kept and no reply stored. Refusal, missing secret, bad JWT, bad body. Two failed turns join into one user message when the next goes through. A 51-message thread is capped to 40. Also `deno check` clean. |
+| `checks/headless/m2.test.cjs` | PASS, 62 of 62 | Below. |
+| `checks/headless/m1.test.cjs` on v4 | PASS, 103 of 103 | M1 capture unchanged by M2. |
+| `tb-journal` deployed | Version 1, `verify_jwt` on | Deployed source read back and matches the repo. Not yet called with a real key: device step 2 is the key check. |
+
+Headless M2 groups (`m2.test.cjs`, phone in Asia/Bangkok on a fake clock unless noted):
+- Shell: v4; IndexedDB version 2 with `journal` and `jdays`; opens on Captures; Journal tab swaps the day bar for the journal bar, title "Mon 09/11/26", bottom button reads Write.
+- Composer and drafts: focused, Send, no kind toggle; draft `journal:2026-11-09` written on input; a reload mid-typing reopens it on the Journal tab; Close keeps it ("draft kept" on Write, not on Capture); Android back closes it.
+- Send (acceptance 1 shape): one call with `local_date`, `message_id`, `content`, `created_at`; the reply stored once, linked by `reply_to`; Claude saw both of the day's captures because captures are pushed first; the journal capture shows inline as a quote before the turn; second turn sends user, assistant, user.
+- Airplane mode (acceptance 2): the turn saves as pending, pill "offline, 1 queued", nothing sent; on reconnect it goes once and gets exactly one reply.
+- Lost response (acceptance 3): the function stored a reply but the phone never heard; the next sync resends and gets the stored reply with no second Claude call.
+- Errors: a function error shows "not sent", the server's message and Retry; not counted as queued; never resent automatically; Retry works. With two queued turns the first failing stops the pass; after Retry both go in order and Claude sees turn one and its reply before turn two.
+- Days and titles: day list newest first with message and capture counts; a captures-only day opens with a hint naming its capture; the title suffix shows, reaches the server and clears its dirty flag; Cancel changes nothing; Write on an older day writes into that day; Today returns.
+- 0400 rule: at 0130 the journal's today is still the previous day and a turn belongs to it; at 0430 it rolls.
+- Second device in Asia/Singapore: pulls every row, replied turns as sent, a server turn with no reply as "not sent" with Retry, the suffix, and the same order as the server; unchanged days are not fetched again; Retry on the orphan gets a reply, which the first phone then pulls.
+- IndexedDB upgrade from an M1 v1 database keeps the capture, the draft and meta; the queued M1 capture still syncs.
+- No session: a turn saves as pending, pill "sign in, 1 queued". A 401 from the function leaves the turn pending and the pill asks to sign in.
+
+Run from the repo root after `npm install` in `checks/headless/` and `npx playwright install chromium`: `node checks/headless/m1.test.cjs`, `node checks/headless/m2.test.cjs`, and with Deno on PATH (or `DENO=/path/to/deno`) `node checks/headless/fn.test.cjs`.
+
+Model settings: thinking is off (`between_tools`, Sonnet 5.5's lowest setting) and effort is low, so the 1500-token cap goes to the reply and replies stay conversational. Server-side refusal fallback is not enabled: it only retries cyber and frontier-AI declines, which a travel journal will not trigger, and it needs a beta header. A refusal shows as "not sent" with Retry.
+
+### Acceptance status
+
+| # | Item | Status |
+|---|---|---|
+| 1 | One real evening conversation in which Claude refers to at least two of that day's captures by content | Open: device step 7 |
+| 2 | A message sent in airplane mode queues, sends on reconnect, and produces exactly one reply | Open: device step 3 (headless K5 PASS) |
+| 3 | Retrying a message that already has a reply returns the stored reply without a second API call (token rows) | Open: device step 4 (headless K6, smoke J6 and J7, fn F5 PASS) |
+| 4 | The Anthropic key appears nowhere in the repo or client | PASS 10/10/26. `static.cjs` scans every file for `sk-ant-` keys; the key is read only from `TB_ANTHROPIC_API_KEY` inside the function, and no response carries it. |
+| 5 | Spend limit set on the `travelboard` workspace (USD 30, auto-reload off), and the key in `TB_ANTHROPIC_API_KEY` belongs to it | PASS 10/10/26 (Gary, Console: limit USD 30, auto-reload off, email at USD 20; key created in that workspace and set as the secret). Device step 2 confirms the key works. |
+
+### Device steps (Pixel, Chrome), v4
+
+Report back the step number and what you saw for any step that does not match. Claude checks the server side through the Supabase connector.
+
+1. **Update.** Open `https://jeuron-hue.github.io/travelboard/sw.js` in Chrome: it should read `const CACHE_VERSION = 4;`. Open travelboard from the home-screen icon. Tap "Update ready, tap to reload" when it appears (or swipe the app away and reopen). Tap the status pill: Version v4. Close. The header now has two tabs, Captures and Journal. On Captures, step back a day or two: your M1 captures should all still be there.
+2. **First call, the key check.** Make sure you have signal. Tap Journal. The bar reads today's date, the bottom button reads Write. Tap Write, type `Key check. Reply in one sentence.`, tap Send. Your message appears with "sending" and "Claude is replying" below it; a reply should follow within about 15 s. If instead it shows "not sent" with a message, stop and send Claude the exact message. A message containing "(401)" means Anthropic rejected the key.
+3. **Airplane mode (item 2).** Turn airplane mode on and check the pill reads "offline". In Journal, Write `Airplane test`, Send. It shows "queued" and the pill reads "offline, 1 queued". Turn airplane mode off. Within about 35 s it should change to a reply, with no tap from you. Note the time.
+4. **Lost reply (item 3).** With signal, Write `Retry test, reply in one sentence`, Send, and as soon as "Claude is replying" shows, turn airplane mode on. Wait 30 s, then turn airplane mode off. The reply should appear once. Note the time. Claude checks: one stored reply for that message and one set of token counts, though the function ran twice.
+5. **Day title.** Tap the date in the journal bar, type `Singapore test`, Save. The bar reads "Sat 10/10/26 Singapore test" (with that day's date). Tap Days: the list shows today with its message and capture counts. Tap another day that has captures: its thread opens, showing any journal captures as quotes, or a hint naming how many captures it has. Tap Days, then Today.
+6. **Capture still works.** Tap Captures, make a capture `M2 regression` in airplane mode, turn airplane mode off, and check it syncs as in M1.
+7. **A real evening (item 1).** On a normal day, make at least three captures as you go (one switched to journal). In the evening, open Journal and have a real conversation of a few turns, by voice or typing. Claude's replies should pick up at least two of the day's captures by what they say, without being asked. Tell Claude the date; Claude reads the thread and checks which captures it used. Use the Retry button if anything shows "not sent", and report it.
+
+Notes for the device run:
+- Journalling works online only; a turn written offline waits as "queued" and goes on reconnect. Captures stay offline-first as before.
+- Cost: each reply is one Sonnet 5.5 call capped at 1500 output tokens. Token counts per reply are in `travel.journal_messages`; Claude can total them for any period.
+
+---
+
 ## M1 Capture (SPEC.md 7.3)
 
 **Status 10/10/26: all nine acceptance items PASS on the Pixel. `checks/static.cjs` and `checks/smoke.sql` pass. M1 done.** Device results and findings are at the end of this section.

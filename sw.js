@@ -5,7 +5,7 @@
    to reload" and only a tap sends SKIP_WAITING. Never skipWaiting automatically.
    Bump CACHE_VERSION on every release, together with APP_VERSION in trip.html. */
 
-const CACHE_VERSION = 3;
+const CACHE_VERSION = 4;
 const CACHE = 'tb-shell-v' + CACHE_VERSION;
 
 const PRECACHE = [

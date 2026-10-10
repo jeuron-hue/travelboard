@@ -6,6 +6,9 @@
 // - sw.js parses; its precache list matches the files on disk; cache name tb-shell-v<N>
 //   matches APP_VERSION in trip.html
 // - no service_role key or string, and no sb_secret_ key, anywhere it could ship
+// - no Anthropic API key anywhere in the repo (SPEC.md 8.7 item 4)
+// - tb-journal: prompt.ts is current with prompts/journal.md; the function reads its key
+//   only from TB_ANTHROPIC_API_KEY and uses no service key
 'use strict';
 
 const fs = require('fs');
@@ -129,6 +132,26 @@ for (const f of walk('')) {
   }
 }
 check(secretHits === 0, 'secrets: no service_role or sb_secret_ material');
+const anthropicHits = walk('').filter((f) => textLike(f) && /sk-ant-[A-Za-z0-9_-]{8,}/.test(read(f)));
+check(anthropicHits.length === 0, `secrets: no Anthropic API key in the repo${anthropicHits.length ? ' (' + anthropicHits.join(', ') + ')' : ''}`);
+
+// ---------- tb-journal Edge Function ----------
+const FN = 'supabase/functions/tb-journal';
+for (const f of ['index.ts', 'prompt.ts', 'context.mjs', 'bundle-prompt.cjs']) check(exists(`${FN}/${f}`), `tb-journal: ${f} exists`);
+check(exists('prompts/journal.md'), 'tb-journal: prompts/journal.md exists');
+if (exists(`${FN}/prompt.ts`) && exists('prompts/journal.md')) {
+  const m = read(`${FN}/prompt.ts`).match(/export const JOURNAL_PROMPT = (".*");\n/s);
+  let ok = false;
+  try { ok = !!m && JSON.parse(m[1]) === read('prompts/journal.md'); } catch (e) { /* not current */ }
+  check(ok, 'tb-journal: prompt.ts matches prompts/journal.md (run bundle-prompt.cjs after editing the prompt)');
+}
+if (exists(`${FN}/index.ts`)) {
+  const fn = read(`${FN}/index.ts`);
+  check(/Deno\.env\.get\('TB_ANTHROPIC_API_KEY'\)/.test(fn) && !/Deno\.env\.get\('ANTHROPIC_API_KEY'\)/.test(fn), 'tb-journal: key read only from TB_ANTHROPIC_API_KEY');
+  check(!/service_role|SERVICE_ROLE|SECRET_KEY/i.test(fn), 'tb-journal: no service key');
+  check(/const MODEL = 'claude-sonnet-5-5';/.test(fn) && /const MAX_TOKENS = 1500;/.test(fn), 'tb-journal: model claude-sonnet-5-5, max_tokens 1500');
+}
+if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(`${FN}/context.mjs`)), 'tb-journal: 40-turn cap');
 
 // ---------- report ----------
 for (const p of passes) console.log('PASS ' + p);
