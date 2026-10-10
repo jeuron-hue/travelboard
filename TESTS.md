@@ -7,7 +7,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ## M2 Journal (SPEC.md 8.7)
 
-**Status 10/10/26: built and deployed; automated checks pass; device steps below are for Gary.** Items 4 and 5 pass; items 1 to 3 need the Pixel.
+**Status 10/10/26: built and deployed; automated checks pass; device steps 1 to 6 PASS on the Pixel.** Items 2 to 5 pass; item 1 (a real evening conversation, device step 7) is open.
 
 ### Automated results, 10/10/26
 
@@ -45,8 +45,8 @@ Model settings: thinking is off (`between_tools`, Sonnet 5.5's lowest setting) a
 | # | Item | Status |
 |---|---|---|
 | 1 | One real evening conversation in which Claude refers to at least two of that day's captures by content | Open: device step 7 |
-| 2 | A message sent in airplane mode queues, sends on reconnect, and produces exactly one reply | Open: device step 3 (headless K5 PASS) |
-| 3 | Retrying a message that already has a reply returns the stored reply without a second API call (token rows) | Open: device step 4 (headless K6, smoke J6 and J7, fn F5 PASS) |
+| 2 | A message sent in airplane mode queues, sends on reconnect, and produces exactly one reply | PASS 10/10/26 (Pixel step 3) |
+| 3 | Retrying a message that already has a reply returns the stored reply without a second API call (token rows) | PASS 10/10/26 (Pixel step 4: two function calls, one Claude call, one reply row) |
 | 4 | The Anthropic key appears nowhere in the repo or client | PASS 10/10/26. `static.cjs` scans every file for `sk-ant-` keys; the key is read only from `TB_ANTHROPIC_API_KEY` inside the function, and no response carries it. |
 | 5 | Spend limit set on the `travelboard` workspace (USD 30, auto-reload off), and the key in `TB_ANTHROPIC_API_KEY` belongs to it | PASS 10/10/26 (Gary, Console: limit USD 30, auto-reload off, email at USD 20; key created in that workspace and set as the secret). Device step 2 confirms the key works. |
 
@@ -65,6 +65,20 @@ Report back the step number and what you saw for any step that does not match. C
 Notes for the device run:
 - Journalling works online only; a turn written offline waits as "queued" and goes on reconnect. Captures stay offline-first as before.
 - Cost: each reply is one Sonnet 5.5 call capped at 1500 output tokens. Token counts per reply are in `travel.journal_messages`; Claude can total them for any period.
+
+### Device results, v4 (Pixel, Gary), 10/10/26
+
+Checked against `travel.journal_messages`, `travel.journal_days` and the Edge Function logs through the Supabase connector. Times SGT.
+
+| Step | Result |
+|---|---|
+| 1 | PASS. v4 running; M1 captures kept through the IndexedDB upgrade. |
+| 2 | PASS. Key check: turn stored 1611:37, reply 1611:40 from `claude-sonnet-5-5` (2101 input, 127 output tokens). The key in `TB_ANTHROPIC_API_KEY` works; no 401. |
+| 3 | PASS. "Airplane test" written 1613:49 in airplane mode, landed 1614:07 on reconnect, one reply 1614:11 (2237 in, 208 out). |
+| 4 | PASS. "Retry test" sent 1615:33. Wi-Fi came back during the step (Gary). Function log: POST at 1615:36 with the Claude call (2462 in, 38 out), then a second POST at 1615:43 with no Claude call (the stored reply returned). One reply row for that turn. |
+| 5 | PASS. Suffix "Singapore test" on 2026-10-10 reached the server 1619:06. Day list and other days checked by Gary. |
+| 6 | PASS. Capture in airplane mode synced as in M1 (Gary). |
+| 7 | Open: a real evening conversation. |
 
 ---
 
