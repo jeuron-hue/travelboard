@@ -13,6 +13,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 |---|---|---|
 | Migration 0005 | Applied, file unchanged | Supabase migration `tb_0005_photo_fields`. Snapshot before = after 0004 (REST 517, `8726dc225828`). Diff: `travel.captures` and `travel.journal_messages` gain their columns, 4 new photo constraints, new bodies for `tb_capture_upsert`, `tb_journal_turn`, `tb_journal_reply` (ACL still `postgres, authenticated`). REST unchanged; rows intact (34 captures, 14 messages). |
 | Migration 0006 | Applied, file unchanged | `tb_0006_tb_photos_bucket`. Diff: bucket `tb-photos` (private, 2097152, `{image/jpeg}`) and `tb_photos_select`, `_insert`, `_update` (authenticated, own folder). REST unchanged, the 36 `travel` and `public` objects unchanged. |
+| Deploy v7 | PASS | `main` fast-forwarded to `152ce96` on Gary's yes. Live `sw.js` reads `const CACHE_VERSION = 7;` (Last-Modified 23/10/26 2359 hrs SGT), fetched through Apify. |
 | `tb-journal` v2 | Deployed, version 2, `verify_jwt` on | Same `index.ts`, `context.mjs`, `prompt.ts` as the repo (`fn.test.cjs` 35 of 35). Works with the v6 client too: same request; a day with no photos sends no images. |
 | `checks/smoke.sql` | PASS, 71 of 71 | 53 earlier tests plus P1 to P10 (photo fields, `photo_path` rule, Remove, `tb_journal_turn` and `tb_journal_reply`, bucket, policies, own-folder read and write, second synthetic uid, anon, no delete). One transaction, rolled back. |
 
@@ -58,7 +59,9 @@ Item 8 (anonymous and other-user access refused) is checked by Claude: the smoke
 
 ## Move to own project (SPEC.md 6.8)
 
-**Status 23/10/26: steps 2 to 6 done; step 8 PASSES (Pixel and keep-alive, 2347 hrs). The move is done. Step 7 (weatherboard clean-up) waits on Gary's yes.**
+**Status 24/10/26: steps 2 to 6 done; step 8 PASSES (Pixel and keep-alive, 2347 hrs). The move is done. Step 7: Gary's yes 24/10/26; not yet run (below).**
+
+Step 7, 24/10/26. Read-only inventory matched 6.8 exactly (3 tables with 33, 12 and 1 rows, 7 indexes, 11 constraints, 9 `tb_` functions, 4 history rows, 1 auth user; weatherboard's other 759 catalogue objects hash `1fc8e6b3fc48`, 12 cron jobs, bucket `radar`, 7 Edge Functions of its own plus `tb-journal`). The drop is `supabase/cleanup/weatherboard_6.8_step7.sql`: one transaction, no CASCADE, row-count guards. Sent three times through the Supabase connector; each call timed out at 60 s (the third with a 5 s lock timeout, so not a lock wait), and each time a read-only check showed nothing changed and no session left behind. Most likely the connector's confirmation for destructive statements went unanswered.
 
 ### Automated results, 23/10/26
 
