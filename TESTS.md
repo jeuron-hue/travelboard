@@ -7,7 +7,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ## M1.1 Photo capture (SPEC.md 7A)
 
-**Status 24/10/26: move passed; 0005 and 0006 applied to `travelboard` and `checks/smoke.sql` passes 71 of 71. `tb-journal` v2 and client v7 next. Cut-off on the Pixel 27/10/26.**
+**Status 24/10/26: 0005, 0006 and 0007 applied; `checks/smoke.sql` 74 of 74; `tb-journal` v3 and client v8 ("Claude sees this" switch, SPEC change 009b70f) live. v7 shipped first and was not run on the Pixel; the device steps below are for v8. Cut-off on the Pixel 27/10/26.**
 
 | Applied, 24/10/26 | Result | Evidence |
 |---|---|---|
@@ -15,6 +15,10 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 | Migration 0006 | Applied, file unchanged | `tb_0006_tb_photos_bucket`. Diff: bucket `tb-photos` (private, 2097152, `{image/jpeg}`) and `tb_photos_select`, `_insert`, `_update` (authenticated, own folder). REST unchanged, the 36 `travel` and `public` objects unchanged. |
 | Deploy v7 | PASS | `main` fast-forwarded to `152ce96` on Gary's yes. Live `sw.js` reads `const CACHE_VERSION = 7;` (Last-Modified 23/10/26 2359 hrs SGT), fetched through Apify. |
 | `tb-journal` v2 | Deployed, version 2, `verify_jwt` on | Same `index.ts`, `context.mjs`, `prompt.ts` as the repo (`fn.test.cjs` 35 of 35). Works with the v6 client too: same request; a day with no photos sends no images. |
+| Migration 0007 | Applied, file unchanged | `tb_0007_photo_to_claude`. Snapshot before = after 0006. Diff: `travel.captures` gains `photo_to_claude` (boolean, not null, default true), new bodies for `tb_capture_upsert` and `tb_journal_turn` (ACL still `postgres, authenticated`). Object count (36), REST, policies and bucket unchanged; all 34 rows switched on. Build detail: a row pushed without the field (an app from before v8) keeps the stored value on update and is true on insert, so an older app never switches a photo back on. |
+| `checks/smoke.sql` after 0007 | PASS, 74 of 74 | Adds P11 (default true, false stored and pulled), P12 (`tb_journal_turn` returns `photo_path` for a switched-on photo, none for a switched-off one, both captures listed: item 11), P13 (a row without the field keeps the switch; explicit true turns it back on). |
+| `tb-journal` v3 | Deployed, version 3, `verify_jwt` on | At most 30 switched-on photos per day; a switched-off photo is not fetched, sent, listed or mentioned. `fn.test.cjs` 37 of 37: F13 has 31 switched-on photos (30 sent as images, the oldest listed "not shown") and 2 switched-off ones (not fetched, no image, no photo attribute, their text still listed); F15 a missing file listed "could not be loaded". |
+| Client v8 | Built | Switch on the capture and edit screens, shown only with a photo, default on; kept in the draft, on the capture row, pushed, exported; an edit of the switch bumps `updated_at`; Share omits "with a photo" for a switched-off photo. `m11.test.cjs` 54 of 54 (P18 to P21 for the switch, including a journal turn that sends every switched-on photo and not the switched-off one), `m1` 103 of 103, `m2` 80 of 80, `static.cjs` 74 of 74. |
 | `checks/smoke.sql` | PASS, 71 of 71 | 53 earlier tests plus P1 to P10 (photo fields, `photo_path` rule, Remove, `tb_journal_turn` and `tb_journal_reply`, bucket, policies, own-folder read and write, second synthetic uid, anon, no delete). One transaction, rolled back. |
 
 ### Automated results, 24/10/26 (before applying)
@@ -39,19 +43,21 @@ Headless M1.1 groups (`m11.test.cjs`, Storage mock with the own-folder rule, 2 M
 - Export carries the four photo fields, no image data. The journal composer has no Photo button.
 - A second phone (reinstall) downloads every photo once, keeps them, shows thumbnails, and does not download again.
 
-### Device steps (Pixel, Chrome), v7: SPEC.md 7A.6
+### Device steps (Pixel, Chrome), v8: SPEC.md 7A.6
 
-To be run once v7 is live (Claude confirms `const CACHE_VERSION = 7;`). Report the step number and what you saw for any step that does not match.
+To be run once v8 is live (Claude confirms `const CACHE_VERSION = 8;`). Report the step number and what you saw for any step that does not match.
 
-1. **Update.** Open `https://jeuron-hue.github.io/travelboard/sw.js`: it should read `const CACHE_VERSION = 7;`. Update the app as before; Version v7. Nothing else changes on screen until you open Capture.
-2. **Camera photo offline (item 1).** Turn airplane mode on and check the pill reads "offline". Tap Capture. Next to note/journal there is now a Photo button. Tap it: Android offers Camera and your gallery apps. Choose Camera and photograph something with visible detail the text will not mention (a sign, a menu, a shelf). Back in travelboard the photo shows above the text, with its size (about 1280 x 960) and Remove. Type `Photo test 1`, Save. The row shows a small thumbnail and a yellow "queued" chip; the pill counts the capture and the photo. Turn airplane mode off; within about 35 s everything reads "synced". Note the time. Claude checks the file in `tb-photos` (at most 1280 px, under 500 KB) and the row's photo fields.
+1. **Update.** Open `https://jeuron-hue.github.io/travelboard/sw.js`: it should read `const CACHE_VERSION = 8;`. Update the app as before; Version v8. Nothing else changes on screen until you open Capture.
+2. **Camera photo offline (item 1).** Turn airplane mode on and check the pill reads "offline". Tap Capture. Next to note/journal there is now a Photo button. Tap it: Android offers Camera and your gallery apps. Choose Camera and photograph something with visible detail the text will not mention (a sign, a menu, a shelf). Back in travelboard the photo shows above the text, with its size (about 1280 x 960), a ticked "Claude sees this" box and Remove. Type `Photo test 1`, Save. The row shows a small thumbnail and a yellow "queued" chip; the pill counts the capture and the photo. Turn airplane mode off; within about 35 s everything reads "synced". Note the time. Claude checks the file in `tb-photos` (at most 1280 px, under 500 KB) and the row's photo fields.
 3. **Gallery photo (item 2).** Capture, Photo, pick an existing photo from Google Photos or Files, type `Photo test 2`, Save. It syncs the same way.
 4. **Photo only (item 3).** Capture, Photo, take a photo, and Save with no text. The row reads "(photo)" and syncs.
-5. **Force-close with a photo (item 4).** Capture, Photo, take a photo, type `Photo draft`, and do not Save. Swipe travelboard away from recents. Reopen it: the capture screen comes back with the text and the photo. Save. If Android closes travelboard while the camera is open and the photo is lost on return, report it: that is the phone reclaiming memory, and the step is then repeated.
-6. **Edit.** Tap the `Photo test 2` row: the full photo shows. Tap Replace, pick another photo, Save. Then open `Photo test 1`, tap Remove, Save: its thumbnail goes, the text stays.
-7. **Claude sees the photo (item 6).** With signal, in Journal, Write: `What is in the first photo I took today?` Claude should describe something visible in it that the capture text does not say. Report what it said.
-8. **Cache (item 7).** Within the hour, send one more journal message the same evening. Claude checks `cache_read_tokens` is above zero on that reply.
-9. **Failed upload (item 5)** is covered headless; on the Pixel, note it if a photo ever stays "queued" after its text synced, and whether it caught up later.
+5. **Force-close with a photo (item 4).** Capture, Photo, take a photo, type `Photo draft`, untick "Claude sees this", and do not Save. Swipe travelboard away from recents. Reopen it: the capture screen comes back with the text, the photo, and the box still unticked. Save. If Android closes travelboard while the camera is open and the photo is lost on return, report it: that is the phone reclaiming memory, and the step is then repeated.
+6. **The switch (item 11).** Tap the `Photo draft` row: the box is unticked. Close. Capture again, Photo, photograph something you would recognise (a book cover, a label), type `Private photo`, untick "Claude sees this", Save, and wait for "synced". Tap the row: still unticked. Claude checks both rows have `photo_to_claude` false on the server.
+7. **Edit.** Tap the `Photo test 2` row: the full photo shows. Tap Replace, pick another photo, Save. Then open `Photo test 1`, tap Remove, Save: its thumbnail goes, the text stays.
+8. **Claude sees the photo (items 6 and 11).** With signal, in Journal, Write: `Describe each photo I took today.` Claude should describe something visible in the switched-on photos that their captures' text does not say, and say nothing about the `Private photo` picture or the `Photo draft` picture (their text may come up, as text). Report what it said. Claude checks in the function log how many photos went in.
+9. **Cache (item 7).** Within the hour, send one more journal message the same evening. Claude checks `cache_read_tokens` is above zero on that reply.
+10. **Switch back on.** Open `Private photo`, tick "Claude sees this", Save, wait for "synced". Send one more journal message asking about it: this time Claude can describe it. (Changing a switch rewrites the photo cache once, so this reply's `cache_read_tokens` may be zero.)
+11. **Failed upload (item 5)** is covered headless; on the Pixel, note it if a photo ever stays "queued" after its text synced, and whether it caught up later.
 
 Item 8 (anonymous and other-user access refused) is checked by Claude: the smoke tests, and an anonymous REST request for one of your photo paths from outside this sandbox.
 
