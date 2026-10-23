@@ -1,7 +1,8 @@
 -- travelboard smoke tests (SPEC.md 11). Run through the Supabase connector as postgres.
 -- Tests 1 to 11 cover M0 (migrations 0001, 0002); J1 to J12 cover M2 (migrations 0003, 0004);
 -- P1 to P10 cover M1.1 (migrations 0005, 0006: photo fields, bucket tb-photos and its policies),
--- including a second synthetic uid that exists only in the request claims.
+-- including a second synthetic uid that exists only in the request claims; P11 to P13 cover the
+-- "Claude sees this" switch (migration 0007, SPEC.md 7A.6 item 11).
 -- Everything runs in one transaction that is rolled back: no rows are left behind.
 -- Acts as Gary's auth user (the single user, gary@travelboard.local) by setting
 -- role and request.jwt.claims the way PostgREST does.
@@ -495,6 +496,47 @@ begin
     reset role;
     r := r || jsonb_build_object('test', 'P10 anon cannot upload', 'pass', v_state = '42501', 'detail', v_state || ' ' || sqlerrm);
   end;
+
+  -- P11 to P13: "Claude sees this" (migration 0007). Test day 2000-01-03.
+  reset role;
+  set local role authenticated;
+  perform set_config('request.jwt.claims', v_claims, true);
+  perform public.tb_captures_upsert(jsonb_build_array(
+    jsonb_build_object('id', '00000000-0000-4000-8000-0000000000f1', 'body', 'switch on by default', 'kind', 'note',
+      'captured_at', '2000-01-03 06:00:00+00', 'tz', 'Asia/Bangkok', 'local_date', '2000-01-03', 'updated_at', '2000-01-03 06:00:00+00',
+      'photo_path', v_uid::text || '/00000000-0000-4000-8000-0000000000f1.jpg', 'photo_w', 1280, 'photo_h', 960, 'photo_bytes', 1000),
+    jsonb_build_object('id', '00000000-0000-4000-8000-0000000000f2', 'body', 'switched off', 'kind', 'note',
+      'captured_at', '2000-01-03 07:00:00+00', 'tz', 'Asia/Bangkok', 'local_date', '2000-01-03', 'updated_at', '2000-01-03 07:00:00+00',
+      'photo_path', v_uid::text || '/00000000-0000-4000-8000-0000000000f2.jpg', 'photo_w', 1280, 'photo_h', 960, 'photo_bytes', 1000,
+      'photo_to_claude', false)));
+  select jsonb_object_agg(e->>'id', e->'photo_to_claude') into v
+    from jsonb_array_elements((public.tb_captures_since(null, null))->'rows') e where e->>'local_date' = '2000-01-03';
+  r := r || jsonb_build_object('test', 'P11 photo_to_claude defaults to true and stores false; pulled with the row',
+         'pass', v->>'00000000-0000-4000-8000-0000000000f1' = 'true' and v->>'00000000-0000-4000-8000-0000000000f2' = 'false', 'detail', v);
+  v := public.tb_journal_turn(jsonb_build_object('message_id', '00000000-0000-4000-8000-0000000000e2',
+         'local_date', '2000-01-03', 'content', 'switch turn', 'created_at', '2000-01-03 12:00:00+00'));
+  r := r || jsonb_build_object('test', 'P12 tb_journal_turn: photo_path for the switched-on photo, none for the switched-off one, both captures listed',
+         'pass', jsonb_array_length(v->'captures') = 2
+                 and v->'captures'->0->>'photo_path' = v_uid::text || '/00000000-0000-4000-8000-0000000000f1.jpg'
+                 and v->'captures'->1->'photo_path' = 'null'::jsonb and v->'captures'->1->>'body' = 'switched off'
+                 and not (v->'captures'->1 ? 'photo_to_claude'), 'detail', v->'captures');
+  -- an app from before the switch edits the switched-off row: the switch stays off
+  perform public.tb_capture_upsert(jsonb_build_object('id', '00000000-0000-4000-8000-0000000000f2', 'body', 'edited by an older app',
+    'kind', 'note', 'captured_at', '2000-01-03 07:00:00+00', 'tz', 'Asia/Bangkok', 'local_date', '2000-01-03',
+    'updated_at', '2000-01-03 08:00:00+00', 'photo_path', v_uid::text || '/00000000-0000-4000-8000-0000000000f2.jpg',
+    'photo_w', 1280, 'photo_h', 960, 'photo_bytes', 1000));
+  reset role;
+  select count(*) into v_n from travel.captures where id = '00000000-0000-4000-8000-0000000000f2' and not photo_to_claude and body = 'edited by an older app';
+  set local role authenticated;
+  perform set_config('request.jwt.claims', v_claims, true);
+  perform public.tb_capture_upsert(jsonb_build_object('id', '00000000-0000-4000-8000-0000000000f2', 'body', 'switched back on',
+    'kind', 'note', 'captured_at', '2000-01-03 07:00:00+00', 'tz', 'Asia/Bangkok', 'local_date', '2000-01-03',
+    'updated_at', '2000-01-03 09:00:00+00', 'photo_path', v_uid::text || '/00000000-0000-4000-8000-0000000000f2.jpg',
+    'photo_w', 1280, 'photo_h', 960, 'photo_bytes', 1000, 'photo_to_claude', true));
+  reset role;
+  select v_n + count(*) into v_n from travel.captures where id = '00000000-0000-4000-8000-0000000000f2' and photo_to_claude;
+  r := r || jsonb_build_object('test', 'P13 a row without the field keeps the stored switch; an explicit true turns it back on',
+         'pass', v_n = 2, 'detail', v_n);
 
   reset role;
   perform set_config('smoke.results', r::text, true);
