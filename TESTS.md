@@ -5,6 +5,45 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ---
 
+## Move to own project (SPEC.md 6.8)
+
+**Status 23/10/26: steps 2 to 6 done. Step 8 waits on the Pixel run below. Step 7 (weatherboard clean-up) waits on step 8 and Gary's yes.**
+
+### Automated results, 23/10/26
+
+Project `travelboard` (`nnnnonspfljdkrxstslw`). Catalogue snapshots used `checks/catalogue.sql` in compact form: one hash over every object outside `travel`, `public.*`, policies and buckets ("REST"), plus each of those listed by name.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Baseline before 0001 | Recorded | REST 511 objects, hash `d645cb03eb64`. In `public`: only Supabase's `rls_auto_enable()` (the "automatic RLS" setting). No `travel`, no buckets, no pg_cron. One auth user, `gary@travelboard.local`, confirmed. |
+| Migration 0001 | Applied, file unchanged | Supabase migration `tb_0001_travel_schema_captures`. New: schema `travel` (ACL owner only), `travel.captures` (RLS on, ACL null, no policies), 3 indexes, 4 constraints. REST went 511 to 517: the 6 extra are Supabase's own migration history (`supabase_migrations` schema, `schema_migrations` table, 2 indexes, 2 constraints) created by the first applied migration. Nothing else. |
+| Migration 0002 | Applied, file unchanged | `tb_0002_rpcs`. New: the 4 `public.tb_*` functions, each definer, `search_path=travel, public`, ACL `postgres, authenticated` only. REST unchanged (517, `8726dc225828`). |
+| Migration 0003 | Applied, file unchanged | `tb_0003_journal_tables`. New: 13 objects in `travel` (2 tables RLS on, no grants; 4 indexes; 7 constraints). REST unchanged. |
+| Migration 0004 | Applied, file unchanged | `tb_0004_journal_rpcs`. New: 5 `public.tb_journal_*` functions, same guardrails. REST unchanged; 0001 to 0003 objects unchanged. |
+| Same schema as weatherboard | PASS | md5 of all 9 function bodies and of all 3 table definitions (columns, types, not null, defaults) equal in both projects (weatherboard read only). |
+| `checks/smoke.sql` | PASS, 53 of 53 | Run in `travelboard`, one transaction, rolled back. |
+| Data copy (step 3) | PASS | Read from weatherboard (read only): 33 captures (1 soft-deleted), 12 journal messages, 1 day title. Inserted in one transaction with `owner` set to the new uid `40d3790a-...` and `server_ts` fresh; the transaction checked its own digests and would have rolled back on a mismatch. id-by-id digest over every column except `owner` and `server_ts`, identical in both projects: captures `23eb76cc...`, messages `75d3ae01...`, days `7321bcc8...`. One owner. Rows are not in this repo (it is public). |
+| `tb-journal` (step 4) | Deployed, version 1, `verify_jwt` on | Same source as the repo. The test call is device step 5. |
+| Keep-alive (step 5) | Built, not yet run | `.github/workflows/keepalive.yml`, daily 0243 UTC. Passes only on Postgres's own 42501 to an anonymous `rpc/tb_whoami` (rule 3 leaves nothing anon can read). This sandbox cannot reach supabase.co, so the first GitHub run is the live test (device step 6). |
+| Client v6 (step 6) | Built | `trip.html` and `sw.js` version 6, URL and publishable key of `travelboard` (key from the connector). |
+| `checks/static.cjs` | PASS, 69 of 69 | Adds: keep-alive pings the project and key `trip.html` uses, daily, no secrets; `.yml` files scanned for keys. |
+| `checks/headless/m1.test.cjs` on v6 | PASS, 103 of 103 | Run with `TB_CHROMIUM=/opt/pw-browsers/chromium`. |
+| `checks/headless/m2.test.cjs` on v6 | PASS, 80 of 80 | New group L, the move: a v5 phone (synced, session stored, cursor set) opens v6: session and cursor cleared, `project_ref` recorded, nothing deleted, every capture dirty, the sent turn pending, a failed turn left failed, the day title re-queued, nothing sent and pill "sign in, 3 queued". After sign in: both captures on the server (the soft-deleted one still deleted), the turn resent once with the stored reply back and no Claude call, still one reply with the same id, the title on the server, pill synced. Next launch: no second reset. K12 updated: a pre-move database now asks to sign in, then syncs. |
+| Security advisor | No new issue | Flags RLS with no policies on the 3 `travel` tables and definer functions callable by `authenticated`: both by design (rule 3). Flags `public.rls_auto_enable()` as callable by anon: it is Supabase's own and returns `event_trigger`, so it cannot be called over REST; left alone (rule 1). Leaked password protection off: irrelevant with self-signup off and one synthetic login. |
+
+### Device steps (Pixel, Chrome), v6: SPEC.md 6.8 step 8
+
+Report back the step number and what you saw for any step that does not match. Claude checks the server side in project `travelboard`.
+
+1. **Update.** Open `https://jeuron-hue.github.io/travelboard/sw.js` in Chrome: it should read `const CACHE_VERSION = 6;` (if it still shows 5, wait a few minutes and reload). Open travelboard from the home-screen icon, tap "Update ready, tap to reload" when it shows (or swipe the app away and reopen). Tap the pill: Version v6. The pill should read "sign in, n queued", with n about 35 or more: every capture on the phone plus your sent journal turns, queued again for the new project. Every capture row shows a yellow "queued" chip. Nothing is missing.
+2. **Sign in to the new project.** With signal, in the same panel, sign in as `gary@travelboard.local` with the new password you set on 23/10/26 (not the old weatherboard one). The pill should turn green "synced" within about 35 s, and every chip "synced". Note the time.
+3. **Everything from before the move.** On Captures, step back through 04/10, 09/10, 10/10 and 23/10: the same captures as before, Ap03 still gone. On Journal, open Days: 10/10 shows "Singapore test" with its messages, and 23/10 its three turns with replies, none marked "not sent" (any that were "not sent" before stay that way). Claude checks every one of the 33 copied captures and anything you made on v5 after the copy is on the server, each once.
+4. **A new capture.** Turn airplane mode on and check the pill reads "offline". Capture `v6 move test`. Turn airplane mode off; within about 35 s it should read "synced". Note the time.
+5. **A journal reply (step 4 test call).** With signal, Journal, Write `Move check. Reply in one sentence.`, Send. A reply should come within about 15 s. If it shows "not sent" instead, send Claude the exact message: "(401)" means Anthropic rejected the key in `TB_ANTHROPIC_API_KEY`; "TB_ANTHROPIC_API_KEY is not set" means the secret is missing in project `travelboard`.
+6. **Keep-alive.** On github.com, `jeuron-hue/travelboard`, Actions, "keep-alive", Run workflow on `main` (Claude can start it instead once it is on `main`). The run should go green within a minute, and the log shows `HTTP 401` and code `42501`. A red run, or anything else in the log, report it.
+
+When all six pass, Claude records step 8 here and asks for your yes on step 7.
+
 ## M2 Journal (SPEC.md 8.7)
 
 **Status 23/10/26: all five acceptance items PASS. `checks/static.cjs` and `checks/smoke.sql` pass. M2 done.** v5 adds Share on the journal bar (device step 8).
