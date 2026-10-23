@@ -1,7 +1,7 @@
 # travelboard: specification
 
 Owner: Gary Chan. Repo: `jeuron-hue/travelboard` (public). Written 04/10/26.
-Status: M0 Foundation done 04/10/26. M1 Capture done 10/10/26. M2 Journal done 23/10/26. M1.1 Photo capture in build from 23/10/26, cut-off 27/10/26.
+Status: M0 Foundation done 04/10/26. M1 Capture done 10/10/26. M2 Journal done 23/10/26. Move to own project (6.8), then M1.1 Photo capture, in build from 23/10/26, cut-off 27/10/26.
 
 This file is the source of record for what travelboard is and how it is built. M0, M1 and M2 are specified in full because they ship before Bangkok (09/11/26). M3 to M8 are skeletons, to be expanded one at a time after Bangkok using the friction log from that trip.
 
@@ -25,7 +25,7 @@ Wanderlog was used for Switzerland (Jan 2025) and liked, but its AI layer and jo
 |---|---|---|
 | D1 | Own app, built module by module, each module usable on its own | 04/10/26 |
 | D2 | Two frontends over one backend: `trip.html` (phone, installed PWA, offline) and `planner.html` (rig/laptop browser, online only, from M3) | 04/10/26 |
-| D3 | Backend in the existing Supabase project `weatherboard` (ref `nyjsrnntxdgfykkmihpx`, org `jeuron`, ap-southeast-1). All travelboard tables in a dedicated `travel` schema | 04/10/26 |
+| D3 | Backend in its own Supabase project `travelboard` (ref `nnnnonspfljdkrxstslw`, org `jeuron`, ap-southeast-1, free plan), created 23/10/26. All travelboard tables in a dedicated `travel` schema. From 04/10/26 to the move it lived inside the `weatherboard` project (ref `nyjsrnntxdgfykkmihpx`); it moved out because that shared database reached 381 MB of the 500 MB cap on 23/10/26 and photos were coming (section 6.8) | 04/10/26, own project 23/10/26 |
 | D4 | Tables are never exposed through the API. The client reaches data only through SECURITY DEFINER RPCs in `public` prefixed `tb_`. One exception from M1.1: photo files go through the Storage API to the private bucket `tb-photos`, guarded by RLS policies on `storage.objects` that admit only the owner's own folder | 04/10/26, photos 23/10/26 |
 | D5 | Server-side secrets (Anthropic key, later Google key) live in Supabase Edge Functions prefixed `tb-`, as secrets named with a `TB_` prefix | 04/10/26, prefix 10/10/26 |
 | D6 | Hosting on GitHub Pages from a public repo. No build step, vanilla JS, libraries vendored into the repo | 04/10/26 |
@@ -65,7 +65,7 @@ trip.html  (installed PWA)            planner.html  (browser, online only)
 GitHub Pages  jeuron-hue/travelboard  (static files only)
   |
   v
-Supabase project "weatherboard" (nyjsrnntxdgfykkmihpx)
+Supabase project "travelboard" (nnnnonspfljdkrxstslw)
   auth      one user, synthetic login
   public    tb_* SECURITY DEFINER RPCs  (the only client entry point)
   travel    tables (not exposed to the API)
@@ -76,17 +76,15 @@ Supabase project "weatherboard" (nyjsrnntxdgfykkmihpx)
 Anthropic Messages API  [M2]      Google Places API  [M3]
 ```
 
-### 4.1 Shared-project guardrails
+### 4.1 Own project, and what is still shared
 
-The `weatherboard` project already runs the East Sky Board: 20 tables in `public`, a `prices` schema, five Edge Functions (`radar-archive`, `station-archive`, `frame-features`, `feeds-archive`, `frame-motion`), nine pg_cron jobs firing every 5 to 10 minutes, and a GitHub Actions keep-alive. It has no auth users. travelboard must never touch any of it.
+From 23/10/26 travelboard has its own Supabase project, so it no longer shares a database, Storage quota, auth settings or Edge Function secrets with weatherboard. Before that it lived inside `weatherboard` (section 6.8).
 
-- travelboard objects: schema `travel`, functions `public.tb_*`, Edge Functions `tb-*`, and from M1.1 the Storage bucket `tb-photos` with policies on `storage.objects` named `tb_photos_*` and scoped to `bucket_id = 'tb-photos'`. Nothing else.
-- Storage is shared too: weatherboard already has a public bucket `radar` (14,013 objects, 57 MB on 23/10/26) with policy `radar_public_read`. travelboard never touches either. The free plan's 1 GB of file storage covers both buckets.
-- Turning self-signup off in Auth settings is project-wide. Safe, because weatherboard uses no auth.
-- Edge Function secrets are project-wide, so weatherboard's functions can read travelboard's secrets and the reverse. Accepted: both are Gary's. travelboard secrets carry a `TB_` prefix (`TB_ANTHROPIC_API_KEY`) so they can never collide with a weatherboard secret, for example if weather later moves its own Anthropic key into Supabase.
-- Anthropic billing is shared too: weather's API twin and travelboard's journal draw on the same USD 100 monthly subscriber credit, in separate Console workspaces (`weather` capped at USD 70, `travelboard` at USD 30) so neither can starve the other.
-- Keep-alive: weatherboard's cron activity keeps the project from pausing. Nothing extra needed.
-- **Storage risk (see section 10):** the database was 237 MB of the 500 MB free cap on 04/10/26, mostly `public.station_obs` (142 MB) and `public.frame_cells` (43 MB), growing every 5 minutes.
+- The `weatherboard` project (ref `nyjsrnntxdgfykkmihpx`) runs Gary's live East Sky Board. travelboard never creates or changes anything there. The one exception is removing everything travelboard left there (6.8 step 7), on Gary's explicit yes, once the move passes on the Pixel.
+- travelboard secrets keep the `TB_` prefix (`TB_ANTHROPIC_API_KEY`), and functions keep `tb_` and `tb-`, so the naming stays unambiguous if the projects ever meet again.
+- Anthropic billing is still shared: weather's API twin and travelboard's journal draw on the same USD 100 monthly subscriber credit, in separate Console workspaces (`weather` capped at USD 70, `travelboard` at USD 30) so neither can starve the other.
+- Keep-alive: a free project pauses after a period without activity, and travelboard has no cron of its own. A scheduled GitHub Actions workflow in this repo keeps it awake (6.8). Confirm the current pause rule at build time.
+- Free plan limits for this project alone: 500 MB database, 1 GB file storage, 5 GB egress (supabase.com/pricing, read 23/10/26).
 
 ### 4.2 Repo layout
 
@@ -132,6 +130,7 @@ travelboard/
 | M0 Foundation | Schema, auth, RPCs, repo, PWA shell, IndexedDB, sync engine | 05/10 to 11/10 | Installs on the Pixel, opens in airplane mode, a record queued offline lands in Supabase on reconnect |
 | M1 Capture | One-tap capture, voice via Gboard, GPS, timezone, edit, soft delete, export | 12/10 to 18/10 | 20 airplane-mode captures all arrive intact after reconnect |
 | M2 Journal | Thread per local day, Claude via `tb-journal`, day's captures as context | 19/10 to 25/10 | One real evening conversation that references the day's captures |
+| Move to own project | travelboard out of `weatherboard` into its own Supabase project (6.8) | 23/10 to 24/10 | 6.8 step 8 passes on the Pixel |
 | M1.1 Photo capture | Photo on a capture (camera or gallery), offline first, Storage bucket `tb-photos`, photos in the journal | 24/10 to 27/10 | Section 7A acceptance passes on the Pixel by 27/10, or it moves to after Bangkok |
 | Shakedown | Daily use in Singapore. Fixes only, no features (M1.1 is the one agreed exception, 23/10) | 26/10 to 01/11 | Freeze on 01/11 |
 | Bangkok pilot | Use it for real, keep a friction log | 09/11 to 12/11 | Friction log written |
@@ -253,7 +252,27 @@ Database `travelboard`, version 1. A small hand-written promise wrapper, no libr
 4. Calling `tb_capture_upsert` twice with the same `id` yields one row; an older `updated_at` does not overwrite a newer one.
 5. Anonymous calls to every `tb_` function fail. Direct REST access to `travel.captures` fails.
 6. `checks/static.cjs` passes; `checks/smoke.sql` passes.
-7. Nothing outside `travel`, `public.tb_*` and `tb-*` was created or altered (verify with a catalogue query before and after).
+7. Nothing outside `travel`, `public.tb_*` and `tb-*` was created or altered (verify with a catalogue query before and after). This held while travelboard lived in `weatherboard`; in its own project the catalogue diff still checks that each migration did only what it says.
+
+### 6.8 Move to its own project (23/10/26)
+
+Done before M1.1, so the photo bucket is built once, in the right place.
+
+1. **Gary, dashboard:** in project `travelboard`, Auth: self-signup off; user `gary@travelboard.local`, auto-confirmed, new strong password. Console, workspace Travelboard: a new key (the old key's value is gone), set as Edge Function secret `TB_ANTHROPIC_API_KEY` in project `travelboard`; then revoke the old key.
+2. **Schema:** apply migrations 0001 to 0004 unchanged to `travelboard`, one at a time, with a catalogue snapshot before and after each. Run `checks/smoke.sql` there.
+3. **Data:** copy `travel.captures`, `travel.journal_messages` and `travel.journal_days` from `weatherboard` with their ids, timestamps and soft deletes intact, `owner` remapped to the new user's uid, `server_ts` set fresh. Row counts and an id-by-id comparison must match before and after.
+4. **Edge Function:** deploy `tb-journal` to `travelboard`, `verify_jwt` on. One test call as Gary from the Pixel after step 6.
+5. **Keep-alive:** a GitHub Actions workflow in this repo on a schedule well inside the pause window, making one cheap request with the publishable key. Model it on weatherboard's keep-alive. No secret beyond the publishable key.
+6. **Client v6:** `SUPABASE_URL` and the publishable key point at `travelboard` (fetch the key with the connector). `meta.project_ref` is stored; when it differs from the running build's ref, the client clears `pull_cursor` and the stored session, marks every local capture and journal row dirty, and shows "sign in". Pushes are idempotent, so the phone's own copy also fills any gap left by step 3. Nothing local is ever deleted.
+7. **Weatherboard clean-up:** everything travelboard comes out of `weatherboard` (Gary, 23/10/26), as soon as step 8 passes on the Pixel, on his explicit yes at that moment. Inventory taken 23/10/26:
+   - schema `travel`: tables `captures` (33 rows), `journal_messages` (12), `journal_days` (1), and their 7 indexes
+   - 9 functions: `public.tb_whoami`, `tb_capture_upsert`, `tb_captures_upsert`, `tb_captures_since`, `tb_journal_day`, `tb_journal_days`, `tb_journal_day_suffix`, `tb_journal_turn`, `tb_journal_reply`
+   - 4 migration history rows in `supabase_migrations.schema_migrations`: `tb_0001_travel_schema_captures`, `tb_0002_rpcs`, `tb_0003_journal_tables`, `tb_0004_journal_rpcs`
+   - Edge Function `tb-journal` (v1) and secret `TB_ANTHROPIC_API_KEY`
+   - auth user `gary@travelboard.local` (the project's only auth user)
+
+   Claude Code drops the schema, the functions and the history rows in one transaction, with a catalogue diff and a check that weatherboard's tables, functions, cron jobs, Edge Functions and the `radar` bucket are unchanged. Gary deletes `tb-journal`, the secret and the auth user in the dashboard. Self-signup stays off in `weatherboard` (it uses no auth). A final query confirms nothing named `travel`, `tb_` or `tb-` remains there.
+8. **Acceptance:** the Pixel signs in to `travelboard`; every capture and journal day from before the move is there; a new capture syncs; a journal message gets a reply; the keep-alive workflow has run once green; `checks/static.cjs`, `checks/smoke.sql` and the M1 and M2 headless suites pass against v6.
 
 ---
 
@@ -304,7 +323,7 @@ Added 23/10/26 on Gary's decision (D15). A photo is part of a capture, not a sep
 ### 7A.1 Schema and storage (migration 0005, then 0006)
 
 - 0005, `travel` and `public.tb_*` only: `alter table travel.captures add photo_path text, add photo_w int, add photo_h int, add photo_bytes int`. `photo_path` is `<owner uuid>/<capture id>.jpg`, null when there is no photo or it has not uploaded yet. Replace `tb_capture_upsert` and `tb_captures_since` so they carry the four fields; everything else in 6.3 is unchanged. Also `alter table travel.journal_messages add cache_write_tokens int, add cache_read_tokens int` for 7A.5.
-- 0006, Storage: create bucket `tb-photos`, private, file size limit 2 MB, allowed type `image/jpeg`. Policies on `storage.objects` for role `authenticated` only, each with `bucket_id = 'tb-photos' and (storage.foldername(name))[1] = auth.uid()::text`: `tb_photos_select`, `tb_photos_insert`, `tb_photos_update` (so a retried upload can overwrite its own file). No delete policy: photos are never deleted (no hard delete). The catalogue snapshot before and after must show only the bucket, these three policies and the 0005 changes; `radar` and `radar_public_read` unchanged.
+- 0006, Storage: create bucket `tb-photos`, private, file size limit 2 MB, allowed type `image/jpeg`. Policies on `storage.objects` for role `authenticated` only, each with `bucket_id = 'tb-photos' and (storage.foldername(name))[1] = auth.uid()::text`: `tb_photos_select`, `tb_photos_insert`, `tb_photos_update` (so a retried upload can overwrite its own file). No delete policy: photos are never deleted (no hard delete). The catalogue snapshot before and after must show only the bucket, these three policies and the 0005 changes. Built in project `travelboard`, after 6.8.
 
 ### 7A.2 Client
 
@@ -344,7 +363,7 @@ Sonnet 5.5 reads images at high resolution: a 1280 x 960 photo is ceil(1280/28) 
 6. Journal: asked about a photo, Claude describes something visible in it that the capture text does not say.
 7. Second journal turn the same evening: `cache_read_tokens` above zero on the stored reply.
 8. Anonymous access to a `tb-photos` object fails, and so does access to another user's folder (smoke test with a second synthetic uid inside a rolled-back transaction, plus a REST check).
-9. Catalogue diffs for 0005 and 0006 touch only `travel.*`, `public.tb_*`, the bucket `tb-photos` and the three `tb_photos_*` policies.
+9. Catalogue diffs for 0005 and 0006 in project `travelboard` touch only `travel.*`, `public.tb_*`, the bucket `tb-photos` and the three `tb_photos_*` policies.
 10. `checks/static.cjs`, `checks/smoke.sql` and the M1 and M2 headless suites pass; a new M1.1 headless suite passes.
 
 ---
@@ -483,9 +502,9 @@ Each skeleton is expanded to full spec before its module starts.
 
 | Item | Detail | Owner / next step |
 |---|---|---|
-| Shared database size | 237 MB of 500 MB on 04/10/26, mostly weatherboard's `station_obs` (142 MB) growing every 5 min. Reaching the free cap would stop writes for travelboard too. Captures stay safe locally, but sync would stop | Gary: decide a retention policy for `station_obs` on the weatherboard side before Bangkok |
-| Shared database size, 23/10/26 | The weatherboard database read 381 MB of the 500 MB cap on 23/10/26, up from 197 MB on 04/10/26 after the retention fix. At that rate it reaches the cap before or during Bangkok, which would stop travelboard sync | Gary: check weatherboard retention in the Weather Prediction project before 01/11 |
-| Shared file storage | Free plan 1 GB shared with weatherboard's `radar` bucket (57 MB on 23/10/26). travelboard photos at about 250 KB each | Check bucket sizes at the end of the shakedown and after Bangkok |
+| Database size (own project) | travelboard's data is small (text rows plus photo paths); photos go to file storage, not the database. weatherboard's growth (381 MB of 500 MB on 23/10/26) no longer affects travelboard | Check sizes at the end of the shakedown |
+| File storage | 1 GB free for travelboard alone; photos at about 250 KB each, so about 4,000 photos | Check bucket size after Bangkok |
+| Project pausing | A free project with no activity pauses; travelboard has no cron | Keep-alive workflow (6.8 step 5); check it is green before flying |
 | Offline is new skill | No prior service worker or IndexedDB work | M0 is deliberately the smallest possible surface for it |
 | Gboard on foreign names | Lebuh Keng Kwee, Teluk Bahang and similar will be mangled | Accepted. Transcripts are for Gary; never parsed |
 | Offline voice | Voice only works offline with Gboard plus the on-device English pack (Settings, System, Languages, Speech, On-device recognition). SwiftKey's voice needs a connection | Gary: Gboard as the keyboard for the trip; check dictation in airplane mode before flying |
@@ -507,6 +526,7 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 23/10/26 D3, 4 diagram, 4.1, 5, new 6.8, 6.7 item 7, 7A.1, 7A.6, 10: travelboard moves to its own Supabase project `travelboard` (ref `nnnnonspfljdkrxstslw`), Gary's decision after the shared `weatherboard` database reached 381 MB of 500 MB. The move comes before M1.1. Everything travelboard is then removed from `weatherboard` (inventory in 6.8 step 7) once the move passes on the Pixel, on Gary's yes.
 - 23/10/26 Status, D4, D15, 4.1, 5, new section 7A, 8.3, 9, 10: M1.1 Photo capture added before Bangkok on Gary's decision (camera or gallery in the app, Claude sees the photos, cut-off 27/10). Storage bucket `tb-photos` and its `tb_photos_*` policies join the travelboard objects allowed in the shared project. Database size risk updated: 381 MB of 500 MB on 23/10/26.
 - 23/10/26 Status, 8.5: M2 done (acceptance item 1 on the 23/10/26 thread). Share button on the journal bar (Gary's decision, before the shakedown freeze), so a day can go into his desktop Claude journalling project.
 - 10/10/26 4.2, 8.5, 11: M2 client details agreed at build (tabs, day list, title suffix, composer mode, sync order and failure handling) written into 8.5; `tb-journal` file layout in 4.2; `m2.test.cjs` and `fn.test.cjs` in 11. No change to the acceptance list.

@@ -8,20 +8,14 @@ travelboard is Gary Chan's personal travel app: a phone PWA (`trip.html`) for ca
 
 ## Current module
 
-**M1.1 Photo capture** (`SPEC.md` section 7A), Gary's go 23/10/26, cut-off 27/10/26: if it is not passing on the Pixel by then, stop and tell Gary; it moves to after Bangkok. M0 done 04/10/26, M1 done 10/10/26, M2 done 23/10/26. The shakedown (26/10 to 01/11) is fixes only apart from finishing M1.1. Do not start M3 or any later module until Gary says go.
+**Move to own project** (`SPEC.md` 6.8), then **M1.1 Photo capture** (`SPEC.md` 7A). Gary's go 23/10/26. Cut-off for M1.1 on the Pixel: 27/10/26; if it is slipping, stop and tell Gary, and it moves to after Bangkok. M0 done 04/10/26, M1 done 10/10/26, M2 done 23/10/26. The shakedown (26/10 to 01/11) is fixes only apart from finishing these two. Do not start M3 or any later module until Gary says go.
 
 ## Hard rules
 
-1. **Shared Supabase project.** travelboard lives inside the `weatherboard` project (ref `nyjsrnntxdgfykkmihpx`), which runs Gary's live East Sky Board weather fleet. You may create or change only:
-   - schema `travel` and objects inside it
-   - functions in `public` whose names start with `tb_`
-   - Edge Functions whose names start with `tb-`
-   - the Storage bucket `tb-photos`, and policies on `storage.objects` named `tb_photos_*` whose conditions are scoped to `bucket_id = 'tb-photos'`
-
-   Never alter, drop, rename or grant on anything else: no `public` tables, no `prices` schema, no cron jobs, no other Edge Functions, no other Storage bucket or policy (weatherboard's `radar` bucket and `radar_public_read` stay untouched), no auth settings beyond turning self-signup off. Run a catalogue snapshot query before and after each migration and confirm the diff touches only travelboard objects.
+1. **Own Supabase project.** travelboard lives in its own project `travelboard` (ref `nnnnonspfljdkrxstslw`, org `jeuron`) from 23/10/26. Within it, keep travelboard's naming: schema `travel`, functions `public.tb_*`, Edge Functions `tb-*`, secrets `TB_*`, Storage bucket `tb-photos` with policies `tb_photos_*`. Leave Supabase's own schemas alone except where a migration names the change. The `weatherboard` project (ref `nyjsrnntxdgfykkmihpx`) runs Gary's live weather fleet: never create or change anything there. Read-only queries there are allowed for the data copy in `SPEC.md` 6.8; dropping travelboard's old objects there needs Gary's explicit yes, in one transaction, with a catalogue diff. Run a catalogue snapshot before and after each migration and confirm the diff matches what the migration says.
 2. **Migrations:** one block at a time, each wrapped in a transaction, saved as a numbered file in `supabase/migrations/`. Show the output of each block before applying the next. No destructive statement without Gary's explicit yes in chat.
 3. **Data access:** tables in `travel` get no grants to `anon` or `authenticated`. The client reaches data only through `SECURITY DEFINER` RPCs with `set search_path = travel, public`, `revoke all from public, anon`, `grant execute to authenticated`, and a check that `auth.uid()` is not null.
-4. **Keys:** the publishable key may sit in client source (fetch it with the Supabase connector, do not guess it). `service_role` never appears in any file in this repo. The Anthropic key exists only as the Edge Function secret `TB_ANTHROPIC_API_KEY`, set by Gary in the dashboard from the Console workspace `travelboard`. Never use or ask for weather's key.
+4. **Keys:** the publishable key may sit in client source (fetch it with the Supabase connector, do not guess it). `service_role` never appears in any file in this repo. The Anthropic key exists only as the Edge Function secret `TB_ANTHROPIC_API_KEY`, set by Gary in the dashboard of project `travelboard` from the Console workspace `travelboard`. Never use or ask for weather's key.
 5. **No build step.** Vanilla HTML, CSS and JS. Libraries are pinned and vendored into `vendor/` so the app works offline. No npm runtime dependencies in the shipped site.
 6. **Offline-first.** The phone UI reads IndexedDB only. Supabase is a sync target, never a render source. A capture must save with no network, no session and no GPS.
 7. **Never auto-parse transcripts** into structured fields.
