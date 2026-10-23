@@ -51,7 +51,7 @@ Item 8 (anonymous and other-user access refused) is checked by Claude: the smoke
 
 ## Move to own project (SPEC.md 6.8)
 
-**Status 23/10/26: steps 2 to 6 done. Step 8 waits on the Pixel run below. Step 7 (weatherboard clean-up) waits on step 8 and Gary's yes.**
+**Status 23/10/26: steps 2 to 6 done; step 8 PASSES (Pixel and keep-alive, 2347 hrs). The move is done. Step 7 (weatherboard clean-up) waits on Gary's yes.**
 
 ### Automated results, 23/10/26
 
@@ -88,6 +88,19 @@ Report back the step number and what you saw for any step that does not match. C
 6. **Keep-alive.** On github.com, `jeuron-hue/travelboard`, Actions, "keep-alive", Run workflow on `main` (Claude can start it instead once it is on `main`). The run should go green within a minute, and the log shows `HTTP 401` and code `42501`. A red run, or anything else in the log, report it.
 
 When all six pass, Claude records step 8 here and asks for your yes on step 7.
+
+### Device results, v6 (Pixel, Gary), 23/10/26
+
+Checked in project `travelboard` through the Supabase connector, the function logs and the GitHub API. Times SGT.
+
+| Step | Result |
+|---|---|
+| 1 | PASS. v6 running; before sign-in the pill read "sign in, 39 queued" (33 captures plus the 6 sent journal turns), every chip "queued" (Gary's screenshot 2338 hrs). |
+| 2 | PASS. Signed in as `gary@travelboard.local` on the new project; "synced", last sync 2341 hrs, no error (screenshot). |
+| 3 | PASS. Screenshots of 04/10, 09/10 (0031 hrs Bangkok), 10/10 and 23/10 show the same captures as before. Server: 33 copied captures, digest still `23eb76cc...` (the re-push changed nothing, as their `updated_at` was equal); 14 journal rows, no turn with two replies. The 6 re-queued turns went through `tb-journal` at 2340:46 to 2340:51, all 200, none with a Claude call (stored replies returned). |
+| 4 | PASS. New capture "Test" captured 2343:23 with GPS, landed 2343:39. |
+| 5 | PASS. "Move check. Reply in one sentence." at 2344:14, one reply at 2344:18 from `claude-sonnet-5-5` (2576 in, 56 out): the new `TB_ANTHROPIC_API_KEY` works. |
+| 6 | PASS. GitHub returned 403 to a workflow dispatch from this session, so the workflow now also runs when its own file changes on `main` (`c7d6a32`; the stamp commit is pushed with `GITHUB_TOKEN` and starts no run). Run 1 (`39981679816`, 2350 hrs): `HTTP 401`, `{"code":"42501",...,"message":"permission denied for function tb_whoami"}`, green; stamp commit `25b3f72`. Daily runs at 0243 UTC from 24/10. |
 
 ## M2 Journal (SPEC.md 8.7)
 
