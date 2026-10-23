@@ -57,7 +57,8 @@ function makeMock() {
       if (!['note', 'journal'].includes(p.kind || 'note')) throw new Error('bad kind');
       const ex = m.rows.get(p.id);
       if (!ex || Date.parse(ex.updated_at) < Date.parse(p.updated_at)) {
-        const row = Object.assign({}, p, { server_ts: ts });
+        const claude = p.photo_to_claude == null ? (ex ? ex.photo_to_claude !== false : true) : !!p.photo_to_claude;
+        const row = Object.assign({}, p, { photo_to_claude: claude, server_ts: ts });
         m.rows.set(p.id, row);
         return { id: p.id, applied: true, server_ts: ts };
       }
@@ -147,8 +148,10 @@ function addJournal(m) {
     if (reply) return { user: u, reply };
     const thread = m.jorder([...m.jrows.values()].filter((r) => r.local_date === u.local_date))
       .filter((r) => cmp(r, u) <= 0).map((r) => ({ id: r.id, role: r.role, content: r.content, created_at: r.created_at }));
+    // Migration 0007: photo_path only where photo_to_claude is true (absent means true).
     const captures = [...m.rows.values()].filter((c) => c.local_date === u.local_date && !c.deleted_at)
-      .sort((a, b) => (a.captured_at < b.captured_at ? -1 : 1));
+      .sort((a, b) => (a.captured_at < b.captured_at ? -1 : 1))
+      .map((c) => Object.assign({}, c, { photo_path: c.photo_to_claude === false ? null : (c.photo_path || null) }));
     return { user: u, reply: null, thread, captures };
   };
   m.reply = (p) => {

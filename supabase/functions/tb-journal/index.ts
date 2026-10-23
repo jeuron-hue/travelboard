@@ -7,7 +7,7 @@
 // travelboard) and never leaves this function.
 //
 // Steps: store the user turn (idempotent) -> if a reply exists, return it with no API
-// call -> else download the day's photos as the user (most recent 20, SPEC.md 7A.4) ->
+// call -> else download the day's switched-on photos as the user (most recent 30, 7A.4) ->
 // build the system prompt (prompts/journal.md), the day's context block (captures and
 // photos, with a prompt-cache breakpoint after the last one) and the thread (last 40
 // turns) -> Claude -> store the reply once, with token and cache counts -> return it.
@@ -17,6 +17,8 @@
 // keeps the user turn and offers Retry.
 //
 // Change log (newest first)
+// - 24/10/26 "Claude sees this" switch (SPEC.md 7A.4, migration 0007): at most 30 switched-on
+//   photos per day (was 20); a switched-off photo is not sent, listed or mentioned.
 // - 23/10/26 M1.1 Photo capture (SPEC.md 7A.4). The day's captures move from the system
 //   prompt into a context block before the thread; each of the most recent 20 photos goes
 //   in as an image labelled with its capture, the rest are listed as not shown, a failed

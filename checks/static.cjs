@@ -165,7 +165,7 @@ if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(
   check(!/storage\.from\([^)]*\)\.remove\(/.test(trip) && !/method: 'DELETE'/.test(trip), 'photos: the client never deletes a file (rule 8)');
   if (exists(`${FN}/context.mjs`)) {
     const ctx = read(`${FN}/context.mjs`);
-    check(/export const MAX_PHOTOS = 20;/.test(ctx) && /export const CACHE_TTL = '1h';/.test(ctx), 'photos: tb-journal sends at most 20 photos, cache breakpoint 1 h');
+    check(/export const MAX_PHOTOS = 30;/.test(ctx) && /export const CACHE_TTL = '1h';/.test(ctx) && /photo_to_claude !== false/.test(ctx), 'photos: tb-journal sends at most 30 switched-on photos, cache breakpoint 1 h');
   }
   const m6 = exists('supabase/migrations/0006_tb_photos_bucket.sql') ? read('supabase/migrations/0006_tb_photos_bucket.sql') : '';
   check(/values \('tb-photos', 'tb-photos', false, 2097152, array\['image\/jpeg'\]\)/.test(m6)
