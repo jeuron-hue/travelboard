@@ -10,6 +10,11 @@ on:
   schedule:
     - cron: '43 2 * * *'
   workflow_dispatch:
+  # Also runs when this file changes on main, so every edit is tested at once. The stamp
+  # commit below is pushed with GITHUB_TOKEN, which starts no new runs, so this cannot loop.
+  push:
+    branches: [main]
+    paths: ['.github/workflows/keepalive.yml']
 permissions:
   contents: write
 jobs:
