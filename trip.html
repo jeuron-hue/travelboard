@@ -26,6 +26,11 @@
     draft survives a force-close; photos missing on this phone are downloaded when online.
 
   Change log (newest first)
+  - 24/10/26 v8. "Claude sees this" switch per photo (SPEC.md D15, 7A.2), default on, shown
+    with the photo on the capture and edit screens. Kept in the draft, on the capture
+    (photo_to_claude, true when absent), pushed with it and in the export. Changing it in an
+    edit bumps updated_at and queues the capture. Removing the photo resets it to on. Share
+    leaves out "with a photo" for a photo switched off.
   - 24/10/26 v7. M1.1 Photo capture. Photo button on the capture screen (Android chooser:
     camera or gallery), preview with Remove; shrunk to 1280 px on the long edge, JPEG 0.82;
     Save works with a photo and no text. IndexedDB version 3 adds store photos
@@ -235,6 +240,10 @@
     background: var(--ground); border: 1px solid var(--line);
   }
   span.thumb { display: grid; place-items: center; font-size: 12px; color: var(--muted); }
+  .claude-switch {
+    display: flex; align-items: center; gap: 10px; min-height: 44px; color: var(--ink); font-size: 16px; cursor: pointer;
+  }
+  .claude-switch input { width: 24px; height: 24px; accent-color: var(--accent); margin: 0; }
 
   #toast {
     position: fixed; left: 16px; right: 16px; z-index: 4;
@@ -387,6 +396,7 @@
     <img id="cap-photo-img" alt="Photo on this capture">
     <div class="side">
       <span id="cap-photo-info"></span>
+      <label class="claude-switch"><input id="cap-photo-claude" type="checkbox" checked> Claude sees this</label>
       <button class="btn" id="cap-photo-remove" type="button">Remove</button>
     </div>
   </div>
@@ -441,7 +451,7 @@
 'use strict';
 
 // Bump together with CACHE_VERSION in sw.js on every release.
-const APP_VERSION = 7;
+const APP_VERSION = 8;
 
 const PROJECT_REF = 'nnnnonspfljdkrxstslw';           // Supabase project travelboard (SPEC.md D3, 6.8)
 const SUPABASE_URL = 'https://' + PROJECT_REF + '.supabase.co';
@@ -674,8 +684,10 @@ try {
 
 const SERVER_FIELDS = ['id', 'body', 'kind', 'captured_at', 'tz', 'local_date', 'lat', 'lng',
   'accuracy_m', 'trip_id', 'place_id', 'photo_path', 'photo_w', 'photo_h', 'photo_bytes',
-  'updated_at', 'deleted_at'];
-const toServer = (row) => Object.fromEntries(SERVER_FIELDS.map((k) => [k, row[k] === undefined ? null : row[k]]));
+  'photo_to_claude', 'updated_at', 'deleted_at'];
+// photo_to_claude: the "Claude sees this" switch, true when absent (rows from before v8).
+const toServer = (row) => Object.fromEntries(SERVER_FIELDS.map((k) =>
+  [k, k === 'photo_to_claude' ? row[k] !== false : row[k] === undefined ? null : row[k]]));
 
 // ---------- capture rows: save, edit, delete, GPS ----------
 
@@ -692,7 +704,7 @@ function newCaptureRow(body, kind) {
     local_date: localDay(now, tz),
     lat: null, lng: null, accuracy_m: null,
     trip_id: null, place_id: null,
-    photo_path: null, photo_w: null, photo_h: null, photo_bytes: null,
+    photo_path: null, photo_w: null, photo_h: null, photo_bytes: null, photo_to_claude: true,
     updated_at: iso,
     deleted_at: null,
     server_ts: null,
@@ -724,7 +736,7 @@ function requestGps(id) {
 
 // mode 'new' (draft key "new"), 'edit' (draft key = capture id) or 'journal' (the same
 // screen as the journal composer, draft key "journal:<local_date>", Save reads Send).
-const cap = { open: false, mode: null, row: null, kind: 'note', busy: false, jdate: null, photo: null };
+const cap = { open: false, mode: null, row: null, kind: 'note', busy: false, jdate: null, photo: null, toClaude: true };
 const draftKey = () => (cap.mode === 'new' ? 'new' : cap.mode === 'journal' ? 'journal:' + cap.jdate : cap.row.id);
 const capBody = () => $('cap-body').value.trim().slice(0, BODY_MAX);
 
@@ -747,6 +759,7 @@ function setPhoto(p) {
   if (photoUrl) { URL.revokeObjectURL(photoUrl); photoUrl = null; }
   const show = hasPhoto();
   $('cap-photo').hidden = !show;
+  $('cap-photo-claude').checked = cap.toClaude;
   $('cap-photo-btn').textContent = show ? 'Replace' : 'Photo';
   if (show) {
     if (cap.photo.blob) {
@@ -794,6 +807,7 @@ function draftRecord(open) {
   const d = { id: draftKey(), body: $('cap-body').value, kind: cap.kind, open, updated_at: new Date().toISOString() };
   const ph = draftPhoto();
   if (ph !== undefined) d.photo = ph;
+  if (cap.mode !== 'journal' && hasPhoto()) d.photo_to_claude = cap.toClaude;
   return d;
 }
 
@@ -817,6 +831,7 @@ async function attachPhoto(file) {
 function removePhoto() {
   if (!cap.open) return;
   const saved = cap.mode === 'edit' && cap.row && (cap.row.photo_path || cap.savedPhoto);
+  cap.toClaude = true;               // a photo attached later starts switched on again
   setPhoto({ state: saved ? 'removed' : 'none' });
   writeDraft();
 }
@@ -847,6 +862,9 @@ async function openCapture(mode, row, draft) {
   setKind(draft ? draft.kind : row ? row.kind : 'note');
   // Photo: the draft's own first (attached, or removed in an edit), else the saved one.
   cap.savedPhoto = mode === 'edit' ? await idb.get('photos', row.id) : null;
+  // "Claude sees this": the draft's value, else the saved capture's (on when absent), else on.
+  cap.toClaude = draft && typeof draft.photo_to_claude === 'boolean' ? draft.photo_to_claude
+    : row ? row.photo_to_claude !== false : true;
   if (mode === 'journal') setPhoto(null);
   else if (draft && draft.photo) setPhoto(Object.assign({ state: 'new' }, draft.photo));
   else if (draft && draft.photo === null && mode === 'edit') setPhoto({ state: 'removed' });
@@ -943,6 +961,7 @@ async function saveCapture() {
   try {
     if (cap.mode === 'new') {
       const row = newCaptureRow(body, cap.kind);
+      if (ph.state === 'new') row.photo_to_claude = cap.toClaude;
       // Local write first, atomically with the photo and clearing the draft. Never waits on
       // GPS or network; the photo uploads on a later sync (SPEC.md 7A.3).
       await idb.tx(['captures', 'drafts', 'photos'], (t) => {
@@ -958,6 +977,7 @@ async function saveCapture() {
       requestGps(row.id);
     } else {
       const id = cap.row.id, kind = cap.kind;
+      const toClaude = hasPhoto() ? cap.toClaude : true;
       // Body, kind and photo only; captured_at, tz and local_date never change on edit.
       // A new photo replaces the old one (uploaded to the same path on the next sync); a
       // removed photo clears the four fields, and the file stays in Storage (SPEC.md 7A.2).
@@ -966,9 +986,10 @@ async function saveCapture() {
         const g = s.get(id);
         g.onsuccess = () => {
           const row = g.result;
-          const change = ph.state === 'new' || ph.state === 'removed';
+          const change = ph.state === 'new' || ph.state === 'removed' || (row && (row.photo_to_claude !== false) !== toClaude);
           if (!row || (row.body === body && row.kind === kind && !change)) return;
-          const next = Object.assign({}, row, { body, kind, updated_at: nextUpdatedAt(row.updated_at), dirty: 1 });
+          const next = Object.assign({}, row, { body, kind, photo_to_claude: toClaude,
+            updated_at: nextUpdatedAt(row.updated_at), dirty: 1 });
           if (ph.state === 'new') {
             t.objectStore('photos').put({ id, blob: ph.blob, w: ph.w, h: ph.h, bytes: ph.bytes, uploaded: 0, at });
           } else if (ph.state === 'removed') {
@@ -1419,7 +1440,8 @@ async function dayText(date) {
   for (const c of caps) {
     let head = `${when(c.captured_at, c.tz)}, ${c.kind}`;
     if (c.lat != null && c.lng != null) head += `, at ${Number(c.lat).toFixed(5)}, ${Number(c.lng).toFixed(5)}`;
-    if (c.photo_path || photoIds.has(c.id)) head += ', with a photo';
+    // A photo switched off for Claude is not mentioned: this text may be pasted into Claude.
+    if ((c.photo_path || photoIds.has(c.id)) && c.photo_to_claude !== false) head += ', with a photo';
     lines.push(`- ${head}: ${indent(c.body) || '(no text)'}`);
   }
   lines.push('', msgs.length ? 'Conversation with Claude' : 'Conversation with Claude: none');
@@ -2001,6 +2023,7 @@ $('cap-file').addEventListener('change', () => {
   if (f) attachPhoto(f);
 });
 $('cap-photo-remove').addEventListener('click', () => { removePhoto(); });
+$('cap-photo-claude').addEventListener('change', () => { cap.toClaude = $('cap-photo-claude').checked; writeDraft(); });
 $('records').addEventListener('click', (ev) => {
   const row = ev.target.closest('.row');
   if (row && !cap.open) openEdit(row.dataset.id).catch(fail('Could not open capture'));

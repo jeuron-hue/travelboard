@@ -96,7 +96,8 @@ async function save(page) {
   await page.waitForFunction(() => document.getElementById('day-label').textContent !== '-');
   await settle(page);
   const version = await page.$eval('#s-version', (e) => e.textContent);
-  check('P0 v7, IndexedDB v3 with a photos store indexed on uploaded', version === 'v7' && await page.evaluate(async () => {
+  const APP = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'trip.html'), 'utf8').match(/const APP_VERSION = (\d+);/)[1];
+  check(`P0 v${APP}, IndexedDB v3 with a photos store indexed on uploaded`, version === 'v' + APP && await page.evaluate(async () => {
     const db = await idb.open();
     return db.version === 3 && db.objectStoreNames.contains('photos') && db.transaction('photos').objectStore('photos').indexNames.contains('uploaded');
   }), version);
@@ -326,6 +327,73 @@ async function save(page) {
   await page.click('#cap-close');
   await waitCap(page, false);
   await page.click('#tab-captures');
+
+  // ================= "Claude sees this" switch (SPEC.md 7A.2, 7A.6 item 11) =================
+  await openCapture(page);
+  check('P18 no photo: no switch on the screen', !(await shown(page, '#cap-photo-claude')));
+  await page.fill('#cap-body', 'Hotel room, private');
+  await attach(page, small, 'room.jpg', 'image/jpeg');
+  check('P18 photo attached: switch shown, on by default', (await shown(page, '#cap-photo-claude'))
+    && await page.$eval('#cap-photo-claude', (e) => e.checked));
+  await page.click('#cap-photo-claude');
+  check('P18 switched off: the draft keeps the photo and the switch', await page.evaluate(async () => {
+    const d = await idb.get('drafts', 'new');
+    return d.photo_to_claude === false && !!d.photo;
+  }));
+  await page.reload();
+  await page.waitForFunction(() => document.getElementById('day-label').textContent !== '-');
+  await waitCap(page, true);
+  check('P18 after a reload mid-draft the switch is still off', await page.evaluate(() => cap.photo.state === 'new')
+    && !(await page.$eval('#cap-photo-claude', (e) => e.checked)));
+  await save(page);
+  await settle(page);
+  await syncIdle(page);
+  const off = (await caps(page)).find((r) => r.body === 'Hotel room, private');
+  check('P18 saved and synced switched off: local and server photo_to_claude false, photo uploaded', off.photo_to_claude === false
+    && mock.rows.get(off.id).photo_to_claude === false && mock.rows.get(off.id).photo_path === `${UID}/${off.id}.jpg`);
+  await page.click(`.row[data-id="${off.id}"]`);
+  await waitCap(page, true);
+  check('P19 edit opens with the switch off', !(await page.$eval('#cap-photo-claude', (e) => e.checked)));
+  const before19 = (await caps(page)).find((r) => r.id === off.id).updated_at;
+  await page.click('#cap-photo-claude');
+  await save(page);
+  const r19 = (await caps(page)).find((r) => r.id === off.id);
+  check('P19 turning it on in an edit bumps updated_at and queues the capture', r19.photo_to_claude === true && r19.dirty === 1 && r19.updated_at > before19);
+  await settle(page);
+  await syncIdle(page);
+  check('P19 the change reaches the server', mock.rows.get(off.id).photo_to_claude === true);
+  await page.click(`.row[data-id="${off.id}"]`);
+  await waitCap(page, true);
+  await page.click('#cap-photo-claude');
+  await save(page);
+  await settle(page);
+  await syncIdle(page);
+  check('P19 and off again', mock.rows.get(off.id).photo_to_claude === false);
+  // the journal: the switched-off photo is not sent (fake tb-journal on the function's own context.mjs)
+  await page.click('#tab-journal');
+  await page.click('#capture');
+  await waitCap(page, true);
+  await page.fill('#cap-body', 'What is in my photos?');
+  await save(page);
+  await settle(page);
+  await syncIdle(page);
+  const sent = mock.claude[mock.claude.length - 1];
+  const onDay = [...mock.rows.values()].filter((r) => r.local_date === off.local_date && !r.deleted_at && r.photo_path
+    && r.photo_to_claude !== false && mock.objects.has(r.photo_path)).length;
+  const offTag = (sent && (sent.context.match(/<capture [^>]*>\nHotel room, private\n<\/capture>/) || [''])[0]) || '';
+  const labels = sent ? sent.messages[0].content.filter((b) => b.type === 'text' && /^Photo from capture/.test(b.text)).map((b) => b.text) : [];
+  check('P20 journal turn: the switched-off capture is listed with no photo attribute and no image label', offTag !== ''
+    && !/photo=/.test(offTag) && !labels.some((t) => t.includes('Hotel room')), offTag);
+  check('P20 every switched-on photo of the day is sent as an image, the switched-off one is not', !!sent
+    && sent.images === Math.min(30, onDay) && labels.length === sent.images, `${sent && sent.images} of ${onDay}`);
+  const share = await page.evaluate(() => dayText(jDay));
+  check('P21 Share text: no "with a photo" on the switched-off capture, still on a switched-on one', /Hotel room, private/.test(share)
+    && !/with a photo: Hotel room/.test(share) && /with a photo: Jay Fai|with a photo: Wat Pho/.test(share), share.slice(0, 400));
+  await page.click('#tab-captures');
+  const [dl2] = await Promise.all([page.waitForEvent('download'), page.evaluate(() => exportCaptures())]);
+  const exp2 = JSON.parse(require('fs').readFileSync(await dl2.path(), 'utf8'));
+  check('P21 export carries photo_to_claude on every capture (true when never set)', exp2.captures.every((x) => typeof x.photo_to_claude === 'boolean')
+    && exp2.captures.find((x) => x.id === off.id).photo_to_claude === false);
 
   // ================= B: second phone (reinstall): pulls rows, downloads photos =================
   const ctxB = await newContext(browser, { tz: 'Asia/Singapore', session: true });
