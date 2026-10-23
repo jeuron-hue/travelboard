@@ -326,7 +326,7 @@ Added 23/10/26 on Gary's decision (D15). A photo is part of a capture, not a sep
 
 ### 7A.1 Schema and storage (migration 0005, then 0006)
 
-- 0005, `travel` and `public.tb_*` only: `alter table travel.captures add photo_path text, add photo_w int, add photo_h int, add photo_bytes int`. `photo_path` is `<owner uuid>/<capture id>.jpg`, null when there is no photo or it has not uploaded yet. Replace `tb_capture_upsert` and `tb_captures_since` so they carry the four fields; everything else in 6.3 is unchanged. Also `alter table travel.journal_messages add cache_write_tokens int, add cache_read_tokens int` for 7A.5.
+- 0005, `travel` and `public.tb_*` only: `alter table travel.captures add photo_path text, add photo_w int, add photo_h int, add photo_bytes int`. `photo_path` is `<owner uuid>/<capture id>.jpg`, null when there is no photo or it has not uploaded yet. Replace `tb_capture_upsert` so it carries the four fields and accepts only the caller's own `<uid>/<id>.jpg` as `photo_path`; `tb_captures_since` already returns whole rows, so it carries them unchanged; everything else in 6.3 is unchanged. Also `alter table travel.journal_messages add cache_write_tokens int, add cache_read_tokens int` for 7A.4, and replace the two function RPCs of 8.2: `tb_journal_turn` returns each capture's `photo_path`, so `tb-journal` can load the day's photos, and `tb_journal_reply` stores the two cache counts.
 - 0006, Storage: create bucket `tb-photos`, private, file size limit 2 MB, allowed type `image/jpeg`. Policies on `storage.objects` for role `authenticated` only, each with `bucket_id = 'tb-photos' and (storage.foldername(name))[1] = auth.uid()::text`: `tb_photos_select`, `tb_photos_insert`, `tb_photos_update` (so a retried upload can overwrite its own file). No delete policy: photos are never deleted (no hard delete). The catalogue snapshot before and after must show only the bucket, these three policies and the 0005 changes. Built in project `travelboard`, after 6.8.
 
 ### 7A.2 Client
@@ -348,7 +348,7 @@ Added 23/10/26 on Gary's decision (D15). A photo is part of a capture, not a sep
 ### 7A.4 Journal (`tb-journal` changes to 8.3 steps 4 to 6)
 
 - Load the day's non-deleted captures with a `photo_path`, most recent 20. Download each as the user (the function already acts as the user through the JWT) and send it as a base64 image block, labelled with its capture's local time, kind and text.
-- Place the captures context and the images in a block before the thread, with a prompt-caching breakpoint after the last image, so later turns that evening read the images from cache.
+- Place the captures context and the images in a block before the thread, with a prompt-caching breakpoint after the last image, so later turns that evening read the images from cache. The breakpoint keeps for 1 h, not the default 5 min, because turns in an evening are often more than 5 min apart; the first write costs about 2x a normal read of the same tokens instead of 1.25x. The system prompt is `prompts/journal.md` alone.
 - More than 20 photos in a day: the rest are listed as text ("photo at 1421 hrs, not shown") so Claude knows they exist.
 - A photo that fails to download is listed as text ("photo at 1421 hrs, could not be loaded") and the call still goes ahead.
 - Store `cache_write_tokens` and `cache_read_tokens` per reply.
@@ -577,6 +577,8 @@ Each skeleton is expanded to full spec before its module starts.
 - A module is done when its acceptance list passes. No mutation testing.
 
 ## 12. Change log
+
+- 24/10/26 7A.1, 7A.4: corrections agreed with Gary at the M1.1 build. 0005 also replaces `tb_journal_turn` (returns `photo_path` per capture) and `tb_journal_reply` (stores the cache counts), which 7A.4 needs and 7A.1 did not name; `tb_captures_since` needs no replacement (it returns whole rows). The cache breakpoint keeps for 1 h. The day's captures move from the system prompt into the context block.
 
 - 23/10/26 4.2, 6.8 steps 5 and 6, 11: move built. Keep-alive is an anonymous `rpc/tb_whoami` that must come back as Postgres's 42501 (travelboard has no anon-readable object, unlike weatherboard's `meta`); v6 reset detail (sent turns resent through `tb-journal`, failed turns left alone, session removed from storage directly). `checks/catalogue.sql` works where pg_cron is not installed and lists Storage buckets. Headless suites take `TB_CHROMIUM` to run against an installed Chromium.
 
