@@ -20,8 +20,21 @@
     offline and sends on reconnect; Claude's reply is stored once per turn; journal-kind
     captures show inline in the day's thread; optional title suffix per day; Share sends
     the whole day (captures and conversation) as plain text to another app.
+  - M1.1 Photo capture (SPEC.md 7A): one photo per capture from the camera or gallery,
+    shrunk on the phone to 1280 px JPEG, kept offline in IndexedDB, uploaded to the private
+    Storage bucket tb-photos before its capture is pushed; thumbnails on rows; a photo in a
+    draft survives a force-close; photos missing on this phone are downloaded when online.
 
   Change log (newest first)
+  - 24/10/26 v7. M1.1 Photo capture. Photo button on the capture screen (Android chooser:
+    camera or gallery), preview with Remove; shrunk to 1280 px on the long edge, JPEG 0.82;
+    Save works with a photo and no text. IndexedDB version 3 adds store photos
+    { id, blob, w, h, bytes, uploaded, at }; drafts keep their photo. Rows show a thumbnail.
+    Edit can add, replace or remove a photo (remove clears the four photo fields; the file
+    stays in Storage). Sync uploads queued photos one at a time, smallest first, to
+    tb-photos/<uid>/<id>.jpg, then fills photo_path and the size fields; a failed upload
+    never holds back the capture's text and GPS. Pulled rows with a photo not on this phone
+    are downloaded. The pill counts queued photos. Export carries the photo fields.
   - 23/10/26 v6. Backend moved to its own Supabase project travelboard (SPEC.md 6.8):
     SUPABASE_URL and the publishable key point at it. meta.project_ref records the project
     the local data was synced with; when it differs from this build's, the pull cursor and
@@ -208,6 +221,20 @@
   .capfoot[hidden] { display: none; }
   .capfoot .info { flex: 1; }
   .danger { color: var(--crit); border-color: var(--crit); }
+  .capbar #cap-photo-btn { min-width: 0; padding: 0 12px; }
+  #cap-photo {
+    display: flex; align-items: center; gap: 12px; padding: 8px 12px;
+    border-bottom: 1px solid var(--line); background: var(--surface);
+  }
+  #cap-photo img { max-height: 34vh; max-width: 70%; border-radius: 8px; object-fit: contain; }
+  #cap-photo .side { display: flex; flex-direction: column; gap: 8px; color: var(--muted); font-size: 14px; }
+  .row.hasthumb { display: flex; align-items: center; gap: 10px; }
+  .row .rowtext { flex: 1; min-width: 0; }
+  .thumb {
+    width: 52px; height: 52px; flex: none; border-radius: 8px; object-fit: cover;
+    background: var(--ground); border: 1px solid var(--line);
+  }
+  span.thumb { display: grid; place-items: center; font-size: 12px; color: var(--muted); }
 
   #toast {
     position: fixed; left: 16px; right: 16px; z-index: 4;
@@ -351,8 +378,17 @@
       <button id="kind-note" type="button" aria-pressed="true">note</button>
       <button id="kind-journal" type="button" aria-pressed="false">journal</button>
     </div>
+    <button class="btn" id="cap-photo-btn" type="button">Photo</button>
+    <input id="cap-file" type="file" accept="image/*" hidden>
     <span class="spacer"></span>
     <button class="save" id="cap-save" type="button" disabled>Save</button>
+  </div>
+  <div id="cap-photo" hidden>
+    <img id="cap-photo-img" alt="Photo on this capture">
+    <div class="side">
+      <span id="cap-photo-info"></span>
+      <button class="btn" id="cap-photo-remove" type="button">Remove</button>
+    </div>
   </div>
   <textarea id="cap-body" maxlength="20000" autocomplete="off" spellcheck="true"
     enterkeyhint="enter" placeholder="Type, or tap the mic on the keyboard"></textarea>
@@ -405,7 +441,7 @@
 'use strict';
 
 // Bump together with CACHE_VERSION in sw.js on every release.
-const APP_VERSION = 6;
+const APP_VERSION = 7;
 
 const PROJECT_REF = 'nnnnonspfljdkrxstslw';           // Supabase project travelboard (SPEC.md D3, 6.8)
 const SUPABASE_URL = 'https://' + PROJECT_REF + '.supabase.co';
@@ -421,6 +457,9 @@ const GPS_OPTS = { enableHighAccuracy: true, timeout: 5000, maximumAge: 60000 };
 const JOURNAL_URL = SUPABASE_URL + '/functions/v1/tb-journal';
 const JOURNAL_TIMEOUT_MS = 120000;  // tb-journal gives Claude 90 s; a retry after a timeout is free
 const JOURNAL_DAYS_LIMIT = 400;
+const BUCKET = 'tb-photos';          // private Storage bucket, own folder <uid>/ (SPEC.md 7A.1)
+const PHOTO_EDGE = 1280;            // long edge after shrinking on the phone (SPEC.md 7A.2)
+const PHOTO_QUALITY = 0.82;
 
 const $ = (id) => document.getElementById(id);
 
@@ -475,17 +514,19 @@ function fmtTime(iso, tz) {
 }
 const deviceTz = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
-// ---------- IndexedDB: database travelboard v2, small promise wrapper ----------
+// ---------- IndexedDB: database travelboard v3, small promise wrapper ----------
 // v1 (M0): captures, drafts, meta. v2 (M2): journal (turns and replies, by id) and jdays
 // (one row per local day: title suffix, and the server's message count and latest
-// server_ts from the last pull, used to skip unchanged days).
+// server_ts from the last pull, used to skip unchanged days). v3 (M1.1): photos, one per
+// capture by capture id: { id, blob, w, h, bytes, uploaded (0 queued, 1 on the server),
+// at (when this blob was set, so an upload never confirms a photo replaced meanwhile) }.
 
 const idb = (() => {
   let dbp = null;
   function open() {
     if (dbp) return dbp;
     dbp = new Promise((resolve, reject) => {
-      const r = indexedDB.open('travelboard', 2);
+      const r = indexedDB.open('travelboard', 3);
       r.onupgradeneeded = () => {
         const db = r.result;
         if (!db.objectStoreNames.contains('captures')) {
@@ -501,6 +542,10 @@ const idb = (() => {
           j.createIndex('state', 'state');
         }
         if (!db.objectStoreNames.contains('jdays')) db.createObjectStore('jdays', { keyPath: 'local_date' });
+        if (!db.objectStoreNames.contains('photos')) {
+          const ph = db.createObjectStore('photos', { keyPath: 'id' });
+          ph.createIndex('uploaded', 'uploaded');
+        }
       };
       r.onsuccess = () => {
         const db = r.result;
@@ -569,6 +614,10 @@ const idb = (() => {
       const db = await open();
       return result(db.transaction(store).objectStore(store).getAll());
     },
+    async keys(store) {
+      const db = await open();
+      return result(db.transaction(store).objectStore(store).getAllKeys());
+    },
     async byIndex(store, index, value) {
       const db = await open();
       return result(db.transaction(store).objectStore(store).index(index).getAll(value));
@@ -624,7 +673,8 @@ try {
 // ---------- captures ----------
 
 const SERVER_FIELDS = ['id', 'body', 'kind', 'captured_at', 'tz', 'local_date', 'lat', 'lng',
-  'accuracy_m', 'trip_id', 'place_id', 'updated_at', 'deleted_at'];
+  'accuracy_m', 'trip_id', 'place_id', 'photo_path', 'photo_w', 'photo_h', 'photo_bytes',
+  'updated_at', 'deleted_at'];
 const toServer = (row) => Object.fromEntries(SERVER_FIELDS.map((k) => [k, row[k] === undefined ? null : row[k]]));
 
 // ---------- capture rows: save, edit, delete, GPS ----------
@@ -642,6 +692,7 @@ function newCaptureRow(body, kind) {
     local_date: localDay(now, tz),
     lat: null, lng: null, accuracy_m: null,
     trip_id: null, place_id: null,
+    photo_path: null, photo_w: null, photo_h: null, photo_bytes: null,
     updated_at: iso,
     deleted_at: null,
     server_ts: null,
@@ -673,7 +724,7 @@ function requestGps(id) {
 
 // mode 'new' (draft key "new"), 'edit' (draft key = capture id) or 'journal' (the same
 // screen as the journal composer, draft key "journal:<local_date>", Save reads Send).
-const cap = { open: false, mode: null, row: null, kind: 'note', busy: false, jdate: null };
+const cap = { open: false, mode: null, row: null, kind: 'note', busy: false, jdate: null, photo: null };
 const draftKey = () => (cap.mode === 'new' ? 'new' : cap.mode === 'journal' ? 'journal:' + cap.jdate : cap.row.id);
 const capBody = () => $('cap-body').value.trim().slice(0, BODY_MAX);
 
@@ -682,18 +733,92 @@ function setKind(kind) {
   $('kind-note').setAttribute('aria-pressed', String(cap.kind === 'note'));
   $('kind-journal').setAttribute('aria-pressed', String(cap.kind === 'journal'));
 }
+// The photo on the capture screen (SPEC.md 7A.2). state: 'none'; 'keep' (the saved capture's
+// own photo, unchanged); 'new' (attached on this screen: blob, w, h, bytes); 'removed' (an
+// edit that takes the saved photo off). A photo counts as content: Save works without text.
+const hasPhoto = () => !!cap.photo && (cap.photo.state === 'new' || cap.photo.state === 'keep');
 function updateSaveEnabled() {
-  $('cap-save').disabled = cap.busy || capBody() === '';
+  $('cap-save').disabled = cap.busy || (capBody() === '' && !(cap.mode !== 'journal' && hasPhoto()));
+}
+
+let photoUrl = null;
+function setPhoto(p) {
+  cap.photo = p || { state: 'none' };
+  if (photoUrl) { URL.revokeObjectURL(photoUrl); photoUrl = null; }
+  const show = hasPhoto();
+  $('cap-photo').hidden = !show;
+  $('cap-photo-btn').textContent = show ? 'Replace' : 'Photo';
+  if (show) {
+    if (cap.photo.blob) {
+      photoUrl = URL.createObjectURL(cap.photo.blob);
+      $('cap-photo-img').src = photoUrl;
+      $('cap-photo-img').hidden = false;
+    } else {
+      $('cap-photo-img').removeAttribute('src');
+      $('cap-photo-img').hidden = true;
+    }
+    $('cap-photo-info').textContent = cap.photo.blob
+      ? `${cap.photo.w} x ${cap.photo.h}, ${Math.round(cap.photo.bytes / 1024)} KB${cap.photo.state === 'new' ? ', not saved yet' : ''}`
+      : 'Photo not on this phone yet; it downloads on the next sync.';
+  }
+  updateSaveEnabled();
+}
+
+// Decode with the camera's orientation applied, draw at most PHOTO_EDGE px on the long edge,
+// re-encode as JPEG. Re-encoding drops EXIF, which is intended: place comes from the
+// capture's own GPS (SPEC.md 7A.2).
+async function shrinkPhoto(file) {
+  let bmp;
+  try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+  catch (e) { bmp = await createImageBitmap(file); }
+  const scale = Math.min(1, PHOTO_EDGE / Math.max(bmp.width, bmp.height));
+  const w = Math.max(1, Math.round(bmp.width * scale)), h = Math.max(1, Math.round(bmp.height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  canvas.getContext('2d').drawImage(bmp, 0, 0, w, h);
+  if (bmp.close) bmp.close();
+  const blob = await new Promise((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('could not encode the photo'))), 'image/jpeg', PHOTO_QUALITY));
+  return { blob, w, h, bytes: blob.size };
+}
+
+// The draft's photo: an object for a photo attached on this screen, null for an edit that
+// removes the saved photo, absent otherwise.
+function draftPhoto() {
+  if (!cap.photo || cap.mode === 'journal') return undefined;
+  if (cap.photo.state === 'new') return { blob: cap.photo.blob, w: cap.photo.w, h: cap.photo.h, bytes: cap.photo.bytes };
+  if (cap.photo.state === 'removed') return null;
+  return undefined;
+}
+function draftRecord(open) {
+  const d = { id: draftKey(), body: $('cap-body').value, kind: cap.kind, open, updated_at: new Date().toISOString() };
+  const ph = draftPhoto();
+  if (ph !== undefined) d.photo = ph;
+  return d;
 }
 
 // Every input writes the draft with open: true. Open means the screen is up, so a draft
 // still open at boot means the app was killed mid-typing.
 function writeDraft() {
   if (!cap.open) return Promise.resolve();
-  return idb.put('drafts', {
-    id: draftKey(), body: $('cap-body').value, kind: cap.kind, open: true,
-    updated_at: new Date().toISOString()
-  }).catch((e) => console.warn('draft write failed', e));
+  return idb.put('drafts', draftRecord(true)).catch((e) => console.warn('draft write failed', e));
+}
+
+async function attachPhoto(file) {
+  if (!cap.open || cap.mode === 'journal') return;
+  try {
+    const p = await shrinkPhoto(file);
+    setPhoto(Object.assign({ state: 'new' }, p));
+    await writeDraft();
+  } catch (e) {
+    alert('Could not read this photo: ' + ((e && e.message) || e));
+  }
+}
+function removePhoto() {
+  if (!cap.open) return;
+  const saved = cap.mode === 'edit' && cap.row && (cap.row.photo_path || cap.savedPhoto);
+  setPhoto({ state: saved ? 'removed' : 'none' });
+  writeDraft();
 }
 
 // Android back: opening the screen pushes a history entry, so back pops it and closes the
@@ -720,6 +845,15 @@ async function openCapture(mode, row, draft) {
   const ta = $('cap-body');
   ta.value = draft ? draft.body : row ? row.body : '';
   setKind(draft ? draft.kind : row ? row.kind : 'note');
+  // Photo: the draft's own first (attached, or removed in an edit), else the saved one.
+  cap.savedPhoto = mode === 'edit' ? await idb.get('photos', row.id) : null;
+  if (mode === 'journal') setPhoto(null);
+  else if (draft && draft.photo) setPhoto(Object.assign({ state: 'new' }, draft.photo));
+  else if (draft && draft.photo === null && mode === 'edit') setPhoto({ state: 'removed' });
+  else if (mode === 'edit' && (cap.savedPhoto || row.photo_path)) {
+    const sp = cap.savedPhoto;
+    setPhoto(sp ? { state: 'keep', blob: sp.blob, w: sp.w, h: sp.h, bytes: sp.bytes } : { state: 'keep' });
+  } else setPhoto(null);
   if (mode === 'edit') {
     const parts = [`Captured ${fmtDate(row.captured_at, row.tz)} ${fmtTime(row.captured_at, row.tz)}`];
     if (row.tz !== deviceTz()) parts.push(cityOf(row.tz));
@@ -728,6 +862,7 @@ async function openCapture(mode, row, draft) {
   }
   $('cap-foot').hidden = mode !== 'edit';
   $('kind-group').hidden = mode === 'journal';
+  $('cap-photo-btn').hidden = mode === 'journal';
   $('cap-save').textContent = mode === 'journal' ? 'Send' : 'Save';
   ta.placeholder = mode === 'journal'
     ? 'Tell Claude about the day. Tap the mic on the keyboard to talk.'
@@ -766,21 +901,22 @@ async function openEdit(id) {
 // how: 'close' (button), 'back' (Android back), 'saved', 'deleted'.
 async function closeCapture(how) {
   if (!cap.open) return;
+  const closed = draftRecord(false);
   cap.open = false;
   const key = draftKey();
   const body = $('cap-body').value;
-  const kind = cap.kind;
   $('cap-body').blur();
   $('cap').hidden = true;
   if (how !== 'back') popCaptureState();
   if (how === 'close' || how === 'back') {
     // New capture or journal turn: keep the draft, closed. Edit: discard it.
-    if ((cap.mode === 'new' || cap.mode === 'journal') && body.trim()) {
-      await idb.put('drafts', { id: key, body, kind, open: false, updated_at: new Date().toISOString() });
+    if ((cap.mode === 'new' || cap.mode === 'journal') && (body.trim() || closed.photo)) {
+      await idb.put('drafts', closed);
     } else {
       await idb.del('drafts', key);
     }
   }
+  setPhoto(null);
   await updateDraftNote();
 }
 
@@ -790,7 +926,7 @@ async function updateDraftNote() {
   const journal = tab === 'journal';
   const label = journal ? 'Write' : 'Capture';
   const d = await idb.get('drafts', journal ? 'journal:' + jDay : 'new');
-  const kept = !!(d && d.body && d.body.trim());
+  const kept = !!(d && ((d.body && d.body.trim()) || d.photo));
   $('primary-label').textContent = label;
   $('draft-note').hidden = !kept;
   $('capture').setAttribute('aria-label', kept ? label + ', draft kept' : label);
@@ -799,15 +935,21 @@ async function updateDraftNote() {
 async function saveCapture() {
   if (cap.mode === 'journal') return sendTurn();
   const body = capBody();
-  if (!cap.open || cap.busy || !body) return;
+  if (!cap.open || cap.busy || (!body && !hasPhoto())) return;
   cap.busy = true;
   updateSaveEnabled();
+  const ph = cap.photo;
+  const at = new Date().toISOString();
   try {
     if (cap.mode === 'new') {
       const row = newCaptureRow(body, cap.kind);
-      // Local write first, atomically with clearing the draft. Never waits on GPS or network.
-      await idb.tx(['captures', 'drafts'], (t) => {
+      // Local write first, atomically with the photo and clearing the draft. Never waits on
+      // GPS or network; the photo uploads on a later sync (SPEC.md 7A.3).
+      await idb.tx(['captures', 'drafts', 'photos'], (t) => {
         t.objectStore('captures').put(row);
+        if (ph.state === 'new') {
+          t.objectStore('photos').put({ id: row.id, blob: ph.blob, w: ph.w, h: ph.h, bytes: ph.bytes, uploaded: 0, at });
+        }
         t.objectStore('drafts').delete('new');
       });
       followToday = true;
@@ -816,14 +958,24 @@ async function saveCapture() {
       requestGps(row.id);
     } else {
       const id = cap.row.id, kind = cap.kind;
-      // Body and kind only; captured_at, tz and local_date never change on edit.
-      await idb.tx(['captures', 'drafts'], (t) => {
+      // Body, kind and photo only; captured_at, tz and local_date never change on edit.
+      // A new photo replaces the old one (uploaded to the same path on the next sync); a
+      // removed photo clears the four fields, and the file stays in Storage (SPEC.md 7A.2).
+      await idb.tx(['captures', 'drafts', 'photos'], (t) => {
         const s = t.objectStore('captures');
         const g = s.get(id);
         g.onsuccess = () => {
           const row = g.result;
-          if (!row || (row.body === body && row.kind === kind)) return;
-          s.put(Object.assign({}, row, { body, kind, updated_at: nextUpdatedAt(row.updated_at), dirty: 1 }));
+          const change = ph.state === 'new' || ph.state === 'removed';
+          if (!row || (row.body === body && row.kind === kind && !change)) return;
+          const next = Object.assign({}, row, { body, kind, updated_at: nextUpdatedAt(row.updated_at), dirty: 1 });
+          if (ph.state === 'new') {
+            t.objectStore('photos').put({ id, blob: ph.blob, w: ph.w, h: ph.h, bytes: ph.bytes, uploaded: 0, at });
+          } else if (ph.state === 'removed') {
+            Object.assign(next, { photo_path: null, photo_w: null, photo_h: null, photo_bytes: null });
+            t.objectStore('photos').delete(id);
+          }
+          s.put(next);
         };
         t.objectStore('drafts').delete(id);
       });
@@ -907,10 +1059,10 @@ async function handleEntry() {
       const old = await idb.get('drafts', 'new');
       let body = old && old.body ? old.body : '';
       if (!body.includes(prefill)) body = body.trim() ? body.replace(/\s+$/, '') + '\n' + prefill : prefill;
-      await idb.put('drafts', {
+      await idb.put('drafts', Object.assign({}, old || {}, {
         id: 'new', body: body.slice(0, BODY_MAX), kind: old ? old.kind : 'note', open: true,
         updated_at: new Date().toISOString()
-      });
+      }));
     }
     // Clean URL, so a reload or a later launch does not apply the same entry twice.
     history.replaceState(null, '', location.pathname);
@@ -965,6 +1117,7 @@ async function exportCaptures() {
 // The home screen shows one local day. It follows "today" (0400 rollover, device zone)
 // until the user steps to another day; tapping the date label returns to today.
 let viewDay = null;
+let thumbUrls = [];                 // object URLs of the row thumbnails, revoked on the next render
 let followToday = true;
 
 // Renders the tab on screen, then the status pill. IndexedDB only.
@@ -993,6 +1146,9 @@ async function renderCaptures() {
   const here = deviceTz();
   const rows = live.filter((r) => r.local_date === viewDay)
     .sort((a, b) => (a.captured_at < b.captured_at ? 1 : a.captured_at > b.captured_at ? -1 : 0));
+  const photoIds = new Set(await idb.keys('photos'));
+  for (const u of thumbUrls) URL.revokeObjectURL(u);
+  thumbUrls = [];
   const ul = $('records');
   ul.replaceChildren();
   for (const r of rows) {
@@ -1026,16 +1182,36 @@ async function renderCaptures() {
       gps.setAttribute('aria-label', 'GPS fix recorded');
       l1.append(gps);
     }
+    // A photo still waiting to upload keeps the row queued even once its text is on the server.
+    const local = photoIds.has(r.id) ? await idb.get('photos', r.id) : null;
+    const queued = !!r.dirty || !!(local && !local.uploaded);
     const chip = document.createElement('span');
-    chip.className = 'chip ' + (r.dirty ? 'queued' : 'synced');
-    chip.textContent = r.dirty ? 'queued' : 'synced';
+    chip.className = 'chip ' + (queued ? 'queued' : 'synced');
+    chip.textContent = queued ? 'queued' : 'synced';
     l1.append(chip);
 
     const l2 = document.createElement('div');
     l2.className = 'line2';
-    l2.textContent = (r.body || '').split('\n').find((s) => s.trim()) || '(empty)';
+    const hasPic = !!local || !!r.photo_path;
+    l2.textContent = (r.body || '').split('\n').find((s) => s.trim()) || (hasPic ? '(photo)' : '(empty)');
 
-    btn.append(l1, l2);
+    if (hasPic) {
+      const text = el('div', 'rowtext');
+      text.append(l1, l2);
+      let thumb;
+      if (local) {
+        thumb = document.createElement('img');
+        thumb.className = 'thumb';
+        thumb.alt = 'Photo';
+        const u = URL.createObjectURL(local.blob);
+        thumbUrls.push(u);
+        thumb.src = u;
+      } else {
+        thumb = el('span', 'thumb', 'photo');      // on the server, not on this phone yet
+      }
+      btn.classList.add('hasthumb');
+      btn.append(text, thumb);
+    } else btn.append(l1, l2);
     li.append(btn);
     ul.append(li);
   }
@@ -1236,13 +1412,15 @@ async function dayText(date) {
   const caps = (await idb.byIndex('captures', 'local_date', date)).filter((r) => !r.deleted_at)
     .sort((a, b) => (a.captured_at < b.captured_at ? -1 : 1));
   const msgs = threadOrder(await idb.byIndex('journal', 'local_date', date));
+  const photoIds = new Set(await idb.keys('photos'));
   const lines = [`travelboard journal, ${jTitleText(date)}`,
     `Local day, 0400 to 0400. Times are ${cityOf(here)} time unless another city is named.`, ''];
   lines.push(caps.length ? `Captures (${caps.length})` : 'Captures: none');
   for (const c of caps) {
     let head = `${when(c.captured_at, c.tz)}, ${c.kind}`;
     if (c.lat != null && c.lng != null) head += `, at ${Number(c.lat).toFixed(5)}, ${Number(c.lng).toFixed(5)}`;
-    lines.push(`- ${head}: ${indent(c.body)}`);
+    if (c.photo_path || photoIds.has(c.id)) head += ', with a photo';
+    lines.push(`- ${head}: ${indent(c.body) || '(no text)'}`);
   }
   lines.push('', msgs.length ? 'Conversation with Claude' : 'Conversation with Claude: none');
   for (const m of msgs) {
@@ -1302,7 +1480,8 @@ async function openJournalDay(d) {
 const syncState = { phase: navigator.onLine ? 'checking' : 'offline', error: null };
 
 async function renderStatus() {
-  const queued = (await idb.countByIndex('captures', 'dirty', 1)) + (await idb.countByIndex('journal', 'state', 'pending'));
+  const queued = (await idb.countByIndex('captures', 'dirty', 1)) + (await idb.countByIndex('journal', 'state', 'pending'))
+    + (await idb.countByIndex('photos', 'uploaded', 0));
   const offline = !navigator.onLine || syncState.phase === 'offline';
   let cls, text;
   if (offline) {
@@ -1394,6 +1573,72 @@ async function push() {
       if (!local || local.updated_at !== sent.get(r.id)) return null;
       return Object.assign({}, local, { dirty: 0, server_ts: r.server_ts });
     });
+  }
+}
+
+// ---------- photos (SPEC.md 7A.3) ----------
+
+// Queued photos, one at a time, smallest first, each to tb-photos/<uid>/<id>.jpg with upsert
+// (a retry or a Replace overwrites the same file). On success the capture gets photo_path and
+// the size fields, a newer updated_at and dirty, so the push that follows carries them. A
+// failure leaves the photo queued and does not stop the sync: the capture's text and GPS
+// still go. Returns the first error, or null.
+async function uploadPhotos(s) {
+  const pending = (await idb.byIndex('photos', 'uploaded', 0)).sort((a, b) => a.bytes - b.bytes);
+  let firstError = null;
+  for (const p of pending) {
+    if (!(await idb.get('captures', p.id))) continue;
+    const path = `${s.user.id}/${p.id}.jpg`;
+    let error;
+    try {
+      ({ error } = await sb.storage.from(BUCKET).upload(path, p.blob, { upsert: true, contentType: 'image/jpeg' }));
+    } catch (e) { error = e; }
+    if (error) {
+      console.warn('photo upload failed', path, error);
+      if (!firstError) firstError = error;
+      if (isNetworkError(error) || isAuthError(error)) break;   // the rest would fail the same way
+      continue;
+    }
+    // Confirm only the blob that was sent: a Replace or Remove meanwhile wins.
+    await idb.tx(['photos', 'captures'], (t) => {
+      const ps = t.objectStore('photos'), cs = t.objectStore('captures');
+      const gp = ps.get(p.id);
+      gp.onsuccess = () => {
+        const cur = gp.result;
+        if (!cur || cur.at !== p.at) return;
+        ps.put(Object.assign({}, cur, { uploaded: 1 }));
+        const gc = cs.get(p.id);
+        gc.onsuccess = () => {
+          const row = gc.result;
+          if (!row) return;
+          cs.put(Object.assign({}, row, { photo_path: path, photo_w: p.w, photo_h: p.h, photo_bytes: p.bytes,
+            updated_at: nextUpdatedAt(row.updated_at), dirty: 1 }));
+        };
+      };
+    });
+  }
+  return firstError;
+}
+
+// A pulled capture whose photo is not on this phone (a reinstall, or replaced on another
+// device): download it once, as the user, and keep it. A local photo still queued is never
+// overwritten. Failures wait for the next sync.
+async function downloadPhotos() {
+  const local = new Map((await idb.all('photos')).map((p) => [p.id, p]));
+  const want = (await idb.all('captures')).filter((r) => r.photo_path && !r.deleted_at && !r.dirty && (() => {
+    const l = local.get(r.id);
+    return !l || (l.uploaded && l.bytes !== r.photo_bytes);
+  })());
+  for (const r of want) {
+    const { data, error } = await sb.storage.from(BUCKET).download(r.photo_path);
+    if (error || !data) {
+      console.warn('photo download failed', r.photo_path, error);
+      if (isNetworkError(error)) return;
+      continue;
+    }
+    const blob = data.type === 'image/jpeg' ? data : new Blob([data], { type: 'image/jpeg' });
+    await idb.update('photos', r.id, (cur) => cur && !cur.uploaded ? null
+      : { id: r.id, blob, w: r.photo_w, h: r.photo_h, bytes: blob.size, uploaded: 1, at: new Date().toISOString() });
   }
 }
 
@@ -1530,14 +1775,22 @@ async function sync() {
       await meta.set('last_sync_error', { at: new Date().toISOString(), message: 'not signed in' });
       return;
     }
+    const photoError = await uploadPhotos(s);   // before the push, so photo_path goes with it
     await push();                 // captures first, so tb-journal sees the day's latest notes
     await pushSuffixes();
     await sendJournal(s);
     await pull();
     await pullJournal();
-    syncState.phase = 'idle';
-    await meta.set('last_sync_ok', new Date().toISOString());
-    await meta.set('last_sync_error', null);
+    await downloadPhotos();
+    if (photoError) {
+      // Everything else synced; the photo stays queued and the 30 s retry tries it again.
+      syncState.phase = isNetworkError(photoError) ? 'offline' : isAuthError(photoError) ? 'signin' : 'error';
+      await meta.set('last_sync_error', { at: new Date().toISOString(), message: 'photo upload: ' + ((photoError && photoError.message) || photoError) });
+    } else {
+      syncState.phase = 'idle';
+      await meta.set('last_sync_ok', new Date().toISOString());
+      await meta.set('last_sync_error', null);
+    }
   } catch (e) {
     console.warn('sync failed', e);
     syncState.phase = !navigator.onLine || isNetworkError(e) ? 'offline' : isAuthError(e) ? 'signin' : 'error';
@@ -1595,7 +1848,7 @@ async function checkProject() {
   if (ref === PROJECT_REF) return false;
   const existing = ref !== undefined || (await meta.get('schema_version')) !== undefined;
   if (existing) {
-    await idb.tx(['captures', 'journal', 'jdays', 'meta'], (t) => {
+    await idb.tx(['captures', 'journal', 'jdays', 'meta', 'photos'], (t) => {
       const each = (store, fn) => {
         const req = t.objectStore(store).openCursor();
         req.onsuccess = () => {
@@ -1606,7 +1859,10 @@ async function checkProject() {
           c.continue();
         };
       };
-      each('captures', (r) => Object.assign({}, r, { dirty: 1, server_ts: null }));
+      // A photo_path names a file in the old project: cleared, and the local photo queued again.
+      each('captures', (r) => Object.assign({}, r, { dirty: 1, server_ts: null,
+        photo_path: null, photo_w: null, photo_h: null, photo_bytes: null }));
+      each('photos', (p) => Object.assign({}, p, { uploaded: 0 }));
       each('journal', (r) => r.role === 'user' && r.state === 'sent' ? Object.assign({}, r, { state: 'pending', error: null }) : null);
       each('jdays', (d) => Object.assign({}, d, { suffix_dirty: d.suffix ? 1 : 0, server_last_ts: null, server_messages: null }));
       t.objectStore('meta').put({ key: 'pull_cursor', value: null });
@@ -1738,6 +1994,13 @@ $('cap-delete').addEventListener('click', () => { deleteCapture(); });
 $('cap-body').addEventListener('input', () => { updateSaveEnabled(); writeDraft(); });
 $('kind-note').addEventListener('click', () => { setKind('note'); writeDraft(); });
 $('kind-journal').addEventListener('click', () => { setKind('journal'); writeDraft(); });
+$('cap-photo-btn').addEventListener('click', () => { if (cap.open) $('cap-file').click(); });
+$('cap-file').addEventListener('change', () => {
+  const f = $('cap-file').files && $('cap-file').files[0];
+  $('cap-file').value = '';
+  if (f) attachPhoto(f);
+});
+$('cap-photo-remove').addEventListener('click', () => { removePhoto(); });
 $('records').addEventListener('click', (ev) => {
   const row = ev.target.closest('.row');
   if (row && !cap.open) openEdit(row.dataset.id).catch(fail('Could not open capture'));
@@ -1774,7 +2037,7 @@ if (sb) sb.auth.onAuthStateChange(() => { renderAuth(); });
   $('s-version').textContent = 'v' + APP_VERSION;
   await idb.open();
   await checkProject();               // before the first sync and before schema_version is written
-  if ((await meta.get('schema_version')) !== 2) await meta.set('schema_version', 2);
+  if ((await meta.get('schema_version')) !== 3) await meta.set('schema_version', 3);
   // A reload while the capture screen was up leaves its history entry on top: pop it.
   popCaptureState();
   if (popWait) await popWait;

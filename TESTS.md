@@ -5,6 +5,50 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ---
 
+## M1.1 Photo capture (SPEC.md 7A)
+
+**Status 24/10/26: code ready on branch `claude/eloquent-maxwell-x34dd0`, all automated checks pass. Nothing applied or deployed: migrations 0005 and 0006, `tb-journal` and client v7 go out after the move's step 8 passes. Cut-off on the Pixel 27/10/26.**
+
+### Automated results, 24/10/26 (before applying)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Migrations 0005, 0006 | Written, not applied | 0005: four photo columns on `travel.captures`, two cache columns on `travel.journal_messages`; `tb_capture_upsert` carries the photo fields and accepts only the caller's own `<uid>/<id>.jpg`; `tb_journal_turn` returns `photo_path` per capture; `tb_journal_reply` stores the cache counts. `tb_captures_since` unchanged (returns whole rows). 0006: bucket `tb-photos` (private, 2 MB, `image/jpeg`) and `tb_photos_select`, `_insert`, `_update` on `storage.objects` for `authenticated`, own folder only, no delete. |
+| `checks/smoke.sql` | Written, runs after applying | P1 to P10: photo fields round-trip, wrong `photo_path` rejected, Remove clears the fields, `photo_path` reaches `tb_journal_turn`, cache counts stored, bucket settings, the three policies, own-folder read and write for Gary, a second synthetic uid cannot read Gary's folder, anon reads and writes nothing, no delete. |
+| `checks/static.cjs` | PASS, 74 of 74 | Adds: bucket, 1280 px and JPEG 0.82 in the client, IndexedDB v3, no file deletes, 20 photos and a 1 h cache in `tb-journal`, the shape of 0006. |
+| `checks/headless/fn.test.cjs` | PASS, 35 of 35 | Deno 2.9.4. System prompt is `prompts/journal.md` alone; the day and its captures move to a context block before the thread. F13: 22 photos on a day, the most recent 20 fetched as the user, 19 images (one file missing), each after a label with its capture's time, kind and text, the 2 oldest listed "not shown", the missing one "could not be loaded", the call still made, one 1 h cache breakpoint after the last image. F14: the second turn sends the same context byte for byte and stores `cache_read_tokens` above zero. F4 and F6: cache counts stored on replies. `deno check` clean. |
+| `checks/headless/m11.test.cjs` (new) | PASS, 41 of 41 (three runs) | Below. |
+| `checks/headless/m1.test.cjs`, `m2.test.cjs` on v7 | PASS, 103 of 103 and 80 of 80 | K0 and K12 now expect IndexedDB v3. |
+
+Headless M1.1 groups (`m11.test.cjs`, Storage mock with the own-folder rule, 2 MB and JPEG limits):
+- Capture screen: Photo is a file input taking images (the Android chooser offers camera and gallery), no `capture` attribute.
+- Acceptance 1: in airplane mode a 4000 x 3000 photo becomes a 1280 x 960 JPEG under 500 KB, saves at once with its thumbnail and a queued chip, pill "offline, 2 queued" (capture and photo); on reconnect the file lands at `tb-photos/<uid>/<id>.jpg` (1280 px long edge, read from the JPEG header) and the row's first push already carries `photo_path` and the size fields.
+- Acceptance 2: a 1500 x 2000 PNG from the gallery becomes a 960 x 1280 JPEG and syncs the same way; an 800 x 600 photo keeps its size.
+- Acceptance 3: a photo with no text saves and syncs; the row reads "(photo)".
+- Acceptance 4: a reload after attaching, before Save, reopens the capture screen with the text and the photo; Close keeps the draft with its photo ("draft kept"), also with no text.
+- Acceptance 5: Storage refusing the upload: text and GPS on the server without `photo_path`, the photo queued, the error in settings; the next sync uploads it. A network drop mid-upload: text pushed, pill offline, photo follows. Queued photos go one at a time, smallest first.
+- Edit: full preview; Replace uploads to the same path and updates the sizes; Remove clears the four fields, the file stays in Storage, no delete call.
+- Export carries the four photo fields, no image data. The journal composer has no Photo button.
+- A second phone (reinstall) downloads every photo once, keeps them, shows thumbnails, and does not download again.
+
+### Device steps (Pixel, Chrome), v7: SPEC.md 7A.6
+
+To be run once v7 is live (Claude confirms `const CACHE_VERSION = 7;`). Report the step number and what you saw for any step that does not match.
+
+1. **Update.** Open `https://jeuron-hue.github.io/travelboard/sw.js`: it should read `const CACHE_VERSION = 7;`. Update the app as before; Version v7. Nothing else changes on screen until you open Capture.
+2. **Camera photo offline (item 1).** Turn airplane mode on and check the pill reads "offline". Tap Capture. Next to note/journal there is now a Photo button. Tap it: Android offers Camera and your gallery apps. Choose Camera and photograph something with visible detail the text will not mention (a sign, a menu, a shelf). Back in travelboard the photo shows above the text, with its size (about 1280 x 960) and Remove. Type `Photo test 1`, Save. The row shows a small thumbnail and a yellow "queued" chip; the pill counts the capture and the photo. Turn airplane mode off; within about 35 s everything reads "synced". Note the time. Claude checks the file in `tb-photos` (at most 1280 px, under 500 KB) and the row's photo fields.
+3. **Gallery photo (item 2).** Capture, Photo, pick an existing photo from Google Photos or Files, type `Photo test 2`, Save. It syncs the same way.
+4. **Photo only (item 3).** Capture, Photo, take a photo, and Save with no text. The row reads "(photo)" and syncs.
+5. **Force-close with a photo (item 4).** Capture, Photo, take a photo, type `Photo draft`, and do not Save. Swipe travelboard away from recents. Reopen it: the capture screen comes back with the text and the photo. Save. If Android closes travelboard while the camera is open and the photo is lost on return, report it: that is the phone reclaiming memory, and the step is then repeated.
+6. **Edit.** Tap the `Photo test 2` row: the full photo shows. Tap Replace, pick another photo, Save. Then open `Photo test 1`, tap Remove, Save: its thumbnail goes, the text stays.
+7. **Claude sees the photo (item 6).** With signal, in Journal, Write: `What is in the first photo I took today?` Claude should describe something visible in it that the capture text does not say. Report what it said.
+8. **Cache (item 7).** Within the hour, send one more journal message the same evening. Claude checks `cache_read_tokens` is above zero on that reply.
+9. **Failed upload (item 5)** is covered headless; on the Pixel, note it if a photo ever stays "queued" after its text synced, and whether it caught up later.
+
+Item 8 (anonymous and other-user access refused) is checked by Claude: the smoke tests, and an anonymous REST request for one of your photo paths from outside this sandbox.
+
+---
+
 ## Move to own project (SPEC.md 6.8)
 
 **Status 23/10/26: steps 2 to 6 done. Step 8 waits on the Pixel run below. Step 7 (weatherboard clean-up) waits on step 8 and Gary's yes.**

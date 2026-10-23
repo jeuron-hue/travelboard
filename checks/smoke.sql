@@ -1,5 +1,7 @@
 -- travelboard smoke tests (SPEC.md 11). Run through the Supabase connector as postgres.
--- Tests 1 to 11 cover M0 (migrations 0001, 0002); J1 to J12 cover M2 (migrations 0003, 0004).
+-- Tests 1 to 11 cover M0 (migrations 0001, 0002); J1 to J12 cover M2 (migrations 0003, 0004);
+-- P1 to P10 cover M1.1 (migrations 0005, 0006: photo fields, bucket tb-photos and its policies),
+-- including a second synthetic uid that exists only in the request claims.
 -- Everything runs in one transaction that is rolled back: no rows are left behind.
 -- Acts as Gary's auth user (the single user, gary@travelboard.local) by setting
 -- role and request.jwt.claims the way PostgREST does.
@@ -24,6 +26,9 @@ declare
   v_seen   uuid[] := '{}';
   v_pages  int := 0;
   f        text;
+  v_other  uuid := gen_random_uuid();          -- a second synthetic user, claims only
+  v_oclaims text;
+  v_pid    uuid := '00000000-0000-4000-8000-0000000000d1';
 begin
   if v_uid is null then
     raise exception 'smoke: auth user gary@travelboard.local not found';
@@ -363,6 +368,133 @@ begin
   select coalesce(sum(input_tokens), 0) into v_n from travel.journal_messages
    where role = 'assistant' and local_date = '2000-01-01';
   r := r || jsonb_build_object('test', 'J12 token sum by day', 'pass', v_n = 100, 'detail', v_n);
+
+  -- ================= M1.1 photos (migrations 0005, 0006). Test day 2000-01-02 holds no real rows.
+  reset role;
+  v_oclaims := json_build_object('sub', v_other, 'role', 'authenticated')::text;
+  set local role authenticated;
+  perform set_config('request.jwt.claims', v_claims, true);
+
+  -- P1. photo fields round-trip through upsert and pull
+  v := public.tb_capture_upsert(jsonb_build_object('id', v_pid, 'body', '', 'kind', 'note',
+         'captured_at', '2000-01-02 06:00:00+00', 'tz', 'Asia/Bangkok', 'local_date', '2000-01-02',
+         'updated_at', '2000-01-02 06:00:00+00', 'photo_path', v_uid::text || '/' || v_pid::text || '.jpg',
+         'photo_w', 1280, 'photo_h', 960, 'photo_bytes', 245000));
+  select e into v from jsonb_array_elements((public.tb_captures_since(null, null))->'rows') e where (e->>'id')::uuid = v_pid;
+  r := r || jsonb_build_object('test', 'P1 photo fields stored and pulled (photo-only capture)',
+         'pass', v->>'photo_path' = v_uid::text || '/' || v_pid::text || '.jpg' and (v->>'photo_w')::int = 1280
+                 and (v->>'photo_h')::int = 960 and (v->>'photo_bytes')::int = 245000 and v->>'body' = '', 'detail', v);
+  -- P2. a photo_path that is not the caller's own <uid>/<id>.jpg is rejected
+  foreach f in array array[v_other::text || '/' || v_pid::text || '.jpg', v_uid::text || '/' || gen_random_uuid()::text || '.jpg', 'x.jpg'] loop
+    begin
+      perform public.tb_capture_upsert(jsonb_build_object('id', v_pid, 'body', 'x', 'kind', 'note',
+        'captured_at', '2000-01-02 06:00:00+00', 'tz', 'Asia/Bangkok', 'local_date', '2000-01-02',
+        'updated_at', '2000-01-02 07:00:00+00', 'photo_path', f));
+      r := r || jsonb_build_object('test', 'P2 rejects photo_path ' || left(f, 12), 'pass', false, 'detail', 'accepted');
+    exception when others then
+      get stacked diagnostics v_state = returned_sqlstate;
+      r := r || jsonb_build_object('test', 'P2 rejects photo_path ' || left(f, 12), 'pass', v_state = '22023', 'detail', v_state || ' ' || sqlerrm);
+    end;
+  end loop;
+  -- P3. Remove: a newer row with null photo fields clears them
+  v := public.tb_capture_upsert(jsonb_build_object('id', v_pid, 'body', 'removed', 'kind', 'note',
+         'captured_at', '2000-01-02 06:00:00+00', 'tz', 'Asia/Bangkok', 'local_date', '2000-01-02',
+         'updated_at', '2000-01-02 08:00:00+00'));
+  reset role;
+  select count(*) into v_n from travel.captures where id = v_pid and photo_path is null and photo_w is null and photo_bytes is null;
+  set local role authenticated;
+  r := r || jsonb_build_object('test', 'P3 removing the photo clears the four fields', 'pass', (v->>'applied')::boolean and v_n = 1, 'detail', v);
+  perform public.tb_capture_upsert(jsonb_build_object('id', v_pid, 'body', 'with photo', 'kind', 'note',
+    'captured_at', '2000-01-02 06:00:00+00', 'tz', 'Asia/Bangkok', 'local_date', '2000-01-02',
+    'updated_at', '2000-01-02 09:00:00+00', 'photo_path', v_uid::text || '/' || v_pid::text || '.jpg',
+    'photo_w', 960, 'photo_h', 1280, 'photo_bytes', 200000));
+  -- P4. tb_journal_turn gives tb-journal each capture's photo_path; tb_journal_reply stores cache counts
+  v := public.tb_journal_turn(jsonb_build_object('message_id', '00000000-0000-4000-8000-0000000000e1',
+         'local_date', '2000-01-02', 'content', 'photo turn', 'created_at', '2000-01-02 12:00:00+00'));
+  r := r || jsonb_build_object('test', 'P4 tb_journal_turn captures carry photo_path',
+         'pass', v->'captures'->0->>'photo_path' = v_uid::text || '/' || v_pid::text || '.jpg', 'detail', v->'captures');
+  v := public.tb_journal_reply(jsonb_build_object('reply_to', '00000000-0000-4000-8000-0000000000e1', 'content', 'r',
+         'model', 'claude-sonnet-5-5', 'input_tokens', 50, 'output_tokens', 5, 'cache_write_tokens', 3200, 'cache_read_tokens', 0));
+  r := r || jsonb_build_object('test', 'P4 tb_journal_reply stores cache_write_tokens and cache_read_tokens',
+         'pass', (v->'reply'->>'cache_write_tokens')::int = 3200 and (v->'reply'->>'cache_read_tokens')::int = 0, 'detail', v->'reply');
+
+  -- P5. bucket tb-photos: private, 2 MB, JPEG only
+  reset role;
+  select count(*) into v_n from storage.buckets
+   where id = 'tb-photos' and not public and file_size_limit = 2097152 and allowed_mime_types = array['image/jpeg'];
+  r := r || jsonb_build_object('test', 'P5 bucket tb-photos private, 2 MB, image/jpeg only', 'pass', v_n = 1, 'detail', v_n);
+  -- P6. exactly three policies for the bucket, authenticated only, none for delete
+  select count(*) into v_n from pg_policies
+   where schemaname = 'storage' and tablename = 'objects' and policyname in ('tb_photos_select', 'tb_photos_insert', 'tb_photos_update')
+     and roles = array['authenticated']::name[];
+  r := r || jsonb_build_object('test', 'P6 tb_photos_select, _insert, _update for authenticated only',
+         'pass', v_n = 3 and not exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects'
+                                          and (qual like '%tb-photos%' or with_check like '%tb-photos%') and cmd = 'DELETE'), 'detail', v_n);
+
+  -- Two objects, one in each user's folder (written as postgres, rolled back with the rest).
+  insert into storage.objects (bucket_id, name) values
+    ('tb-photos', v_uid::text || '/' || v_pid::text || '.jpg'),
+    ('tb-photos', v_other::text || '/00000000-0000-4000-8000-0000000000d2.jpg');
+  -- P7. read: own folder only; anon nothing
+  set local role authenticated;
+  perform set_config('request.jwt.claims', v_claims, true);
+  select count(*) into v_n from storage.objects where bucket_id = 'tb-photos' and name like '%-0000000000d_.jpg';
+  r := r || jsonb_build_object('test', 'P7 Gary reads his own photo and not the other user''s',
+         'pass', v_n = 1 and exists (select 1 from storage.objects where name = v_uid::text || '/' || v_pid::text || '.jpg'), 'detail', v_n);
+  perform set_config('request.jwt.claims', v_oclaims, true);
+  select count(*) into v_n from storage.objects where bucket_id = 'tb-photos' and name like v_uid::text || '/%';
+  r := r || jsonb_build_object('test', 'P7 a second synthetic uid cannot read Gary''s folder', 'pass', v_n = 0, 'detail', v_n);
+  reset role;
+  set local role anon;
+  perform set_config('request.jwt.claims', '', true);
+  select count(*) into v_n from storage.objects where bucket_id = 'tb-photos';
+  reset role;
+  r := r || jsonb_build_object('test', 'P7 anon reads nothing in tb-photos', 'pass', v_n = 0, 'detail', v_n);
+  -- P8. write: own folder only
+  set local role authenticated;
+  perform set_config('request.jwt.claims', v_claims, true);
+  begin
+    insert into storage.objects (bucket_id, name) values ('tb-photos', v_uid::text || '/00000000-0000-4000-8000-0000000000d3.jpg');
+    r := r || jsonb_build_object('test', 'P8 Gary uploads into his own folder', 'pass', true, 'detail', null);
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate;
+    r := r || jsonb_build_object('test', 'P8 Gary uploads into his own folder', 'pass', false, 'detail', v_state || ' ' || sqlerrm);
+  end;
+  begin
+    insert into storage.objects (bucket_id, name) values ('tb-photos', v_other::text || '/00000000-0000-4000-8000-0000000000d4.jpg');
+    r := r || jsonb_build_object('test', 'P8 Gary cannot write into another folder', 'pass', false, 'detail', 'accepted');
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate;
+    r := r || jsonb_build_object('test', 'P8 Gary cannot write into another folder', 'pass', v_state = '42501', 'detail', v_state || ' ' || sqlerrm);
+  end;
+  update storage.objects set user_metadata = '{"retry":1}' where bucket_id = 'tb-photos' and name = v_uid::text || '/' || v_pid::text || '.jpg';
+  get diagnostics v_n = row_count;
+  r := r || jsonb_build_object('test', 'P8 Gary can overwrite his own file (upsert on retry)', 'pass', v_n = 1, 'detail', v_n);
+  update storage.objects set user_metadata = '{"x":1}' where bucket_id = 'tb-photos' and name like v_other::text || '/%';
+  get diagnostics v_n = row_count;
+  r := r || jsonb_build_object('test', 'P8 Gary cannot overwrite another user''s file', 'pass', v_n = 0, 'detail', v_n);
+  -- P9. no delete, even of his own file
+  begin
+    delete from storage.objects where bucket_id = 'tb-photos' and name = v_uid::text || '/' || v_pid::text || '.jpg';
+    get diagnostics v_n = row_count;
+  exception when others then
+    v_n := 0;
+  end;
+  reset role;
+  r := r || jsonb_build_object('test', 'P9 Gary cannot delete his own photo (no delete policy)',
+         'pass', v_n = 0 and exists (select 1 from storage.objects where name = v_uid::text || '/' || v_pid::text || '.jpg'), 'detail', v_n);
+  -- P10. anon cannot write
+  set local role anon;
+  perform set_config('request.jwt.claims', '', true);
+  begin
+    insert into storage.objects (bucket_id, name) values ('tb-photos', v_uid::text || '/00000000-0000-4000-8000-0000000000d5.jpg');
+    reset role;
+    r := r || jsonb_build_object('test', 'P10 anon cannot upload', 'pass', false, 'detail', 'accepted');
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate;
+    reset role;
+    r := r || jsonb_build_object('test', 'P10 anon cannot upload', 'pass', v_state = '42501', 'detail', v_state || ' ' || sqlerrm);
+  end;
 
   reset role;
   perform set_config('smoke.results', r::text, true);

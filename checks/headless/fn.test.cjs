@@ -3,7 +3,9 @@
 // Runs the real supabase/functions/tb-journal/index.ts under Deno against local fakes:
 // PostgREST (the journal mock in harness.cjs, which mirrors migration 0004) and the
 // Anthropic Messages API (records every request). Needs deno on PATH or DENO=/path/to/deno.
-// Checks the request it sends to Claude, idempotent retries, error mapping and the 40-turn cap.
+// Checks the request it sends to Claude, idempotent retries, error mapping and the 40-turn cap;
+// from M1.1 (SPEC.md 7A.4) also a fake of Storage: the day's photos as labelled images (most
+// recent 20, the rest listed), a failed download listed, the cache breakpoint, cache counts.
 'use strict';
 const http = require('http');
 const path = require('path');
@@ -18,7 +20,18 @@ const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok }); con
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const m = makeMock();
-const anth = { mode: 'ok', calls: [] };
+const anth = { mode: 'ok', calls: [], prefixes: new Set() };
+// Prompt cache, roughly: a request whose context block (everything up to the breakpoint) was
+// seen before reads it from cache; a new one writes it.
+const cacheUsage = (body) => {
+  const first = body.messages[0];
+  if (!Array.isArray(first.content)) return { cache_creation_input_tokens: 0, cache_read_input_tokens: 0 };
+  const key = JSON.stringify([body.system, first.content.slice(0, -1)]);
+  const hit = anth.prefixes.has(key);
+  anth.prefixes.add(key);
+  return hit ? { cache_creation_input_tokens: 0, cache_read_input_tokens: 3000 } : { cache_creation_input_tokens: 3000, cache_read_input_tokens: 0 };
+};
+const storageGets = [];
 function fake(req, res) {
   let data = '';
   req.on('data', (c) => { data += c; });
@@ -32,7 +45,15 @@ function fake(req, res) {
       return send(200, { id: 'msg_' + anth.calls.length, type: 'message', role: 'assistant', model: 'claude-sonnet-5-5',
         content: refusal ? [] : [{ type: 'text', text: 'Reply ' + anth.calls.length + ' about the omelette.' }],
         stop_reason: refusal ? 'refusal' : 'end_turn', stop_sequence: null,
-        usage: { input_tokens: 1200 + anth.calls.length, output_tokens: 40 } });
+        usage: Object.assign({ input_tokens: 1200 + anth.calls.length, output_tokens: 40 }, cacheUsage(body)) });
+    }
+    const st = /^\/storage\/v1\/object\/tb-photos\/(.+)$/.exec(req.url);
+    if (st && req.method === 'GET') {
+      storageGets.push({ path: decodeURIComponent(st[1]), auth: req.headers.authorization, apikey: req.headers.apikey });
+      const o = m.objects.get(decodeURIComponent(st[1]));
+      if (req.headers.authorization !== JWT || !o) return send(400, { statusCode: '404', error: 'not_found', message: 'Object not found' });
+      res.writeHead(200, { 'content-type': 'image/jpeg' });
+      return res.end(o.bytes);
     }
     if (req.url.startsWith('/rest/v1/rpc/')) {
       if (req.headers.authorization !== JWT) return send(401, { code: 'PGRST301', message: 'JWT expired' });
@@ -102,15 +123,20 @@ const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
     check('F4 model claude-sonnet-5-5, max_tokens 1500', c1.body.model === 'claude-sonnet-5-5' && c1.body.max_tokens === 1500, JSON.stringify([c1.body.model, c1.body.max_tokens]));
     check('F4 thinking between_tools, effort low', c1.body.thinking && c1.body.thinking.type === 'between_tools' && c1.body.output_config && c1.body.output_config.effort === 'low');
     const sys = String(c1.body.system);
-    check('F4 system starts with prompts/journal.md', sys.startsWith(require('fs').readFileSync(path.join(ROOT, 'prompts/journal.md'), 'utf8').trim().slice(0, 60)));
-    check('F4 system lists the day and both live captures with Bangkok local times', sys.includes('Mon 09/11/26')
-      && sys.includes('Jay Fai crab omelette') && sys.includes('1830 hrs Bangkok time') && sys.includes('Wat Pho') && sys.includes('0900 hrs Bangkok time')
-      && sys.indexOf('Wat Pho') < sys.indexOf('Jay Fai') && sys.includes('13.75240, 100.50450 (within 9 m)'));
-    check('F4 system leaves out deleted captures and other days', !sys.includes('DELETED NOTE') && !sys.includes('OTHER DAY'));
-    check('F4 messages: one user turn with the content', c1.body.messages.length === 1 && c1.body.messages[0].role === 'user'
-      && c1.body.messages[0].content === 'Long day. The omelette was worth the wait.');
+    check('F4 system is prompts/journal.md, nothing day-specific', sys === require('fs').readFileSync(path.join(ROOT, 'prompts/journal.md'), 'utf8').trim());
+    const first = c1.body.messages[0];
+    const ctx = Array.isArray(first.content) ? first.content.filter((b) => b.type === 'text').slice(0, -1).map((b) => b.text).join('\n') : '';
+    check('F4 context block lists the day and both live captures with Bangkok local times', ctx.includes('Mon 09/11/26')
+      && ctx.includes('Jay Fai crab omelette') && ctx.includes('1830 hrs Bangkok time') && ctx.includes('Wat Pho') && ctx.includes('0900 hrs Bangkok time')
+      && ctx.indexOf('Wat Pho') < ctx.indexOf('Jay Fai') && ctx.includes('13.75240, 100.50450 (within 9 m)'), ctx.slice(0, 300));
+    check('F4 context leaves out deleted captures and other days', !ctx.includes('DELETED NOTE') && !ctx.includes('OTHER DAY'));
+    check('F4 messages: one user turn, the context first, then the content', c1.body.messages.length === 1 && first.role === 'user'
+      && first.content[first.content.length - 1].type === 'text' && first.content[first.content.length - 1].text === 'Long day. The omelette was worth the wait.'
+      && !!first.content[first.content.length - 2].cache_control);
+    check('F4 no photos on this day: no image blocks, no Storage call', !first.content.some((b) => b.type === 'image') && storageGets.length === 0);
     const row = [...m.jrows.values()].find((x) => x.reply_to === uid(1));
-    check('F4 reply row: model and token counts stored', row && row.model === 'claude-sonnet-5-5' && row.input_tokens === 1201 && row.output_tokens === 40);
+    check('F4 reply row: model, token and cache counts stored', row && row.model === 'claude-sonnet-5-5' && row.input_tokens === 1201 && row.output_tokens === 40
+      && row.cache_write_tokens === 3000 && row.cache_read_tokens === 0, JSON.stringify(row));
 
     // F5 retry returns the stored reply, no API call (acceptance 3)
     r = await call(turn(uid(1), 'Long day. The omelette was worth the wait.', '2026-11-09T14:00:00Z'));
@@ -122,6 +148,8 @@ const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
     const c2 = anth.calls[1];
     check('F6 second turn: thread user, assistant, user', r.status === 200 && c2.body.messages.length === 3
       && c2.body.messages.map((x) => x.role).join() === 'user,assistant,user' && c2.body.messages[1].content === 'Reply 1 about the omelette.');
+    const row2 = [...m.jrows.values()].find((x) => x.reply_to === uid(2));
+    check('F6 second turn reads the context from cache (cache_read_tokens stored)', row2 && row2.cache_read_tokens === 3000 && row2.cache_write_tokens === 0, JSON.stringify(row2));
 
     // F7 Anthropic 401: clear error, turn kept, no reply
     anth.mode = '401';
@@ -156,6 +184,50 @@ const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
     const cap = anth.calls[n0].body.messages;
     check('F10 51-message thread capped to 40, starts with a user turn, ends with "last"', cap.length <= 40 && cap.length >= 39
       && cap[0].role === 'user' && cap[cap.length - 1].content === 'last', cap.length);
+
+    // F13 photos (SPEC.md 7A.4): 23 captures on 11/11, 22 with a photo. The most recent 20
+    // go in as images, except one whose file is missing; the 2 oldest are listed as not shown.
+    const P = '11111111-2222-4333-8444-555555555555';
+    const day = [];
+    for (let i = 0; i < 23; i++) {
+      const id = uid(500 + i);
+      const withPhoto = i !== 5;
+      day.push({ id, body: i === 7 ? '' : `Stop ${i}`, kind: i % 4 === 0 ? 'journal' : 'note', tz: 'Asia/Bangkok', local_date: '2026-11-11',
+        captured_at: `2026-11-11T${String(2 + Math.floor(i / 4)).padStart(2, '0')}:${String((i % 4) * 15).padStart(2, '0')}:00Z`,
+        updated_at: '2026-11-11T12:00:00Z', photo_path: withPhoto ? `${P}/${id}.jpg` : null });
+      if (withPhoto && i !== 15) m.objects.set(`${P}/${id}.jpg`, { bytes: Buffer.from('JPEG-' + i), contentType: 'image/jpeg' });
+    }
+    m.upsertBatch(day);
+    const g0 = storageGets.length, n13 = anth.calls.length;
+    r = await call(turn(uid(300), 'What did you see in the photos?', '2026-11-11T14:00:00Z', '2026-11-11'));
+    const c13 = anth.calls[n13] && anth.calls[n13].body;
+    const blocks = c13 ? c13.messages[0].content : [];
+    const imgs = blocks.filter((b) => b.type === 'image');
+    const ctx13 = blocks[0] && blocks[0].text || '';
+    check('F13 200 and a reply', r.status === 200 && !!r.body.reply, JSON.stringify(r.body));
+    check('F13 20 photos fetched as the user, the 2 oldest not fetched', storageGets.length - g0 === 20
+      && storageGets.slice(g0).every((g) => g.auth === JWT && g.apikey === 'pk_test')
+      && !storageGets.slice(g0).some((g) => g.path.endsWith(uid(500) + '.jpg') || g.path.endsWith(uid(501) + '.jpg')), storageGets.length - g0);
+    check('F13 19 images (the missing file is not one), JPEG base64 of the stored bytes, oldest first', imgs.length === 19
+      && imgs.every((b) => b.source.type === 'base64' && b.source.media_type === 'image/jpeg')
+      && imgs[0].source.data === Buffer.from('JPEG-2').toString('base64') && imgs[18].source.data === Buffer.from('JPEG-22').toString('base64'), imgs.length);
+    const labelOk = blocks.every((b, i) => b.type !== 'image' || (blocks[i - 1].type === 'text' && /^Photo from capture \d+, \d{4} hrs Bangkok time, (note|journal): /.test(blocks[i - 1].text)));
+    check('F13 each image follows a label with its capture\'s time, kind and text', labelOk
+      && blocks.some((b) => b.type === 'text' && b.text.includes('Stop 22')) && blocks.some((b) => b.type === 'text' && /, note: \(no text\)$/.test(b.text)));
+    check('F13 the 2 oldest photos listed as not shown, the missing one as could not be loaded, the call still made',
+      (ctx13.match(/, not shown"/g) || []).length === 2 && (ctx13.match(/could not be loaded/g) || []).length === 1
+      && ctx13.includes('photo="photo at 0900 hrs Bangkok, not shown"'), ctx13.slice(0, 400));
+    const last = blocks[blocks.length - 2];
+    check('F13 cache breakpoint (1 h) on the last context block, the last image; nothing after it but the turn', !!last && last.type === 'image'
+      && JSON.stringify(last.cache_control) === JSON.stringify({ type: 'ephemeral', ttl: '1h' })
+      && blocks.filter((b) => b.cache_control).length === 1 && blocks[blocks.length - 1].text === 'What did you see in the photos?');
+    const row13 = [...m.jrows.values()].find((x) => x.reply_to === uid(300));
+    check('F13 reply stored with cache_write_tokens', row13 && row13.cache_write_tokens === 3000);
+    r = await call(turn(uid(301), 'And the last one?', '2026-11-11T14:05:00Z', '2026-11-11'));
+    const c14 = anth.calls[anth.calls.length - 1].body;
+    const row14 = [...m.jrows.values()].find((x) => x.reply_to === uid(301));
+    check('F14 second turn that evening: same context block byte for byte, cache_read_tokens above zero (acceptance 7)',
+      JSON.stringify(c14.messages[0].content.slice(0, -1)) === JSON.stringify(blocks.slice(0, -1)) && row14 && row14.cache_read_tokens > 0);
 
     // F11 database rejects the JWT
     r = await call(turn(uid(6), 'x', '2026-11-09T15:00:00Z'), { Authorization: 'Bearer eyJ.other' });

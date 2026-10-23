@@ -4,6 +4,8 @@
 //   microsecond server_ts per batch, keyset pull) plus /auth/v1/health
 // - mock of the journal RPCs (migrations 0003, 0004) and of the tb-journal Edge Function,
 //   built on the function's own context.mjs, with switchable failure modes
+// - mock of Storage bucket tb-photos (migration 0006): upload with upsert, own folder only,
+//   2 MB and JPEG only, download, a switch to make uploads fail
 // - browser context setup: timezone, fake session, controllable geolocation stub
 // Needs the dev dependency in package.json (npm install here) or NODE_PATH pointing at
 // an existing playwright install. Chromium: npx playwright install chromium.
@@ -45,8 +47,10 @@ function makeMock() {
     const us = String(m.seq).padStart(6, '0');
     return `2026-10-04T05:00:00.${us}+00:00`;
   };
+  m.pushLog = [];               // every row as pushed: { id, photo_path, at }
   m.upsertBatch = (arr) => {
     const ts = m.serverTs();
+    for (const p of arr) m.pushLog.push({ id: p.id, photo_path: p.photo_path === undefined ? null : p.photo_path, at: m.storageCalls ? m.storageCalls.length : 0 });
     return arr.map((p) => {
       if (typeof p.body === 'string' && [...p.body].length > 20000) throw new Error('body too long');
       if (!p.tz) throw new Error('tz required');
@@ -74,7 +78,32 @@ function makeMock() {
     m.rows.set(id, Object.assign({}, ex, patch, { server_ts: m.serverTs() }));
   };
   addJournal(m);
+  addStorage(m);
   return m;
+}
+
+// ---------- mock of Storage bucket tb-photos (migration 0006) ----------
+function addStorage(m) {
+  m.objects = new Map();        // path -> { bytes: Buffer, contentType }
+  m.storageCalls = [];          // { method, path, status }
+  m.uploadFail = null;          // null | 'network' | 'http'
+  // supabase-js sends a Blob as multipart/form-data: the file is the part named "".
+  m.filePart = (buf, ctype) => {
+    const b = (/boundary=(.+)$/.exec(ctype || '') || [])[1];
+    if (!b) return { bytes: buf, type: ctype };
+    const sep = Buffer.from('--' + b);
+    let i = buf.indexOf(sep);
+    while (i >= 0) {
+      const next = buf.indexOf(sep, i + sep.length);
+      if (next < 0) break;
+      const part = buf.subarray(i + sep.length + 2, next - 2);
+      const h = part.indexOf('\r\n\r\n');
+      const head = part.subarray(0, h).toString();
+      if (/name=""/.test(head)) return { bytes: part.subarray(h + 4), type: (/Content-Type: (\S+)/i.exec(head) || [])[1] };
+      i = next;
+    }
+    return { bytes: Buffer.alloc(0), type: null };
+  };
 }
 
 // ---------- mock of migrations 0003 and 0004, and of tb-journal ----------
@@ -130,6 +159,8 @@ function addJournal(m) {
     const ts = m.serverTs();
     const r = { id: crypto.randomUUID(), local_date: parent.local_date, role: 'assistant', content: p.content,
       reply_to: parent.id, model: p.model, input_tokens: p.input_tokens, output_tokens: p.output_tokens,
+      cache_write_tokens: p.cache_write_tokens == null ? null : p.cache_write_tokens,
+      cache_read_tokens: p.cache_read_tokens == null ? null : p.cache_read_tokens,
       created_at: new Date().toISOString(), server_ts: ts };
     m.jrows.set(r.id, r);
     return { reply: r, inserted: true };
@@ -163,9 +194,17 @@ function addJournal(m) {
     if (m.fnMode === 'busy') return [503, { error: 'anthropic_busy', message: 'Claude is busy or the workspace limit is reached (529). Try again later.' }];
     if (m.fnMode === 'refusal') return [502, { error: 'refusal', message: 'Claude declined to answer this one. Rephrase and send again.' }];
     const c = await loadContext();
-    const system = c.buildSystem('PROMPT', turn.user.local_date, turn.captures);
-    const messages = c.buildMessages(turn.thread);
-    m.claude.push({ system, messages });
+    const images = new Map();
+    for (const id of c.photosToSend(turn.captures)) {
+      const cp = turn.captures.find((x) => x.id === id);
+      const o = m.objects.get(cp.photo_path);
+      images.set(id, o ? o.bytes.toString('base64') : null);
+    }
+    const system = c.buildSystem('PROMPT');
+    const contextBlocks = c.buildContext(turn.user.local_date, turn.captures, images);
+    const messages = c.buildMessages(turn.thread, contextBlocks);
+    const context = contextBlocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+    m.claude.push({ system, messages, context, images: contextBlocks.filter((b) => b.type === 'image').length });
     const caps = turn.captures.map((x) => x.body.split('\n')[0]).join(' / ');
     const text = `Reply ${m.claude.length} to "${messages[messages.length - 1].content}"` + (caps ? `. Captures: ${caps}` : '');
     const stored = m.reply({ reply_to: body.message_id, content: text, model: 'claude-sonnet-5-5', input_tokens: 1000 + m.claude.length, output_tokens: 50 });
@@ -183,6 +222,31 @@ async function attachMock(ctx, m) {
     if (u.pathname === '/auth/v1/health') return route.fulfill({ status: 200, headers: cors, body: '{}' });
     const json = (status, obj) => route.fulfill({ status, headers: Object.assign({ 'content-type': 'application/json' }, cors), body: JSON.stringify(obj) });
     if (m.unauth) return json(401, { code: 'PGRST301', message: 'JWT expired' });
+    const st = /^\/storage\/v1\/object\/tb-photos\/(.+)$/.exec(u.pathname);
+    if (st) {
+      const p = decodeURIComponent(st[1]);
+      const auth = req.headers()['authorization'] || '';
+      const own = /^Bearer eyJ/.test(auth) && p.split('/')[0] === UID;
+      const done = (status, obj) => { m.storageCalls.push({ method: req.method(), path: p, status }); return json(status, obj); };
+      if (req.method() === 'POST' || req.method() === 'PUT') {
+        if (m.uploadFail === 'network') { m.storageCalls.push({ method: req.method(), path: p, status: 0 }); return route.abort('internetdisconnected'); }
+        if (m.uploadFail === 'http') return done(500, { statusCode: '500', error: 'Internal', message: 'storage down' });
+        if (!own) return done(403, { statusCode: '403', error: 'Unauthorized', message: 'new row violates row-level security policy' });
+        const f = m.filePart(req.postDataBuffer() || Buffer.alloc(0), req.headers()['content-type']);
+        if (f.bytes.length > 2 * 1024 * 1024) return done(413, { statusCode: '413', error: 'Payload too large', message: 'The object exceeded the maximum allowed size' });
+        if (f.type !== 'image/jpeg') return done(415, { statusCode: '415', error: 'invalid_mime_type', message: 'mime type ' + f.type + ' is not supported' });
+        if (m.objects.has(p) && req.headers()['x-upsert'] !== 'true') return done(409, { statusCode: '409', error: 'Duplicate', message: 'The resource already exists' });
+        m.objects.set(p, { bytes: Buffer.from(f.bytes), contentType: f.type });
+        return done(200, { Key: 'tb-photos/' + p, Id: p });
+      }
+      if (req.method() === 'GET') {
+        const o = m.objects.get(p);
+        if (!own || !o) return done(400, { statusCode: '404', error: 'not_found', message: 'Object not found' });
+        m.storageCalls.push({ method: 'GET', path: p, status: 200 });
+        return route.fulfill({ status: 200, headers: Object.assign({ 'content-type': 'image/jpeg' }, cors), body: o.bytes });
+      }
+      return done(405, { message: 'method' });
+    }
     const body = req.postDataJSON ? req.postDataJSON() : null;
     m.calls.push(u.pathname);
     if (u.pathname === '/functions/v1/tb-journal') {

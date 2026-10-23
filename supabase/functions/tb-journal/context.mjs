@@ -1,4 +1,4 @@
-// tb-journal context building (SPEC.md 8.3 steps 5 and 6). Plain ES module with no
+// tb-journal context building (SPEC.md 8.3 steps 5 and 6, 7A.4). Plain ES module with no
 // imports, so the Edge Function (Deno) and the headless checks (node) run the same code.
 
 export const MAX_TURNS = 40;
@@ -27,27 +27,64 @@ export function fmtLocalTime(iso, tz) {
   return `${p.hour}${p.minute} hrs ${city} time`;
 }
 
-// System prompt: the journal contract from prompts/journal.md, then the day's context.
-export function buildSystem(prompt, localDate, captures) {
+export const MAX_PHOTOS = 20;      // SPEC.md 7A.4: the most recent 20 of the day's photos go in as images
+export const CACHE_TTL = '1h';     // an evening's turns can be more than 5 min apart (SPEC.md 7A.4)
+
+// System prompt: the journal contract from prompts/journal.md. The day's context goes in a
+// block before the thread (buildContext), so the system prompt is the same every day.
+export function buildSystem(prompt) {
+  return String(prompt).trim();
+}
+
+// Which of the day's photos go in as images: the most recent MAX_PHOTOS by captured_at.
+// captures: the day's live captures, oldest first. Returns ids, oldest first.
+export function photosToSend(captures) {
+  return (captures || []).filter((c) => c.photo_path).map((c) => c.id).slice(-MAX_PHOTOS);
+}
+
+// The day's context as content blocks, placed before the thread (SPEC.md 7A.4): the day,
+// every capture with its local time, kind, place and text, then each photo sent as an image,
+// labelled with its capture. A photo beyond the 20 is listed as "not shown"; one that failed
+// to download as "could not be loaded". The last block carries the cache breakpoint, so the
+// later turns of the evening read the images from cache.
+// images: Map capture id -> base64 JPEG, or null when the download failed. Ids missing from
+// the map were not sent (beyond the 20).
+export function buildContext(localDate, captures, images) {
+  const imgs = images || new Map();
   const list = (captures || []).map((c, i) => {
     const where = c.lat != null && c.lng != null
-      ? `, at ${Number(c.lat).toFixed(5)}, ${Number(c.lng).toFixed(5)}` +
+      ? `${Number(c.lat).toFixed(5)}, ${Number(c.lng).toFixed(5)}` +
         (c.accuracy_m != null ? ` (within ${Math.round(c.accuracy_m)} m)` : '')
       : '';
-    return `<capture n="${i + 1}" time="${fmtLocalTime(c.captured_at, c.tz)}" kind="${c.kind}"${where ? ` location="${where.slice(5)}"` : ''}>\n` +
-      `${String(c.body || '').trim()}\n</capture>`;
+    let photo = '';
+    if (c.photo_path) {
+      const at = `photo at ${fmtLocalTime(c.captured_at, c.tz).replace(/ time$/, '')}`;
+      photo = !imgs.has(c.id) ? ` photo="${at}, not shown"` : imgs.get(c.id) === null ? ` photo="${at}, could not be loaded"` : ' photo="shown below"';
+    }
+    return `<capture n="${i + 1}" time="${fmtLocalTime(c.captured_at, c.tz)}" kind="${c.kind}"${where ? ` location="${where}"` : ''}${photo}>\n` +
+      `${String(c.body || '').trim() || '(no text)'}\n</capture>`;
   });
-  return `${String(prompt).trim()}\n\n` +
+  const blocks = [{ type: 'text', text:
     `<day>${fmtDay(localDate)}. A local day runs from 0400 to 0400, so captures after midnight belong to this evening.</day>\n\n` +
     (list.length
       ? `Gary's captures for this day, oldest first (${list.length}). These are his own notes, typed or dictated on the street:\n\n${list.join('\n\n')}`
-      : 'Gary made no captures on this day.');
+      : 'Gary made no captures on this day.') }];
+  (captures || []).forEach((c, i) => {
+    const data = imgs.get(c.id);
+    if (!data) return;
+    const text = String(c.body || '').trim();
+    blocks.push({ type: 'text', text: `Photo from capture ${i + 1}, ${fmtLocalTime(c.captured_at, c.tz)}, ${c.kind}: ${text || '(no text)'}` });
+    blocks.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } });
+  });
+  blocks[blocks.length - 1].cache_control = { type: 'ephemeral', ttl: CACHE_TTL };
+  return blocks;
 }
 
 // thread: [{role, content}] in thread order, ending with the user turn being answered.
 // Consecutive turns of one role are joined (a turn that failed and a later one, both sent
-// before any reply), capped to the most recent MAX_TURNS, starting on a user turn.
-export function buildMessages(thread) {
+// before any reply), capped to the most recent MAX_TURNS, starting on a user turn. When
+// context blocks are given, they open the first user message, ahead of its text.
+export function buildMessages(thread, context) {
   const out = [];
   for (const m of thread || []) {
     const role = m.role === 'assistant' ? 'assistant' : 'user';
@@ -60,5 +97,6 @@ export function buildMessages(thread) {
   let msgs = out.slice(-MAX_TURNS);
   while (msgs.length && msgs[0].role !== 'user') msgs = msgs.slice(1);
   if (!msgs.length || msgs[msgs.length - 1].role !== 'user') throw new Error('thread must end with a user turn');
+  if (context && context.length) msgs[0] = { role: 'user', content: [...context, { type: 'text', text: msgs[0].content }] };
   return msgs;
 }

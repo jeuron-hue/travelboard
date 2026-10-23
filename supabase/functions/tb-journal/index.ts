@@ -7,23 +7,32 @@
 // travelboard) and never leaves this function.
 //
 // Steps: store the user turn (idempotent) -> if a reply exists, return it with no API
-// call -> else build the system prompt (prompts/journal.md plus the day's captures) and
-// the thread (last 40 turns) -> Claude -> store the reply once -> return it.
+// call -> else download the day's photos as the user (most recent 20, SPEC.md 7A.4) ->
+// build the system prompt (prompts/journal.md), the day's context block (captures and
+// photos, with a prompt-cache breakpoint after the last one) and the thread (last 40
+// turns) -> Claude -> store the reply once, with token and cache counts -> return it.
 //
 // Responses: 200 { user, reply, cached }. Errors: { error, message } with 400 bad request,
 // 401 not signed in, 502 Anthropic or database failure, 503 Anthropic busy. The client
 // keeps the user turn and offers Retry.
 //
 // Change log (newest first)
+// - 23/10/26 M1.1 Photo capture (SPEC.md 7A.4). The day's captures move from the system
+//   prompt into a context block before the thread; each of the most recent 20 photos goes
+//   in as an image labelled with its capture, the rest are listed as not shown, a failed
+//   download is listed as could not be loaded and the call goes ahead. Cache breakpoint
+//   (1 h) after the context; cache write and read tokens stored on the reply.
 // - 10/10/26 First version (M2).
 
 import Anthropic from 'npm:@anthropic-ai/sdk@0.127.0';
 import { JOURNAL_PROMPT } from './prompt.ts';
-import { buildMessages, buildSystem } from './context.mjs';
+import { buildContext, buildMessages, buildSystem, photosToSend } from './context.mjs';
 
 const MODEL = 'claude-sonnet-5-5';
 const MAX_TOKENS = 1500;          // SPEC.md 8.3 step 6, 8.6
 const API_TIMEOUT_MS = 90_000;    // the client waits 120 s for the whole call
+const PHOTO_TIMEOUT_MS = 15_000;  // per photo download; a slow one is listed as not loaded
+const BUCKET = 'tb-photos';
 
 const CORS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -36,6 +45,13 @@ const YMD = /^\d{4}-\d{2}-\d{2}$/;
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
 const fail = (status: number, error: string, message: string) => json(status, { error, message });
+
+// Uint8Array -> base64, in chunks so a 300 KB photo never overflows the argument list.
+function toBase64(bytes: Uint8Array): string {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
 
 class RpcError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -91,9 +107,28 @@ Deno.serve(async (req) => {
     const key = Deno.env.get('TB_ANTHROPIC_API_KEY');
     if (!key) return fail(502, 'no_key', 'TB_ANTHROPIC_API_KEY is not set in the Edge Function secrets.');
 
+    // Step 4 (7A.4): the day's photos, downloaded as the caller, so Storage applies the
+    // tb_photos_select policy. A failure is null: listed as "could not be loaded".
+    const storage = Deno.env.get('SUPABASE_URL') + '/storage/v1/object/' + BUCKET + '/';
+    const captures = turn.captures || [];
+    const images = new Map<string, string | null>();
+    await Promise.all(photosToSend(captures).map(async (id: string) => {
+      const c = captures.find((x: { id: string }) => x.id === id);
+      try {
+        const r = await fetch(storage + c.photo_path, {
+          headers: { apikey, Authorization: auth }, signal: AbortSignal.timeout(PHOTO_TIMEOUT_MS) });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        images.set(id, toBase64(new Uint8Array(await r.arrayBuffer())));
+      } catch (e) {
+        console.error('photo download failed', c.photo_path, (e as Error).message || String(e));
+        images.set(id, null);
+      }
+    }));
+
     // Steps 5 and 6.
-    const system = buildSystem(JOURNAL_PROMPT, turn.user.local_date, turn.captures);
-    const messages = buildMessages(turn.thread);
+    const system = buildSystem(JOURNAL_PROMPT);
+    const context = buildContext(turn.user.local_date, captures, images);
+    const messages = buildMessages(turn.thread, context);
     const client = new Anthropic({ apiKey: key, timeout: API_TIMEOUT_MS, maxRetries: 1 });
     let msg;
     try {
@@ -128,13 +163,17 @@ Deno.serve(async (req) => {
     }
     const text = msg.content.filter((b) => b.type === 'text').map((b) => (b as { text: string }).text).join('').trim();
     if (!text) return fail(502, 'empty', `Claude returned no text (stop reason ${msg.stop_reason}).`);
+    const cacheWrite = msg.usage.cache_creation_input_tokens ?? 0;
+    const cacheRead = msg.usage.cache_read_input_tokens ?? 0;
     console.log('reply', { model: msg.model, input_tokens: msg.usage.input_tokens,
-      output_tokens: msg.usage.output_tokens, stop_reason: msg.stop_reason });
+      output_tokens: msg.usage.output_tokens, cache_write_tokens: cacheWrite, cache_read_tokens: cacheRead,
+      photos: [...images.values()].filter(Boolean).length, stop_reason: msg.stop_reason });
 
     // Step 7: stored once. A concurrent retry that got there first wins; return its reply.
     const stored = await rpc('tb_journal_reply', {
       reply_to: message_id, content: text, model: msg.model,
       input_tokens: msg.usage.input_tokens, output_tokens: msg.usage.output_tokens,
+      cache_write_tokens: cacheWrite, cache_read_tokens: cacheRead,
     });
     return json(200, { user: turn.user, reply: stored.reply, cached: !stored.inserted });
   } catch (e) {

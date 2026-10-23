@@ -10,6 +10,8 @@
 // - tb-journal: prompt.ts is current with prompts/journal.md; the function reads its key
 //   only from TB_ANTHROPIC_API_KEY and uses no service key
 // - keep-alive workflow pings the project and key trip.html uses, daily, with no secret
+// - M1.1: photo constants, IndexedDB v3, no file deletes, 20 photos and 1 h cache in
+//   tb-journal, migration 0006 shape
 'use strict';
 
 const fs = require('fs');
@@ -153,6 +155,23 @@ if (exists(`${FN}/index.ts`)) {
   check(/const MODEL = 'claude-sonnet-5-5';/.test(fn) && /const MAX_TOKENS = 1500;/.test(fn), 'tb-journal: model claude-sonnet-5-5, max_tokens 1500');
 }
 if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(`${FN}/context.mjs`)), 'tb-journal: 40-turn cap');
+
+// ---------- M1.1 photos (SPEC.md 7A) ----------
+{
+  const trip = read('trip.html');
+  check(/const BUCKET = 'tb-photos';/.test(trip) && /const PHOTO_EDGE = 1280;/.test(trip) && /const PHOTO_QUALITY = 0\.82;/.test(trip),
+    'photos: client uses bucket tb-photos, 1280 px long edge, JPEG 0.82');
+  check(/indexedDB\.open\('travelboard', 3\)/.test(trip) && /createObjectStore\('photos', \{ keyPath: 'id' \}\)/.test(trip), 'photos: IndexedDB v3 with store photos');
+  check(!/storage\.from\([^)]*\)\.remove\(/.test(trip) && !/method: 'DELETE'/.test(trip), 'photos: the client never deletes a file (rule 8)');
+  if (exists(`${FN}/context.mjs`)) {
+    const ctx = read(`${FN}/context.mjs`);
+    check(/export const MAX_PHOTOS = 20;/.test(ctx) && /export const CACHE_TTL = '1h';/.test(ctx), 'photos: tb-journal sends at most 20 photos, cache breakpoint 1 h');
+  }
+  const m6 = exists('supabase/migrations/0006_tb_photos_bucket.sql') ? read('supabase/migrations/0006_tb_photos_bucket.sql') : '';
+  check(/values \('tb-photos', 'tb-photos', false, 2097152, array\['image\/jpeg'\]\)/.test(m6)
+    && (m6.match(/create policy tb_photos_(select|insert|update) on storage\.objects for (select|insert|update) to authenticated/g) || []).length === 3
+    && !/for delete/.test(m6) && !/\banon\b[^.]*\bto\b|to anon/.test(m6), 'photos: 0006 makes a private 2 MB JPEG bucket and three own-folder policies, no delete, nothing for anon');
+}
 
 // ---------- keep-alive workflow (SPEC.md 6.8 step 5) ----------
 const KA = '.github/workflows/keepalive.yml';
