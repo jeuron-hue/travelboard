@@ -1,7 +1,7 @@
 # travelboard: specification
 
 Owner: Gary Chan. Repo: `jeuron-hue/travelboard` (public). Written 04/10/26.
-Status: M0 Foundation done 04/10/26. M1 Capture done 10/10/26. M2 Journal done 23/10/26.
+Status: M0 Foundation done 04/10/26. M1 Capture done 10/10/26. M2 Journal done 23/10/26. M1.1 Photo capture in build from 23/10/26, cut-off 27/10/26.
 
 This file is the source of record for what travelboard is and how it is built. M0, M1 and M2 are specified in full because they ship before Bangkok (09/11/26). M3 to M8 are skeletons, to be expanded one at a time after Bangkok using the friction log from that trip.
 
@@ -26,7 +26,7 @@ Wanderlog was used for Switzerland (Jan 2025) and liked, but its AI layer and jo
 | D1 | Own app, built module by module, each module usable on its own | 04/10/26 |
 | D2 | Two frontends over one backend: `trip.html` (phone, installed PWA, offline) and `planner.html` (rig/laptop browser, online only, from M3) | 04/10/26 |
 | D3 | Backend in the existing Supabase project `weatherboard` (ref `nyjsrnntxdgfykkmihpx`, org `jeuron`, ap-southeast-1). All travelboard tables in a dedicated `travel` schema | 04/10/26 |
-| D4 | Tables are never exposed through the API. The client reaches data only through SECURITY DEFINER RPCs in `public` prefixed `tb_` | 04/10/26 |
+| D4 | Tables are never exposed through the API. The client reaches data only through SECURITY DEFINER RPCs in `public` prefixed `tb_`. One exception from M1.1: photo files go through the Storage API to the private bucket `tb-photos`, guarded by RLS policies on `storage.objects` that admit only the owner's own folder | 04/10/26, photos 23/10/26 |
 | D5 | Server-side secrets (Anthropic key, later Google key) live in Supabase Edge Functions prefixed `tb-`, as secrets named with a `TB_` prefix | 04/10/26, prefix 10/10/26 |
 | D6 | Hosting on GitHub Pages from a public repo. No build step, vanilla JS, libraries vendored into the repo | 04/10/26 |
 | D7 | Auth: one synthetic login created from the dashboard, `signInWithPassword`, self-signup off | 04/10/26 |
@@ -37,6 +37,7 @@ Wanderlog was used for Switzerland (Jan 2025) and liked, but its AI layer and jo
 | D12 | Lighter test regime than house standard: static checks, SQL smoke script, written manual test scripts. No mutation testing | 04/10/26 |
 | D13 | Map layer is locate-and-reach only: day map, coordinates, copyable address, deep link to Google Maps. No offline vector tiles | 04/10/26 |
 | D14 | Apify is a plan-time enrichment tool only, never in a street-time path | 04/10/26 |
+| D15 | Photo captures (M1.1): one photo per capture from the in-app camera or gallery, shrunk on the phone, stored offline first, synced to a private Supabase Storage bucket `tb-photos`. Claude sees the day's photos in the journal. Built before Bangkok with a cut-off of 27/10/26; if it is not passing on the Pixel by then, it ships after Bangkok | 23/10/26 |
 
 ## 3. Design principles
 
@@ -79,7 +80,8 @@ Anthropic Messages API  [M2]      Google Places API  [M3]
 
 The `weatherboard` project already runs the East Sky Board: 20 tables in `public`, a `prices` schema, five Edge Functions (`radar-archive`, `station-archive`, `frame-features`, `feeds-archive`, `frame-motion`), nine pg_cron jobs firing every 5 to 10 minutes, and a GitHub Actions keep-alive. It has no auth users. travelboard must never touch any of it.
 
-- travelboard objects: schema `travel`, functions `public.tb_*`, Edge Functions `tb-*`, nothing else.
+- travelboard objects: schema `travel`, functions `public.tb_*`, Edge Functions `tb-*`, and from M1.1 the Storage bucket `tb-photos` with policies on `storage.objects` named `tb_photos_*` and scoped to `bucket_id = 'tb-photos'`. Nothing else.
+- Storage is shared too: weatherboard already has a public bucket `radar` (14,013 objects, 57 MB on 23/10/26) with policy `radar_public_read`. travelboard never touches either. The free plan's 1 GB of file storage covers both buckets.
 - Turning self-signup off in Auth settings is project-wide. Safe, because weatherboard uses no auth.
 - Edge Function secrets are project-wide, so weatherboard's functions can read travelboard's secrets and the reverse. Accepted: both are Gary's. travelboard secrets carry a `TB_` prefix (`TB_ANTHROPIC_API_KEY`) so they can never collide with a weatherboard secret, for example if weather later moves its own Anthropic key into Supabase.
 - Anthropic billing is shared too: weather's API twin and travelboard's journal draw on the same USD 100 monthly subscriber credit, in separate Console workspaces (`weather` capped at USD 70, `travelboard` at USD 30) so neither can starve the other.
@@ -130,7 +132,8 @@ travelboard/
 | M0 Foundation | Schema, auth, RPCs, repo, PWA shell, IndexedDB, sync engine | 05/10 to 11/10 | Installs on the Pixel, opens in airplane mode, a record queued offline lands in Supabase on reconnect |
 | M1 Capture | One-tap capture, voice via Gboard, GPS, timezone, edit, soft delete, export | 12/10 to 18/10 | 20 airplane-mode captures all arrive intact after reconnect |
 | M2 Journal | Thread per local day, Claude via `tb-journal`, day's captures as context | 19/10 to 25/10 | One real evening conversation that references the day's captures |
-| Shakedown | Daily use in Singapore. Fixes only, no features | 26/10 to 01/11 | Freeze on 01/11 |
+| M1.1 Photo capture | Photo on a capture (camera or gallery), offline first, Storage bucket `tb-photos`, photos in the journal | 24/10 to 27/10 | Section 7A acceptance passes on the Pixel by 27/10, or it moves to after Bangkok |
+| Shakedown | Daily use in Singapore. Fixes only, no features (M1.1 is the one agreed exception, 23/10) | 26/10 to 01/11 | Freeze on 01/11 |
 | Bangkok pilot | Use it for real, keep a friction log | 09/11 to 12/11 | Friction log written |
 | M3 Trip model + planner | Trips, days, items, places, hours validation | after Bangkok | skeleton below |
 | M4 Phone day view + lookup | Morning pre-fetch, cached lookup, live query | after M3 | skeleton below |
@@ -294,6 +297,58 @@ Database `travelboard`, version 1. A small hand-written promise wrapper, no libr
 
 ---
 
+## 7A. M1.1 Photo capture (full)
+
+Added 23/10/26 on Gary's decision (D15). A photo is part of a capture, not a separate object: same row, same kinds, same day rule, same sync.
+
+### 7A.1 Schema and storage (migration 0005, then 0006)
+
+- 0005, `travel` and `public.tb_*` only: `alter table travel.captures add photo_path text, add photo_w int, add photo_h int, add photo_bytes int`. `photo_path` is `<owner uuid>/<capture id>.jpg`, null when there is no photo or it has not uploaded yet. Replace `tb_capture_upsert` and `tb_captures_since` so they carry the four fields; everything else in 6.3 is unchanged. Also `alter table travel.journal_messages add cache_write_tokens int, add cache_read_tokens int` for 7A.5.
+- 0006, Storage: create bucket `tb-photos`, private, file size limit 2 MB, allowed type `image/jpeg`. Policies on `storage.objects` for role `authenticated` only, each with `bucket_id = 'tb-photos' and (storage.foldername(name))[1] = auth.uid()::text`: `tb_photos_select`, `tb_photos_insert`, `tb_photos_update` (so a retried upload can overwrite its own file). No delete policy: photos are never deleted (no hard delete). The catalogue snapshot before and after must show only the bucket, these three policies and the 0005 changes; `radar` and `radar_public_read` unchanged.
+
+### 7A.2 Client
+
+- **Capture screen:** a Photo button next to the kind toggle opens the Android chooser (`<input type="file" accept="image/*">`: camera or gallery). One photo per capture. The photo shows as a preview above the textarea with a Remove control. Save is enabled when the trimmed body is non-empty or a photo is attached, so a photo-only capture is fine.
+- **Shrink on the phone:** decode with `createImageBitmap(file, { imageOrientation: 'from-image' })`, draw to a canvas at 1280 px on the long edge (smaller images kept as they are), `toBlob('image/jpeg', 0.82)`. Target about 200 to 300 KB. Re-encoding drops EXIF, which is intended: place comes from the capture's own GPS.
+- **Time and place:** the capture's `captured_at`, `tz`, `local_date` and GPS are those of attaching, as for any capture. A gallery photo taken earlier gets the attaching time. Reading the photo's own taken-at time and place is deferred (section 9).
+- **IndexedDB v3:** new store `photos`, keyPath `id` (the capture id), value `{ id, blob, w, h, bytes, uploaded }`. The draft keeps its photo too (draft id `new` or the capture id), so a force-close after attaching restores the photo with the text.
+- **Rows:** a small square thumbnail on the capture row when a photo exists, from the local blob. Tapping the row opens the edit screen with the full preview. If a pulled row has `photo_path` but no local blob (reinstall), download it once when online, as the user, and keep it in `photos`.
+- **Edit:** a photo can be added, replaced or removed. Remove sets the four photo fields null and bumps `updated_at`; the file stays in Storage. Replace uploads to the same path.
+- **Export:** unchanged JSON, now with the four photo fields. Photos are not embedded.
+
+### 7A.3 Sync
+
+- Before pushing a capture, upload its photo if `uploaded = 0`: `storage.from('tb-photos').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })`. On success set `uploaded = 1`, fill `photo_path`, `photo_w`, `photo_h`, `photo_bytes` on the capture, bump `updated_at`, mark dirty. A capture never carries a `photo_path` the server cannot serve.
+- A failed upload leaves the photo queued while the capture row is still pushed without `photo_path`, so text and GPS are never held back by a photo. The pill counts queued photos with queued captures.
+- Uploads go one at a time, smallest first, each with the 20 s fetch timeout. Same triggers, lock and retry as 6.6.
+
+### 7A.4 Journal (`tb-journal` changes to 8.3 steps 4 to 6)
+
+- Load the day's non-deleted captures with a `photo_path`, most recent 20. Download each as the user (the function already acts as the user through the JWT) and send it as a base64 image block, labelled with its capture's local time, kind and text.
+- Place the captures context and the images in a block before the thread, with a prompt-caching breakpoint after the last image, so later turns that evening read the images from cache.
+- More than 20 photos in a day: the rest are listed as text ("photo at 1421 hrs, not shown") so Claude knows they exist.
+- A photo that fails to download is listed as text ("photo at 1421 hrs, could not be loaded") and the call still goes ahead.
+- Store `cache_write_tokens` and `cache_read_tokens` per reply.
+
+### 7A.5 Cost
+
+Sonnet 5.5 reads images at high resolution: a 1280 x 960 photo is ceil(1280/28) x ceil(960/28) = 46 x 35 = 1,610 tokens. At USD 2 per million input tokens that is about USD 0.003 per photo per call uncached; cache reads are USD 0.10 per million. An evening with 15 photos over 10 turns is roughly USD 0.10 with caching, against about USD 0.50 without. The USD 30 cap is unchanged. (Docs read 23/10/26.)
+
+### 7A.6 M1.1 acceptance
+
+1. Airplane mode: a camera photo attached to a capture saves at once and shows its thumbnail. On reconnect the file lands at `tb-photos/<uid>/<id>.jpg`, at most 1280 px on the long edge and under 500 KB, and the row has `photo_path` and the size fields.
+2. A gallery photo works the same way.
+3. A photo-only capture (no text) saves and syncs.
+4. Force-close after attaching a photo, before Save: reopening restores the draft with the photo.
+5. A capture whose photo upload fails still syncs its text and GPS, and the photo follows on a later sync (headless test; on the Pixel, observed if it happens).
+6. Journal: asked about a photo, Claude describes something visible in it that the capture text does not say.
+7. Second journal turn the same evening: `cache_read_tokens` above zero on the stored reply.
+8. Anonymous access to a `tb-photos` object fails, and so does access to another user's folder (smoke test with a second synthetic uid inside a rolled-back transaction, plus a REST check).
+9. Catalogue diffs for 0005 and 0006 touch only `travel.*`, `public.tb_*`, the bucket `tb-photos` and the three `tb_photos_*` policies.
+10. `checks/static.cjs`, `checks/smoke.sql` and the M1 and M2 headless suites pass; a new M1.1 headless suite passes.
+
+---
+
 ## 8. M2 Journal with Claude (full)
 
 ### 8.1 Shape
@@ -340,7 +395,7 @@ Function RPCs (migration 0004, Gary's decision 10/10/26): `tb-journal` reaches t
   1. Resolve the user from the JWT.
   2. Upsert the user message by `message_id` (idempotent).
   3. If an assistant reply with `reply_to = message_id` already exists, return it without calling the API. Retries are free and never duplicate.
-  4. Load that day's thread and that day's non-deleted captures (by `local_date`).
+  4. Load that day's thread and that day's non-deleted captures (by `local_date`). From M1.1, also the day's photos (7A.4).
   5. Build the system prompt: `prompts/journal.md`, then a context block listing the day's captures with local time, kind, body and coordinates when present.
   6. Call the Anthropic Messages API: model `claude-sonnet-5-5` (verify the current string at docs.claude.com when building), `max_tokens` 1500, the full thread as messages, capped to the most recent 40 turns.
   7. Store the reply with `model`, token counts, `reply_to`.
@@ -420,7 +475,7 @@ Each skeleton is expanded to full spec before its module starts.
 - Voice tier 2: in-app mic via Web Speech API with `processLocally: true` (Chrome 139+), feature-detected, language pack installed at first run.
 - Voice tier 3: record audio to IndexedDB, transcribe later via a separate speech-to-text vendor (the Anthropic API does not take audio).
 - Journal M2.1: two-tier memory (static contract plus validated heuristics).
-- Photos: links into Google Photos by date, no media pipeline.
+- Photos: in-app photo captures done in M1.1 (7A). Still later: the photo's own taken-at time and place from EXIF, sharing photos in from Google Photos (POST share target handled by the service worker), more than one photo per capture.
 
 ---
 
@@ -429,6 +484,8 @@ Each skeleton is expanded to full spec before its module starts.
 | Item | Detail | Owner / next step |
 |---|---|---|
 | Shared database size | 237 MB of 500 MB on 04/10/26, mostly weatherboard's `station_obs` (142 MB) growing every 5 min. Reaching the free cap would stop writes for travelboard too. Captures stay safe locally, but sync would stop | Gary: decide a retention policy for `station_obs` on the weatherboard side before Bangkok |
+| Shared database size, 23/10/26 | The weatherboard database read 381 MB of the 500 MB cap on 23/10/26, up from 197 MB on 04/10/26 after the retention fix. At that rate it reaches the cap before or during Bangkok, which would stop travelboard sync | Gary: check weatherboard retention in the Weather Prediction project before 01/11 |
+| Shared file storage | Free plan 1 GB shared with weatherboard's `radar` bucket (57 MB on 23/10/26). travelboard photos at about 250 KB each | Check bucket sizes at the end of the shakedown and after Bangkok |
 | Offline is new skill | No prior service worker or IndexedDB work | M0 is deliberately the smallest possible surface for it |
 | Gboard on foreign names | Lebuh Keng Kwee, Teluk Bahang and similar will be mangled | Accepted. Transcripts are for Gary; never parsed |
 | Offline voice | Voice only works offline with Gboard plus the on-device English pack (Settings, System, Languages, Speech, On-device recognition). SwiftKey's voice needs a connection | Gary: Gboard as the keyboard for the trip; check dictation in airplane mode before flying |
@@ -450,6 +507,7 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 23/10/26 Status, D4, D15, 4.1, 5, new section 7A, 8.3, 9, 10: M1.1 Photo capture added before Bangkok on Gary's decision (camera or gallery in the app, Claude sees the photos, cut-off 27/10). Storage bucket `tb-photos` and its `tb_photos_*` policies join the travelboard objects allowed in the shared project. Database size risk updated: 381 MB of 500 MB on 23/10/26.
 - 23/10/26 Status, 8.5: M2 done (acceptance item 1 on the 23/10/26 thread). Share button on the journal bar (Gary's decision, before the shakedown freeze), so a day can go into his desktop Claude journalling project.
 - 10/10/26 4.2, 8.5, 11: M2 client details agreed at build (tabs, day list, title suffix, composer mode, sync order and failure handling) written into 8.5; `tb-journal` file layout in 4.2; `m2.test.cjs` and `fn.test.cjs` in 11. No change to the acceptance list.
 - 10/10/26 Status, 8.2: M2 started on Gary's go. 8.2 gains RLS on both journal tables, the canonical thread order, the latest `server_ts` per day in `tb_journal_days`, and two function RPCs (`tb_journal_turn`, `tb_journal_reply`) so `tb-journal` works as the signed-in user with no service key (Gary's decision; 8.3 named the steps but not how the function reaches the database).

@@ -8,7 +8,7 @@ travelboard is Gary Chan's personal travel app: a phone PWA (`trip.html`) for ca
 
 ## Current module
 
-**None in build.** M0 Foundation done 04/10/26; M1 Capture done 10/10/26; M2 Journal done 23/10/26. Shakedown (26/10 to 01/11) is fixes only. Do not start M3 or any later module until Gary says go. If you finish early, stop and report.
+**M1.1 Photo capture** (`SPEC.md` section 7A), Gary's go 23/10/26, cut-off 27/10/26: if it is not passing on the Pixel by then, stop and tell Gary; it moves to after Bangkok. M0 done 04/10/26, M1 done 10/10/26, M2 done 23/10/26. The shakedown (26/10 to 01/11) is fixes only apart from finishing M1.1. Do not start M3 or any later module until Gary says go.
 
 ## Hard rules
 
@@ -16,8 +16,9 @@ travelboard is Gary Chan's personal travel app: a phone PWA (`trip.html`) for ca
    - schema `travel` and objects inside it
    - functions in `public` whose names start with `tb_`
    - Edge Functions whose names start with `tb-`
+   - the Storage bucket `tb-photos`, and policies on `storage.objects` named `tb_photos_*` whose conditions are scoped to `bucket_id = 'tb-photos'`
 
-   Never alter, drop, rename or grant on anything else: no `public` tables, no `prices` schema, no cron jobs, no other Edge Functions, no auth settings beyond turning self-signup off. Run a catalogue snapshot query before and after each migration and confirm the diff touches only travelboard objects.
+   Never alter, drop, rename or grant on anything else: no `public` tables, no `prices` schema, no cron jobs, no other Edge Functions, no other Storage bucket or policy (weatherboard's `radar` bucket and `radar_public_read` stay untouched), no auth settings beyond turning self-signup off. Run a catalogue snapshot query before and after each migration and confirm the diff touches only travelboard objects.
 2. **Migrations:** one block at a time, each wrapped in a transaction, saved as a numbered file in `supabase/migrations/`. Show the output of each block before applying the next. No destructive statement without Gary's explicit yes in chat.
 3. **Data access:** tables in `travel` get no grants to `anon` or `authenticated`. The client reaches data only through `SECURITY DEFINER` RPCs with `set search_path = travel, public`, `revoke all from public, anon`, `grant execute to authenticated`, and a check that `auth.uid()` is not null.
 4. **Keys:** the publishable key may sit in client source (fetch it with the Supabase connector, do not guess it). `service_role` never appears in any file in this repo. The Anthropic key exists only as the Edge Function secret `TB_ANTHROPIC_API_KEY`, set by Gary in the dashboard from the Console workspace `travelboard`. Never use or ask for weather's key.
