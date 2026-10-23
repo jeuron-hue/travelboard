@@ -13,6 +13,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 |---|---|---|
 | Migration 0005 | Applied, file unchanged | Supabase migration `tb_0005_photo_fields`. Snapshot before = after 0004 (REST 517, `8726dc225828`). Diff: `travel.captures` and `travel.journal_messages` gain their columns, 4 new photo constraints, new bodies for `tb_capture_upsert`, `tb_journal_turn`, `tb_journal_reply` (ACL still `postgres, authenticated`). REST unchanged; rows intact (34 captures, 14 messages). |
 | Migration 0006 | Applied, file unchanged | `tb_0006_tb_photos_bucket`. Diff: bucket `tb-photos` (private, 2097152, `{image/jpeg}`) and `tb_photos_select`, `_insert`, `_update` (authenticated, own folder). REST unchanged, the 36 `travel` and `public` objects unchanged. |
+| `tb-journal` v2 | Deployed, version 2, `verify_jwt` on | Same `index.ts`, `context.mjs`, `prompt.ts` as the repo (`fn.test.cjs` 35 of 35). Works with the v6 client too: same request; a day with no photos sends no images. |
 | `checks/smoke.sql` | PASS, 71 of 71 | 53 earlier tests plus P1 to P10 (photo fields, `photo_path` rule, Remove, `tb_journal_turn` and `tb_journal_reply`, bucket, policies, own-folder read and write, second synthetic uid, anon, no delete). One transaction, rolled back. |
 
 ### Automated results, 24/10/26 (before applying)
