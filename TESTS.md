@@ -81,7 +81,7 @@ Checked against `travel.journal_messages`, `travel.journal_days` and the Edge Fu
 | 5 | PASS. Suffix "Singapore test" on 2026-10-10 reached the server 1619:06. Day list and other days checked by Gary. |
 | 6 | PASS. Capture in airplane mode synced as in M1 (Gary). |
 | 7 | PASS 23/10/26. Thread for 2026-10-23: captures at 2153 ("Tt") and 2158 (a note that pictures cannot be attached). Three turns, at 2153 and 2200 hrs, each with one reply. The 2200 reply named both captures by content without being asked. A test evening rather than a full real one; Gary agreed to close M2 on it, as real journalling gets used in the shakedown. Findings: no way to attach pictures (Photos is in SPEC 9, later); Gary wants a day out of travelboard into his desktop Claude journalling project, hence Share in v5. |
-| 8 | Open: Share (v5). |
+| 8 | PASS 23/10/26. Share from the 23/10/26 thread went through the Android share sheet into the Claude app's Daily Journaling project at 2212 hrs: title, the local-day line, both captures with time, kind and coordinates, then the conversation (Gary's screenshot). Gary kept Share on the Journal tab only. |
 
 ---
 
