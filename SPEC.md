@@ -1,7 +1,7 @@
 # travelboard: specification
 
 Owner: Gary Chan. Repo: `jeuron-hue/travelboard` (public). Written 04/10/26.
-Status: M0 Foundation done 04/10/26. M1 Capture done 10/10/26. M2 Journal in build from 10/10/26.
+Status: M0 Foundation done 04/10/26. M1 Capture done 10/10/26. M2 Journal done 23/10/26.
 
 This file is the source of record for what travelboard is and how it is built. M0, M1 and M2 are specified in full because they ship before Bangkok (09/11/26). M3 to M8 are skeletons, to be expanded one at a time after Bangkok using the friction log from that trip.
 
@@ -360,6 +360,7 @@ The file is plain text in the repo so Gary edits it without touching code. The t
 - Send: write the user turn to IndexedDB with state `pending`, render it, call `tb-journal` if online. Offline, it stays `pending` and is sent by the sync engine on reconnect.
 - The day defaults to today's local date. Captures tagged `journal` appear inline in that day's thread as quoted context.
 - Detail agreed at build (10/10/26): Captures and Journal tabs sit in the header; the bottom button reads Capture or Write. A Days button lists every day with messages, captures or a title, plus today, newest first. Tapping the day title sets its suffix. The composer is the capture screen in a journal mode (Send instead of Save, no kind toggle), with a draft per day kept like capture drafts.
+- Share (added 23/10/26, Gary's decision): a Share button on the journal bar sends the day on screen as plain text (title, every live capture with time, kind and coordinates, then the conversation in thread order) through the Android share sheet, or copies it where sharing is unavailable. It feeds Gary's daily journalling project in Claude on desktop.
 - Sync order: push captures (so the function sees the latest notes), push day suffixes, send pending turns oldest first, pull captures, pull journal days whose message count or latest `server_ts` changed. A network failure or timeout (120 s) leaves a turn pending for the next sync; a 401 leaves it pending and asks to sign in; any other failure the function reports marks the turn "not sent" with its message and a Retry button, and stops that pass so later turns keep their order. A failed turn is never resent automatically.
 
 ### 8.6 Cost control
@@ -449,6 +450,7 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 23/10/26 Status, 8.5: M2 done (acceptance item 1 on the 23/10/26 thread). Share button on the journal bar (Gary's decision, before the shakedown freeze), so a day can go into his desktop Claude journalling project.
 - 10/10/26 4.2, 8.5, 11: M2 client details agreed at build (tabs, day list, title suffix, composer mode, sync order and failure handling) written into 8.5; `tb-journal` file layout in 4.2; `m2.test.cjs` and `fn.test.cjs` in 11. No change to the acceptance list.
 - 10/10/26 Status, 8.2: M2 started on Gary's go. 8.2 gains RLS on both journal tables, the canonical thread order, the latest `server_ts` per day in `tb_journal_days`, and two function RPCs (`tb_journal_turn`, `tb_journal_reply`) so `tb-journal` works as the signed-in user with no service key (Gary's decision; 8.3 named the steps but not how the function reaches the database).
 - 10/10/26 D5, D11, 4 diagram, 4.1, 8.3, 8.6, 8.7: Anthropic billing and key for M2 (Gary's decision before the M2 go). Journal key comes from its own Console workspace `travelboard` (USD 30 monthly limit, auto-reload off) in the org that holds weather's `weather` workspace (USD 70); both share the USD 100 monthly subscriber API credit. Edge Function secret renamed `ANTHROPIC_API_KEY` to `TB_ANTHROPIC_API_KEY`, because secrets are project-wide in weatherboard. Model string `claude-sonnet-5-5` confirmed in the API model list on 10/10/26 (weather project).

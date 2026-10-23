@@ -18,9 +18,14 @@
     the same full-screen textarea as capture for writing; a turn is stored locally as
     pending and sent to the tb-journal Edge Function by the sync engine, so it queues
     offline and sends on reconnect; Claude's reply is stored once per turn; journal-kind
-    captures show inline in the day's thread; optional title suffix per day.
+    captures show inline in the day's thread; optional title suffix per day; Share sends
+    the whole day (captures and conversation) as plain text to another app.
 
   Change log (newest first)
+  - 23/10/26 v5. Journal bar gains Share: the day's title, every live capture and the
+    conversation as plain text, through the Android share sheet (Claude app, Copy and so
+    on), or copied to the clipboard where sharing is not available. For pasting into
+    Gary's daily journalling project in Claude on desktop.
   - 10/10/26 v4. M2 Journal. Captures and Journal tabs in the header. IndexedDB version 2
     adds stores journal and jdays. Sync order: push captures, push day suffixes, send
     queued journal turns oldest first (stops at the first failure, which shows Retry),
@@ -262,7 +267,8 @@
   .tabs button[aria-pressed="true"] { background: var(--accent-bg); color: var(--accent); }
 
   /* Journal */
-  .jbar { grid-template-columns: auto 1fr; }
+  .jbar { grid-template-columns: auto 1fr auto; }
+  .jbar #j-share { padding: 0 14px; font-size: 17px; }
   .jbar #j-days { padding: 0 14px; font-size: 17px; }
   .jbar #j-title { font-weight: 600; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 10px; font-size: 17px; }
   .jbar #j-title.today { color: var(--accent); }
@@ -308,6 +314,7 @@
 <nav class="daybar jbar" id="jbar" aria-label="Journal day" hidden>
   <button id="j-days" type="button">Days</button>
   <button id="j-title" type="button" aria-label="Day title, tap to add a title">-</button>
+  <button id="j-share" type="button" aria-label="Share this day as text">Share</button>
 </nav>
 
 <main>
@@ -391,7 +398,7 @@
 'use strict';
 
 // Bump together with CACHE_VERSION in sw.js on every release.
-const APP_VERSION = 4;
+const APP_VERSION = 5;
 
 const SUPABASE_URL = 'https://nyjsrnntxdgfykkmihpx.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_q75DGiJBda-NwE3tdgPtFg_g3Rasmcg';
@@ -1087,6 +1094,7 @@ async function renderJournal() {
   if (jView === 'days') {
     // Every day with messages, captures or a title, plus today; newest first.
     $('j-days').textContent = 'Today';
+    $('j-share').hidden = true;
     $('j-title').textContent = 'Journal days';
     $('j-title').classList.remove('today');
     const days = new Map();
@@ -1118,6 +1126,7 @@ async function renderJournal() {
   }
 
   $('j-days').textContent = 'Days';
+  $('j-share').hidden = false;
   $('j-title').textContent = jTitleText(jDay);
   $('j-title').classList.toggle('today', jDay === today);
   const msgs = threadOrder(await idb.byIndex('journal', 'local_date', jDay));
@@ -1208,6 +1217,60 @@ async function sendTurn() {
     updateSaveEnabled();
     alert('Send failed: ' + ((e && e.message) || e));
   }
+}
+
+// One day as plain text: title, every live capture, then the conversation in thread order.
+// Made for pasting into another Claude chat (Gary's daily journalling project on desktop).
+async function dayText(date) {
+  const here = deviceTz();
+  const when = (iso, tz) => fmtTime(iso, tz) + (tz && tz !== here ? ' ' + cityOf(tz) : '');
+  const indent = (t) => String(t || '').trim().replace(/\n/g, '\n  ');
+  const caps = (await idb.byIndex('captures', 'local_date', date)).filter((r) => !r.deleted_at)
+    .sort((a, b) => (a.captured_at < b.captured_at ? -1 : 1));
+  const msgs = threadOrder(await idb.byIndex('journal', 'local_date', date));
+  const lines = [`travelboard journal, ${jTitleText(date)}`,
+    `Local day, 0400 to 0400. Times are ${cityOf(here)} time unless another city is named.`, ''];
+  lines.push(caps.length ? `Captures (${caps.length})` : 'Captures: none');
+  for (const c of caps) {
+    let head = `${when(c.captured_at, c.tz)}, ${c.kind}`;
+    if (c.lat != null && c.lng != null) head += `, at ${Number(c.lat).toFixed(5)}, ${Number(c.lng).toFixed(5)}`;
+    lines.push(`- ${head}: ${indent(c.body)}`);
+  }
+  lines.push('', msgs.length ? 'Conversation with Claude' : 'Conversation with Claude: none');
+  for (const m of msgs) {
+    const who = m.role === 'assistant' ? 'Claude' : 'Gary';
+    const note = m.role === 'user' && m.state !== 'sent' ? ' (not sent yet)' : '';
+    lines.push('', `${who}, ${fmtTime(m.created_at, here)}${note}:`, String(m.content || '').trim());
+  }
+  return lines.join('\n') + '\n';
+}
+
+// Android share sheet when available (the Claude app, Copy, and so on); otherwise copy.
+async function shareDay() {
+  const text = await dayText(jDay);
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: 'travelboard ' + fmtDayLabel(jDay), text });
+      return;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;      // closed the sheet
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.append(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    if (!ok) { alert('Could not copy the day.'); return; }
+  }
+  showToast(`${fmtDayLabel(jDay)} copied`, null);
 }
 
 async function retryTurn(id) {
@@ -1599,6 +1662,7 @@ $('j-thread').addEventListener('click', (ev) => {
   const b = ev.target.closest('[data-retry]');
   if (b) retryTurn(b.dataset.retry);
 });
+$('j-share').addEventListener('click', () => { shareDay().catch(fail('Share failed')); });
 $('j-title').addEventListener('click', () => {
   if (jView !== 'thread') return;
   const dlg = $('suffix-dlg');

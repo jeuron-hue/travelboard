@@ -71,7 +71,8 @@ const settle = (page) => page.waitForFunction(() => !syncing, null, { timeout: 1
   await page.waitForFunction(() => document.getElementById('day-label').textContent !== '-');
   await settle(page);
 
-  check('K0 version v4, IndexedDB v2 with journal and jdays stores', (await text(page, '#s-version')) === 'v4'
+  const APP_VERSION = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'trip.html'), 'utf8').match(/const APP_VERSION = (\d+);/)[1];
+  check(`K0 version v${APP_VERSION}, IndexedDB v2 with journal and jdays stores`, (await text(page, '#s-version')) === 'v' + APP_VERSION
     && await page.evaluate(async () => { const db = await idb.open(); return db.version === 2 && db.objectStoreNames.contains('journal') && db.objectStoreNames.contains('jdays'); }));
   check('K0 opens on the Captures tab', await page.evaluate(() => tab === 'captures') && (await shown(page, '#daybar')) && !(await shown(page, '#jbar')));
 
@@ -229,9 +230,12 @@ const settle = (page) => page.waitForFunction(() => !syncing, null, { timeout: 1
   await page.evaluate(() => window.dispatchEvent(new Event('offline')));
   await write(page, 'Queued one.', bkk('2140'));
   await write(page, 'Queued two.', bkk('2141'));
+  await settle(page);
   mock.offline = false;
   mock.fnMode = 'busy';
   await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  // settle can return between a sync and its queued re-run, so wait for the outcome itself.
+  await page.waitForFunction(async () => (await idb.all('journal')).some((r) => r.content === 'Queued one.' && r.state === 'error'), null, { timeout: 10000 }).catch(() => {});
   await settle(page);
   rows = await jrows(page);
   const q1 = rows.find((r) => r.content === 'Queued one.'), q2 = rows.find((r) => r.content === 'Queued two.');
@@ -297,6 +301,33 @@ const settle = (page) => page.waitForFunction(() => !syncing, null, { timeout: 1
   await page.evaluate(() => render());
   check('K10 0430: today rolls to Tue 10/11/26', (await text(page, '#j-title')) === 'Tue 10/11/26');
   check('K10 no dialogs (alerts) on page A', dialogs === 0, dialogs);
+
+  // --- Share the day as text (v5): share sheet when available, clipboard otherwise
+  await page.evaluate(() => openJournalDay('2026-11-09'));
+  check('K15 Share shows on a thread', await shown(page, '#j-share'));
+  await page.evaluate(() => Object.defineProperty(navigator, 'share', { configurable: true, value: async (d) => { window.__shared = d; } }));
+  await page.click('#j-share');
+  await page.waitForFunction(() => !!window.__shared, null, { timeout: 3000 }).catch(() => {});
+  const shared = await page.evaluate(() => window.__shared || null);
+  const st = shared ? shared.text : '';
+  check('K15 share sheet gets the day as text: title, both captures, the conversation', shared
+    && shared.title === 'travelboard Mon 09/11/26' && st.startsWith('travelboard journal, Mon 09/11/26\n')
+    && st.includes('Times are Bangkok time') && st.includes('Captures (2)')
+    && st.includes('- 1830 hrs, note: Jay Fai crab omelette, queue 40 min') && st.includes('- 1845 hrs, journal: Feet done in.')
+    && st.includes('Gary, 2105 hrs:\nLong day in the old town. The omelette was worth it.') && /\nClaude, \d{4} hrs:\nReply /.test(st), st.slice(0, 400));
+  check('K15 conversation in thread order', st.indexOf('Queued one.') < st.indexOf('Queued two.')
+    && st.indexOf('Long day in the old town') < st.indexOf('Wat Pho in the morning.') && !st.includes('(not sent yet)'));
+  await page.evaluate(() => Object.defineProperty(navigator, 'share', { configurable: true, value: undefined }));
+  await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: BASE.replace(/\/$/, '') });
+  await page.click('#j-share');
+  await page.waitForFunction(() => !document.getElementById('toast').hidden, null, { timeout: 3000 }).catch(() => {});
+  const clip = await page.evaluate(() => navigator.clipboard.readText().catch(() => ''));
+  check('K15 no share sheet: copied to the clipboard, toast "Mon 09/11/26 copied"', clip === st
+    && (await text(page, '#toast-text')) === 'Mon 09/11/26 copied');
+  await page.click('#j-days');
+  await page.waitForFunction(() => document.getElementById('j-title').textContent === 'Journal days', null, { timeout: 2000 }).catch(() => {});
+  check('K15 Share hidden on the day list', !(await shown(page, '#j-share')));
+  await page.click('#j-days');
 
   // ================= B: second device in Asia/Singapore pulls everything =================
   // One server turn with no reply, unknown to any phone.

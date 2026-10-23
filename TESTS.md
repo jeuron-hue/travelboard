@@ -7,7 +7,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ## M2 Journal (SPEC.md 8.7)
 
-**Status 10/10/26: built and deployed; automated checks pass; device steps 1 to 6 PASS on the Pixel.** Items 2 to 5 pass; item 1 (a real evening conversation, device step 7) is open.
+**Status 23/10/26: all five acceptance items PASS. `checks/static.cjs` and `checks/smoke.sql` pass. M2 done.** v5 adds Share on the journal bar (device step 8).
 
 ### Automated results, 10/10/26
 
@@ -20,6 +20,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 | `checks/headless/fn.test.cjs` | PASS, 25 of 25 | The real `index.ts` under Deno 2.9.4 against local fakes of PostgREST and the Anthropic API. Request to Claude: model `claude-sonnet-5-5`, `max_tokens` 1500, thinking `between_tools`, effort low, key from `TB_ANTHROPIC_API_KEY`; system prompt is `prompts/journal.md` then the day and its live captures with local times and coordinates, deleted captures and other days left out. Retry of an answered turn: stored reply, no second API call. Anthropic 401 gives `anthropic_auth` with a message naming the secret, the turn kept and no reply stored. Refusal, missing secret, bad JWT, bad body. Two failed turns join into one user message when the next goes through. A 51-message thread is capped to 40. Also `deno check` clean. |
 | `checks/headless/m2.test.cjs` | PASS, 62 of 62 | Below. |
 | `checks/headless/m1.test.cjs` on v4 | PASS, 103 of 103 | M1 capture unchanged by M2. |
+| v5 Share, 23/10/26 | PASS | `m2.test.cjs` K15: the share sheet gets the day's title, both captures with times and kinds, and the conversation in thread order; with no share sheet the same text goes to the clipboard with a toast; Share hidden on the day list. `m2.test.cjs` 67 of 67 (five runs; one test race in K8 fixed by waiting for the outcome), `m1.test.cjs` 103 of 103, `static.cjs` 64 of 64. No server or function change. |
 | Deploy | PASS | `main` at `8cb1891`. Live `sw.js` reads `const CACHE_VERSION = 4;` (Last-Modified 10/10/26 1557 hrs SGT), fetched through Apify because this sandbox cannot reach github.io. |
 | `tb-journal` deployed | Version 1, `verify_jwt` on | Deployed source read back and matches the repo. Not yet called with a real key: device step 2 is the key check. |
 
@@ -44,7 +45,7 @@ Model settings: thinking is off (`between_tools`, Sonnet 5.5's lowest setting) a
 
 | # | Item | Status |
 |---|---|---|
-| 1 | One real evening conversation in which Claude refers to at least two of that day's captures by content | Open: device step 7 |
+| 1 | One real evening conversation in which Claude refers to at least two of that day's captures by content | PASS 23/10/26 (Pixel step 7, Gary agreed to close on it): in the 2200 hrs reply Claude named both of the day's captures by content |
 | 2 | A message sent in airplane mode queues, sends on reconnect, and produces exactly one reply | PASS 10/10/26 (Pixel step 3) |
 | 3 | Retrying a message that already has a reply returns the stored reply without a second API call (token rows) | PASS 10/10/26 (Pixel step 4: two function calls, one Claude call, one reply row) |
 | 4 | The Anthropic key appears nowhere in the repo or client | PASS 10/10/26. `static.cjs` scans every file for `sk-ant-` keys; the key is read only from `TB_ANTHROPIC_API_KEY` inside the function, and no response carries it. |
@@ -61,6 +62,7 @@ Report back the step number and what you saw for any step that does not match. C
 5. **Day title.** Tap the date in the journal bar, type `Singapore test`, Save. The bar reads "Sat 10/10/26 Singapore test" (with that day's date). Tap Days: the list shows today with its message and capture counts. Tap another day that has captures: its thread opens, showing any journal captures as quotes, or a hint naming how many captures it has. Tap Days, then Today.
 6. **Capture still works.** Tap Captures, make a capture `M2 regression` in airplane mode, turn airplane mode off, and check it syncs as in M1.
 7. **A real evening (item 1).** On a normal day, make at least three captures as you go (one switched to journal). In the evening, open Journal and have a real conversation of a few turns, by voice or typing. Claude's replies should pick up at least two of the day's captures by what they say, without being asked. Tell Claude the date; Claude reads the thread and checks which captures it used. Use the Retry button if anything shows "not sent", and report it.
+8. **Share (v5).** Open `https://jeuron-hue.github.io/travelboard/sw.js`: it should read `const CACHE_VERSION = 5;`. Update the app as in step 1; Version v5. In Journal, open a day with messages and tap Share at the right of the journal bar. The Android share sheet opens: pick Claude (or Copy). The text starts "travelboard journal" with the day, lists every capture of the day with its time, then the conversation. Paste it into your desktop journalling project and check it reads well there.
 
 Notes for the device run:
 - Journalling works online only; a turn written offline waits as "queued" and goes on reconnect. Captures stay offline-first as before.
@@ -78,7 +80,8 @@ Checked against `travel.journal_messages`, `travel.journal_days` and the Edge Fu
 | 4 | PASS. "Retry test" sent 1615:33. Wi-Fi came back during the step (Gary). Function log: POST at 1615:36 with the Claude call (2462 in, 38 out), then a second POST at 1615:43 with no Claude call (the stored reply returned). One reply row for that turn. |
 | 5 | PASS. Suffix "Singapore test" on 2026-10-10 reached the server 1619:06. Day list and other days checked by Gary. |
 | 6 | PASS. Capture in airplane mode synced as in M1 (Gary). |
-| 7 | Open: a real evening conversation. |
+| 7 | PASS 23/10/26. Thread for 2026-10-23: captures at 2153 ("Tt") and 2158 (a note that pictures cannot be attached). Three turns, at 2153 and 2200 hrs, each with one reply. The 2200 reply named both captures by content without being asked. A test evening rather than a full real one; Gary agreed to close M2 on it, as real journalling gets used in the shakedown. Findings: no way to attach pictures (Photos is in SPEC 9, later); Gary wants a day out of travelboard into his desktop Claude journalling project, hence Share in v5. |
+| 8 | Open: Share (v5). |
 
 ---
 
