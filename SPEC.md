@@ -37,7 +37,7 @@ Wanderlog was used for Switzerland (Jan 2025) and liked, but its AI layer and jo
 | D12 | Lighter test regime than house standard: static checks, SQL smoke script, written manual test scripts. No mutation testing | 04/10/26 |
 | D13 | Map layer is locate-and-reach only: day map, coordinates, copyable address, deep link to Google Maps. No offline vector tiles | 04/10/26 |
 | D14 | Apify is a plan-time enrichment tool only, never in a street-time path | 04/10/26 |
-| D15 | Photo captures (M1.1): one photo per capture from the in-app camera or gallery, shrunk on the phone, stored offline first, synced to a private Supabase Storage bucket `tb-photos`. Claude sees the day's photos in the journal. Built before Bangkok with a cut-off of 27/10/26; if it is not passing on the Pixel by then, it ships after Bangkok | 23/10/26 |
+| D15 | Photo captures (M1.1): one photo per capture from the in-app camera or gallery, shrunk on the phone, stored offline first, synced to a private Supabase Storage bucket `tb-photos`. Claude sees the day's photos in the journal. Each photo has a "Claude sees this" switch, default on: switched off, the photo is kept, synced and shared like any other but never goes to Claude. At most 30 switched-on photos per day reach Claude (combined across both travellers from M1.2); switched-off photos have no limit (24/10/26). Built before Bangkok with a cut-off of 27/10/26; if it is not passing on the Pixel by then, it ships after Bangkok | 23/10/26, switch 24/10/26 |
 | D16 | Two travellers (M1.2): Eric gets his own login on his own Android phone. All captures, photos included, are shared between Gary and Eric; journal threads stay private to their owner. Privacy is by what each chooses to put in. Each has his own journal prompt; both share the `travelboard` workspace. Built after M1.1 for Bangkok, cut-off 31/10/26 | 23/10/26 |
 
 ## 3. Design principles
@@ -324,20 +324,21 @@ Done before M1.1, so the photo bucket is built once, in the right place.
 
 Added 23/10/26 on Gary's decision (D15). A photo is part of a capture, not a separate object: same row, same kinds, same day rule, same sync.
 
-### 7A.1 Schema and storage (migration 0005, then 0006)
+### 7A.1 Schema and storage (migrations 0005, 0006, then 0007)
 
 - 0005, `travel` and `public.tb_*` only: `alter table travel.captures add photo_path text, add photo_w int, add photo_h int, add photo_bytes int`. `photo_path` is `<owner uuid>/<capture id>.jpg`, null when there is no photo or it has not uploaded yet. Replace `tb_capture_upsert` so it carries the four fields and accepts only the caller's own `<uid>/<id>.jpg` as `photo_path`; `tb_captures_since` already returns whole rows, so it carries them unchanged; everything else in 6.3 is unchanged. Also `alter table travel.journal_messages add cache_write_tokens int, add cache_read_tokens int` for 7A.4, and replace the two function RPCs of 8.2: `tb_journal_turn` returns each capture's `photo_path`, so `tb-journal` can load the day's photos, and `tb_journal_reply` stores the two cache counts.
 - 0006, Storage: create bucket `tb-photos`, private, file size limit 2 MB, allowed type `image/jpeg`. Policies on `storage.objects` for role `authenticated` only, each with `bucket_id = 'tb-photos' and (storage.foldername(name))[1] = auth.uid()::text`: `tb_photos_select`, `tb_photos_insert`, `tb_photos_update` (so a retried upload can overwrite its own file). No delete policy: photos are never deleted (no hard delete). The catalogue snapshot before and after must show only the bucket, these three policies and the 0005 changes. Built in project `travelboard`, after 6.8.
+- 0007 (added 24/10/26, after 0005 and 0006 were applied), `travel` and `public.tb_*` only: `alter table travel.captures add photo_to_claude boolean not null default true`. Replace `tb_capture_upsert` so it carries the field. Replace `tb_journal_turn` so it returns `photo_path` only where `photo_to_claude` is true (null otherwise), so a switched-off photo never reaches `tb-journal` at all. `tb_captures_since` returns whole rows, so it carries the field unchanged. Catalogue snapshot before and after.
 
 ### 7A.2 Client
 
-- **Capture screen:** a Photo button next to the kind toggle opens the Android chooser (`<input type="file" accept="image/*">`: camera or gallery). One photo per capture. The photo shows as a preview above the textarea with a Remove control. Save is enabled when the trimmed body is non-empty or a photo is attached, so a photo-only capture is fine.
+- **Capture screen:** a Photo button next to the kind toggle opens the Android chooser (`<input type="file" accept="image/*">`: camera or gallery). One photo per capture. The photo shows as a preview above the textarea with a Remove control and a "Claude sees this" switch, default on. The switch shows only when a photo is attached. Save is enabled when the trimmed body is non-empty or a photo is attached, so a photo-only capture is fine.
 - **Shrink on the phone:** decode with `createImageBitmap(file, { imageOrientation: 'from-image' })`, draw to a canvas at 1280 px on the long edge (smaller images kept as they are), `toBlob('image/jpeg', 0.82)`. Target about 200 to 300 KB. Re-encoding drops EXIF, which is intended: place comes from the capture's own GPS.
 - **Time and place:** the capture's `captured_at`, `tz`, `local_date` and GPS are those of attaching, as for any capture. A gallery photo taken earlier gets the attaching time. Reading the photo's own taken-at time and place is deferred (section 9).
-- **IndexedDB v3:** new store `photos`, keyPath `id` (the capture id), value `{ id, blob, w, h, bytes, uploaded }`. The draft keeps its photo too (draft id `new` or the capture id), so a force-close after attaching restores the photo with the text.
+- **IndexedDB v3:** new store `photos`, keyPath `id` (the capture id), value `{ id, blob, w, h, bytes, uploaded }`. Captures carry `photo_to_claude` (true when absent). The draft keeps its photo and the switch too (draft id `new` or the capture id), so a force-close after attaching restores the photo with the text.
 - **Rows:** a small square thumbnail on the capture row when a photo exists, from the local blob. Tapping the row opens the edit screen with the full preview. If a pulled row has `photo_path` but no local blob (reinstall), download it once when online, as the user, and keep it in `photos`.
-- **Edit:** a photo can be added, replaced or removed. Remove sets the four photo fields null and bumps `updated_at`; the file stays in Storage. Replace uploads to the same path.
-- **Export:** unchanged JSON, now with the four photo fields. Photos are not embedded.
+- **Edit:** a photo can be added, replaced or removed, and its switch turned on or off; a change to the switch bumps `updated_at` and marks the capture dirty like any edit. A turn already sent has seen the photo or not; the switch applies from the next turn. Remove sets the four photo fields null and bumps `updated_at`; the file stays in Storage. Replace uploads to the same path.
+- **Export:** unchanged JSON, now with the four photo fields and `photo_to_claude`. Photos are not embedded.
 
 ### 7A.3 Sync
 
@@ -347,15 +348,16 @@ Added 23/10/26 on Gary's decision (D15). A photo is part of a capture, not a sep
 
 ### 7A.4 Journal (`tb-journal` changes to 8.3 steps 4 to 6)
 
-- Load the day's non-deleted captures with a `photo_path`, most recent 20. Download each as the user (the function already acts as the user through the JWT) and send it as a base64 image block, labelled with its capture's local time, kind and text.
+- Load the day's non-deleted captures with a `photo_path` and `photo_to_claude` true, most recent 30 (changed from 20 on 24/10/26). Download each as the user (the function already acts as the user through the JWT) and send it as a base64 image block, labelled with its capture's local time, kind and text.
 - Place the captures context and the images in a block before the thread, with a prompt-caching breakpoint after the last image, so later turns that evening read the images from cache. The breakpoint keeps for 1 h, not the default 5 min, because turns in an evening are often more than 5 min apart; the first write costs about 2x a normal read of the same tokens instead of 1.25x. The system prompt is `prompts/journal.md` alone.
-- More than 20 photos in a day: the rest are listed as text ("photo at 1421 hrs, not shown") so Claude knows they exist.
+- More than 30 switched-on photos in a day: the rest are listed as text ("photo at 1421 hrs, not shown") so Claude knows they exist.
+- A switched-off photo is not sent, not listed and not mentioned. Its capture's time, kind, text and place go to Claude as for any capture, with no sign that it had a photo.
 - A photo that fails to download is listed as text ("photo at 1421 hrs, could not be loaded") and the call still goes ahead.
 - Store `cache_write_tokens` and `cache_read_tokens` per reply.
 
 ### 7A.5 Cost
 
-Sonnet 5.5 reads images at high resolution: a 1280 x 960 photo is ceil(1280/28) x ceil(960/28) = 46 x 35 = 1,610 tokens. At USD 2 per million input tokens that is about USD 0.003 per photo per call uncached; cache reads are USD 0.10 per million. An evening with 15 photos over 10 turns is roughly USD 0.10 with caching, against about USD 0.50 without. The USD 30 cap is unchanged. (Docs read 23/10/26.)
+Sonnet 5.5 reads images at high resolution: a 1280 x 960 photo is ceil(1280/28) x ceil(960/28) = 46 x 35 = 1,610 tokens. At USD 2 per million input tokens that is about USD 0.003 per photo per call uncached; cache reads are USD 0.10 per million. An evening with 15 photos over 10 turns is roughly USD 0.10 with caching, against about USD 0.50 without. The USD 30 cap is unchanged. (Docs read 23/10/26.) At the 30-photo cap the image block is about 48,000 tokens: the first turn of an evening writes it to the 1 h cache for about USD 0.19, each later turn reads it for under USD 0.01. Changing a switch or adding a photo mid-evening rewrites the cache once.
 
 ### 7A.6 M1.1 acceptance
 
@@ -367,8 +369,9 @@ Sonnet 5.5 reads images at high resolution: a 1280 x 960 photo is ceil(1280/28) 
 6. Journal: asked about a photo, Claude describes something visible in it that the capture text does not say.
 7. Second journal turn the same evening: `cache_read_tokens` above zero on the stored reply.
 8. Anonymous access to a `tb-photos` object fails, and so does access to another user's folder (smoke test with a second synthetic uid inside a rolled-back transaction, plus a REST check).
-9. Catalogue diffs for 0005 and 0006 in project `travelboard` touch only `travel.*`, `public.tb_*`, the bucket `tb-photos` and the three `tb_photos_*` policies.
+9. Catalogue diffs for 0005, 0006 and 0007 in project `travelboard` touch only `travel.*`, `public.tb_*`, the bucket `tb-photos` and the three `tb_photos_*` policies.
 10. `checks/static.cjs`, `checks/smoke.sql` and the M1 and M2 headless suites pass; a new M1.1 headless suite passes.
+11. A photo with "Claude sees this" off never reaches Claude: `tb_journal_turn` returns no `photo_path` for it (smoke test) and `tb-journal` sends no image or mention of it (`fn.test.cjs`). With 31 switched-on photos in a day, 30 are sent as images and one is listed as text; switched-off photos on the same day do not count (`fn.test.cjs`). On the Pixel, the switch survives Save, edit and sync.
 
 ---
 
@@ -381,7 +384,7 @@ Added 23/10/26 on Gary's decision (D16). Eric, Gary's travel companion, gets his
 - In project `travelboard`, Auth: add `eric@travelboard.local`, auto-confirmed, strong password. Gary hands it to Eric in person; it never goes into a chat or a file.
 - Eric installs travelboard from the same link on his Android phone and sets up Gboard voice the same way (D10).
 
-### 7B.2 Schema (migration 0007, after M1.1's 0005 and 0006)
+### 7B.2 Schema (migration 0008, after M1.1's 0005 to 0007)
 
 - `travel.people (uid uuid primary key references auth.users(id), display_name text not null, journal_prompt text not null)`. Rows: Gary (`journal`), Eric (`journal-eric`).
 - `travel.partners (a uuid references auth.users(id), b uuid references auth.users(id), primary key (a, b), check (a <> b))`, one row per direction, so Gary and Eric are two rows.
@@ -393,7 +396,7 @@ Added 23/10/26 on Gary's decision (D16). Eric, Gary's travel companion, gets his
 - Storage: replace `tb_photos_select` so it admits `public.tb_can_read(((storage.foldername(name))[1])::uuid)`. Insert and update stay own folder only.
 - Catalogue snapshot before and after, as for every migration.
 
-### 7B.3 Client (v8)
+### 7B.3 Client (the release after M1.1's last)
 
 - IndexedDB: captures carry `owner` and `owner_name`. Only the device user's own rows can be dirty; the partner's rows are read-only mirrors.
 - Day view shows both people's captures together, newest first. The partner's rows carry a small name label ("Eric" or "Gary"). Tapping a partner row opens a read-only view (text, photo, time, place); no Edit, no Delete.
@@ -404,7 +407,7 @@ Added 23/10/26 on Gary's decision (D16). Eric, Gary's travel companion, gets his
 ### 7B.4 Journal
 
 - `tb-journal` picks the system prompt from `travel.people.journal_prompt`: `prompts/journal.md` for Gary, `prompts/journal-eric.md` for Eric. The Eric file starts as the Gary file with everything specific to Gary taken out and his name in its place; Eric tunes it later.
-- The context block lists the day's captures from both people, each labelled with whose it is, and includes photos from both (most recent 20 in total, 7A.4).
+- The context block lists the day's captures from both people, each labelled with whose it is, and includes switched-on photos from both (most recent 30 in total, 7A.4). Each person's switch holds in both threads: a photo Eric switches off reaches neither journal.
 - Same model, limits and caching as M2 and 7A. Both people draw on the one `travelboard` workspace (USD 30 a month). Token counts stay per reply, so usage splits by person with one query.
 
 ### 7B.5 M1.2 acceptance
@@ -578,6 +581,7 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 24/10/26 D15, 7A.1, 7A.2, 7A.4, 7A.5, 7A.6 item 9 and new item 11, 7B.2, 7B.3, 7B.4: Gary's decision. Per-photo "Claude sees this" switch, default on, in migration 0007 (0005 and 0006 already applied); `tb_journal_turn` withholds the path of a switched-off photo. Photos to Claude per day raised from 20 to 30, counting switched-on photos only, combined across both travellers in M1.2; switched-off photos have no limit. M1.2's migration becomes 0008 and its client the release after M1.1's last.
 - 24/10/26 7A.1, 7A.4: corrections agreed with Gary at the M1.1 build. 0005 also replaces `tb_journal_turn` (returns `photo_path` per capture) and `tb_journal_reply` (stores the cache counts), which 7A.4 needs and 7A.1 did not name; `tb_captures_since` needs no replacement (it returns whole rows). The cache breakpoint keeps for 1 h. The day's captures move from the system prompt into the context block.
 
 - 23/10/26 4.2, 6.8 steps 5 and 6, 11: move built. Keep-alive is an anonymous `rpc/tb_whoami` that must come back as Postgres's 42501 (travelboard has no anon-readable object, unlike weatherboard's `meta`); v6 reset detail (sent turns resent through `tb-journal`, failed turns left alone, session removed from storage directly). `checks/catalogue.sql` works where pg_cron is not installed and lists Storage buckets. Headless suites take `TB_CHROMIUM` to run against an installed Chromium.
