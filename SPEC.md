@@ -1,7 +1,7 @@
 # travelboard: specification
 
 Owner: Gary Chan. Repo: `jeuron-hue/travelboard` (public). Written 04/10/26.
-Status: M0 Foundation done 04/10/26. M1 Capture done 10/10/26. M2 Journal done 23/10/26. Move to own project (6.8), then M1.1 Photo capture, in build from 23/10/26, cut-off 27/10/26.
+Status: M0 Foundation done 04/10/26. M1 Capture done 10/10/26. M2 Journal done 23/10/26. Move to own project (6.8), then M1.1 Photo capture (cut-off 27/10/26), then M1.2 Two travellers (cut-off 31/10/26), in build from 23/10/26.
 
 This file is the source of record for what travelboard is and how it is built. M0, M1 and M2 are specified in full because they ship before Bangkok (09/11/26). M3 to M8 are skeletons, to be expanded one at a time after Bangkok using the friction log from that trip.
 
@@ -38,6 +38,7 @@ Wanderlog was used for Switzerland (Jan 2025) and liked, but its AI layer and jo
 | D13 | Map layer is locate-and-reach only: day map, coordinates, copyable address, deep link to Google Maps. No offline vector tiles | 04/10/26 |
 | D14 | Apify is a plan-time enrichment tool only, never in a street-time path | 04/10/26 |
 | D15 | Photo captures (M1.1): one photo per capture from the in-app camera or gallery, shrunk on the phone, stored offline first, synced to a private Supabase Storage bucket `tb-photos`. Claude sees the day's photos in the journal. Built before Bangkok with a cut-off of 27/10/26; if it is not passing on the Pixel by then, it ships after Bangkok | 23/10/26 |
+| D16 | Two travellers (M1.2): Eric gets his own login on his own Android phone. All captures, photos included, are shared between Gary and Eric; journal threads stay private to their owner. Privacy is by what each chooses to put in. Each has his own journal prompt; both share the `travelboard` workspace. Built after M1.1 for Bangkok, cut-off 31/10/26 | 23/10/26 |
 
 ## 3. Design principles
 
@@ -51,7 +52,7 @@ These bind every module.
 6. **Every fact carries its source and its age.** Places hours, a blog post and a photo of the door sign are not equal. Unverified facts are flagged, not presented as fact.
 7. **Store identity, not text.** A place is stored by `place_id` and coordinates from the source at add time, never by a typed address.
 8. **Local day, not Singapore day, and the day ends at 0400.** The day is taken in the zone where the capture was made, and it rolls over at 0400 local, not midnight: a capture at 0030 hrs in Bangkok belongs to that Bangkok evening.
-9. **Ugly is fine. Friction is not.** One user. Spend effort on taps saved, not polish.
+9. **Ugly is fine. Friction is not.** Two users, Gary and Eric (from M1.2). Spend effort on taps saved, not polish.
 
 ## 4. Architecture
 
@@ -132,7 +133,8 @@ travelboard/
 | M2 Journal | Thread per local day, Claude via `tb-journal`, day's captures as context | 19/10 to 25/10 | One real evening conversation that references the day's captures |
 | Move to own project | travelboard out of `weatherboard` into its own Supabase project (6.8) | 23/10 to 24/10 | 6.8 step 8 passes on the Pixel |
 | M1.1 Photo capture | Photo on a capture (camera or gallery), offline first, Storage bucket `tb-photos`, photos in the journal | 24/10 to 27/10 | Section 7A acceptance passes on the Pixel by 27/10, or it moves to after Bangkok |
-| Shakedown | Daily use in Singapore. Fixes only, no features (M1.1 is the one agreed exception, 23/10) | 26/10 to 01/11 | Freeze on 01/11 |
+| M1.2 Two travellers | Eric's login, shared captures and photos, private journals (7B) | after M1.1, by 31/10 | Section 7B acceptance passes on both phones by 31/10, or it moves to after Bangkok |
+| Shakedown | Daily use in Singapore. Fixes only, no features (the move, M1.1 and M1.2 are the agreed exceptions, 23/10) | 26/10 to 01/11 | Freeze on 01/11 |
 | Bangkok pilot | Use it for real, keep a friction log | 09/11 to 12/11 | Friction log written |
 | M3 Trip model + planner | Trips, days, items, places, hours validation | after Bangkok | skeleton below |
 | M4 Phone day view + lookup | Morning pre-fetch, cached lookup, live query | after M3 | skeleton below |
@@ -242,7 +244,7 @@ Database `travelboard`, version 1. A small hand-written promise wrapper, no libr
 - Push: read all `dirty = 1` captures, send in batches of 50 to `tb_captures_upsert`, mark each `dirty = 0` only on a confirming response. Any failure leaves rows dirty for the next trigger.
 - Pull: `tb_captures_since(pull_cursor.server_ts, pull_cursor.id)`, merge by last-write-wins on `updated_at`, advance `pull_cursor` to `next_cursor`, repeat until a page comes back empty. `pull_cursor` is the `{server_ts, id}` pair, starting as nulls. Keep `server_ts` as the exact string the server returned: it has microsecond precision, and converting it to a JS `Date` truncates to milliseconds, which moves the cursor backwards and re-pulls the same page forever.
 - No session or no network: skip silently, record `last_sync_error`, show a small status dot (checking / synced / queued n / sign in / offline). "checking" is the state at launch, and after an `online` event, until a sync attempt settles; the dot never shows synced before a sync has succeeded in the current session. At launch with `navigator.onLine` false it starts as offline.
-- Single user, so last-write-wins is the whole conflict policy.
+- Only a row's owner can change it (M1.2 keeps that), so last-write-wins on the owner's devices is the whole conflict policy.
 
 ### 6.7 M0 acceptance
 
@@ -368,6 +370,54 @@ Sonnet 5.5 reads images at high resolution: a 1280 x 960 photo is ceil(1280/28) 
 
 ---
 
+## 7B. M1.2 Two travellers (full)
+
+Added 23/10/26 on Gary's decision (D16). Eric, Gary's travel companion, gets his own login on his own Android phone. Captures, photos included, are shared between the two; each journal thread stays private to its owner. Privacy is by choice of what goes in: anything either of them does not want the other to see stays out of travelboard. Built after M1.1 passes, cut-off 31/10/26; if it is not passing on both phones by then, Gary pilots Bangkok alone and M1.2 follows the trip.
+
+### 7B.1 Accounts (Gary, dashboard)
+
+- In project `travelboard`, Auth: add `eric@travelboard.local`, auto-confirmed, strong password. Gary hands it to Eric in person; it never goes into a chat or a file.
+- Eric installs travelboard from the same link on his Android phone and sets up Gboard voice the same way (D10).
+
+### 7B.2 Schema (migration 0007, after M1.1's 0005 and 0006)
+
+- `travel.people (uid uuid primary key references auth.users(id), display_name text not null, journal_prompt text not null)`. Rows: Gary (`journal`), Eric (`journal-eric`).
+- `travel.partners (a uuid references auth.users(id), b uuid references auth.users(id), primary key (a, b), check (a <> b))`, one row per direction, so Gary and Eric are two rows.
+- `public.tb_can_read(p_owner uuid) returns boolean`: true when `p_owner = auth.uid()` or a `partners` row links them. `SECURITY DEFINER`, same guardrails as the other RPCs, executable by `authenticated`. Used by the RPCs and by the Storage policy.
+- `tb_captures_since` returns the caller's rows and their partners' rows, each with `owner` and `owner_name`. The keyset cursor is unchanged (it already orders across all rows).
+- `tb_capture_upsert` and `tb_captures_upsert` unchanged in rule: a row whose existing `owner` differs from the caller is rejected, so nobody can edit or delete the other's captures.
+- `tb_whoami` also returns `display_name` and the partners' uids and names.
+- `tb_journal_turn` returns the day's non-deleted captures of the caller and partners, each with `owner_name`. Journal rows themselves stay owner-only; no RPC returns another person's thread.
+- Storage: replace `tb_photos_select` so it admits `public.tb_can_read(((storage.foldername(name))[1])::uuid)`. Insert and update stay own folder only.
+- Catalogue snapshot before and after, as for every migration.
+
+### 7B.3 Client (v8)
+
+- IndexedDB: captures carry `owner` and `owner_name`. Only the device user's own rows can be dirty; the partner's rows are read-only mirrors.
+- Day view shows both people's captures together, newest first. The partner's rows carry a small name label ("Eric" or "Gary"). Tapping a partner row opens a read-only view (text, photo, time, place); no Edit, no Delete.
+- The pill and queue counts cover own rows only. Photos of the partner are downloaded when online and kept locally like own photos (7A.2), so they show offline.
+- Export: every capture on the phone, own and partner, with `owner_name`.
+- Journal tab is unchanged in shape: the device user's own threads only.
+
+### 7B.4 Journal
+
+- `tb-journal` picks the system prompt from `travel.people.journal_prompt`: `prompts/journal.md` for Gary, `prompts/journal-eric.md` for Eric. The Eric file starts as the Gary file with everything specific to Gary taken out and his name in its place; Eric tunes it later.
+- The context block lists the day's captures from both people, each labelled with whose it is, and includes photos from both (most recent 20 in total, 7A.4).
+- Same model, limits and caching as M2 and 7A. Both people draw on the one `travelboard` workspace (USD 30 a month). Token counts stay per reply, so usage splits by person with one query.
+
+### 7B.5 M1.2 acceptance
+
+1. Eric signs in on his Android phone and, for a day, sees his own captures and Gary's, Gary's labelled and read-only.
+2. Gary sees Eric's captures and photos the same way on the Pixel.
+3. Neither can edit or delete the other's capture: no controls in the app, and the RPC rejects it (smoke test).
+4. A photo of Eric's shows on Gary's phone, including offline after one online sync. Reading the partner's folder in `tb-photos` is allowed; writing it is refused; a third synthetic uid (in a rolled-back transaction) can read neither person's folder.
+5. Neither can read the other's journal thread (smoke test on the RPCs, and nothing in either app).
+6. Eric's journal uses his prompt, and on a day with captures from both, his reply can refer to one of Gary's captures by content.
+7. An airplane-mode capture on Eric's phone syncs on reconnect and appears on Gary's phone after his next sync.
+8. `checks/static.cjs`, `checks/smoke.sql` and the M1, M1.1 and M2 headless suites pass; a new M1.2 headless suite passes.
+
+---
+
 ## 8. M2 Journal with Claude (full)
 
 ### 8.1 Shape
@@ -404,7 +454,7 @@ Thread order: each user turn by `(created_at, id)`, its assistant reply straight
 
 Client RPCs (migration 0004): `tb_journal_day(p_local_date date)` returns the thread; `tb_journal_days(p_limit int)` lists days with message counts and the latest `server_ts`, so the client re-fetches only days that changed; `tb_journal_day_suffix(p_local_date, p_suffix)` sets the title suffix.
 
-Function RPCs (migration 0004, Gary's decision 10/10/26): `tb-journal` reaches the database as the signed-in user, never with a service key. It forwards the caller's JWT and calls two more `tb_` RPCs with the same guardrails as the rest (rule 3 of `CLAUDE.md`): `tb_journal_turn(p jsonb)` does steps 2 to 4 of 8.3 in one call (upsert the user turn, return any stored reply, else the thread up to that turn and the day's non-deleted captures); `tb_journal_reply(p jsonb)` does step 7 (store the reply once per user turn; a second insert for the same turn returns the stored one). Single user, so the client being able to call them too is accepted.
+Function RPCs (migration 0004, Gary's decision 10/10/26): `tb-journal` reaches the database as the signed-in user, never with a service key. It forwards the caller's JWT and calls two more `tb_` RPCs with the same guardrails as the rest (rule 3 of `CLAUDE.md`): `tb_journal_turn(p jsonb)` does steps 2 to 4 of 8.3 in one call (upsert the user turn, return any stored reply, else the thread up to that turn and the day's non-deleted captures); `tb_journal_reply(p jsonb)` does step 7 (store the reply once per user turn; a second insert for the same turn returns the stored one). The client being able to call them too is accepted: they act only as the caller, and from M1.2 only on the caller's own thread.
 
 ### 8.3 Edge Function `tb-journal`
 
@@ -526,6 +576,7 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 23/10/26 D16, principle 9, 5, new section 7B, 6.6, 8.3 note: M1.2 Two travellers added for Bangkok on Gary's decision. Eric on his own Android login; all captures and photos shared; journal threads private; own journal prompt each. Built after M1.1, cut-off 31/10/26.
 - 23/10/26 D3, 4 diagram, 4.1, 5, new 6.8, 6.7 item 7, 7A.1, 7A.6, 10: travelboard moves to its own Supabase project `travelboard` (ref `nnnnonspfljdkrxstslw`), Gary's decision after the shared `weatherboard` database reached 381 MB of 500 MB. The move comes before M1.1. Everything travelboard is then removed from `weatherboard` (inventory in 6.8 step 7) once the move passes on the Pixel, on Gary's yes.
 - 23/10/26 Status, D4, D15, 4.1, 5, new section 7A, 8.3, 9, 10: M1.1 Photo capture added before Bangkok on Gary's decision (camera or gallery in the app, Claude sees the photos, cut-off 27/10). Storage bucket `tb-photos` and its `tb_photos_*` policies join the travelboard objects allowed in the shared project. Database size risk updated: 381 MB of 500 MB on 23/10/26.
 - 23/10/26 Status, 8.5: M2 done (acceptance item 1 on the 23/10/26 thread). Share button on the journal bar (Gary's decision, before the shakedown freeze), so a day can go into his desktop Claude journalling project.

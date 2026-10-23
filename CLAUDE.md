@@ -4,11 +4,11 @@ Standing brief for Claude Code. Read this file, then `SPEC.md`, before doing any
 
 ## What this is
 
-travelboard is Gary Chan's personal travel app: a phone PWA (`trip.html`) for capture, voice notes and journalling with Claude, and later a rig planner (`planner.html`). One user. Built module by module; each module is specified in `SPEC.md` with an acceptance list.
+travelboard is Gary Chan's personal travel app: a phone PWA (`trip.html`) for capture, voice notes and journalling with Claude, and later a rig planner (`planner.html`). Two users from M1.2: Gary and his travel companion Eric, each on his own Android phone. Built module by module; each module is specified in `SPEC.md` with an acceptance list.
 
 ## Current module
 
-**Move to own project** (`SPEC.md` 6.8), then **M1.1 Photo capture** (`SPEC.md` 7A). Gary's go 23/10/26. Cut-off for M1.1 on the Pixel: 27/10/26; if it is slipping, stop and tell Gary, and it moves to after Bangkok. M0 done 04/10/26, M1 done 10/10/26, M2 done 23/10/26. The shakedown (26/10 to 01/11) is fixes only apart from finishing these two. Do not start M3 or any later module until Gary says go.
+**Move to own project** (`SPEC.md` 6.8), then **M1.1 Photo capture** (`SPEC.md` 7A), then **M1.2 Two travellers** (`SPEC.md` 7B, in its own session after M1.1 passes). Gary's go 23/10/26. Cut-offs on the phones: M1.1 by 27/10/26, M1.2 by 31/10/26; if either is slipping, stop and tell Gary, and it moves to after Bangkok. M0 done 04/10/26, M1 done 10/10/26, M2 done 23/10/26. The shakedown (26/10 to 01/11) is fixes only apart from finishing these three. Do not start M3 or any later module until Gary says go.
 
 ## Hard rules
 
