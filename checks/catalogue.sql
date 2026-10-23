@@ -1,8 +1,10 @@
 -- travelboard catalogue snapshot. Read-only.
 -- Run before and after every migration; diff the two outputs.
 -- Each row: kind, object name, md5 fingerprint of its definition and grants.
--- Any added, removed or changed row outside schema travel, public.tb_* and
--- Edge Functions tb-* is a breach of CLAUDE.md rule 1.
+-- Any added, removed or changed row outside schema travel, public.tb_*, the bucket
+-- tb-photos and its tb_photos_* policies is a breach of CLAUDE.md rule 1, unless the
+-- migration being checked names it. Edge Functions are not in the database: list them
+-- with the connector.
 with objs as (
   select 'schema' as kind, n.nspname as name,
          md5(concat_ws('|', pg_get_userbyid(n.nspowner), n.nspacl::text)) as fp
@@ -51,8 +53,18 @@ with objs as (
                                                     from pg_publication_tables pt where pt.pubname = p.pubname)))
   from pg_publication p
   union all
-  select 'cron_job', j.jobname, md5(concat_ws('|', j.schedule, j.command, j.active::text, j.username, j.database))
-  from cron.job j
+  -- cron.job exists only where pg_cron is installed (weatherboard yes, travelboard no).
+  -- query_to_xml runs the inner query only when the CASE picks it, so this works in both.
+  select 'cron_job', x.jobname, x.fp
+  from xmltable('/table/row'
+         passing case when to_regclass('cron.job') is not null then query_to_xml(
+           'select jobname, md5(concat_ws(''|'', schedule, command, active::text, username, database)) as fp from cron.job',
+           false, false, '') else '<table/>'::xml end
+         columns jobname text path 'jobname', fp text path 'fp') x
+  union all
+  select 'storage_bucket', b.id,
+         md5(concat_ws('|', b.public::text, b.file_size_limit::text, b.allowed_mime_types::text))
+  from storage.buckets b
   union all
   select 'role', r.rolname, md5(concat_ws('|', r.rolsuper, r.rolcanlogin, r.rolbypassrls, r.rolconfig::text))
   from pg_roles r

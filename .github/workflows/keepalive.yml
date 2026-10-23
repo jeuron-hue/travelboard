@@ -1,0 +1,36 @@
+name: keep-alive
+# travelboard keep-alive (SPEC.md 4.1, 6.8 step 5). Modelled on weatherboard's keepalive.yml.
+# Supabase pauses a free project after about 7 days of low database activity (docs read
+# 23/10/26). Once a day this makes one anonymous call to rpc/tb_whoami with the publishable
+# key. travelboard grants anon nothing (CLAUDE.md rule 3), so the expected answer is
+# Postgres's own permission error 42501: proof the request reached the database. Anything
+# else (540 paused, 5xx, no answer) fails the run.
+# The stamp commit keeps GitHub from switching the schedule off after 60 days without a commit.
+on:
+  schedule:
+    - cron: '43 2 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ping the travelboard database
+        run: |
+          code=$(curl -sS -o "$RUNNER_TEMP/ping.json" -w '%{http_code}' -X POST \
+            "https://nnnnonspfljdkrxstslw.supabase.co/rest/v1/rpc/tb_whoami" \
+            -H "apikey: sb_publishable_uvuGUpCgEIMgWzDSBwOi8Q_56z6Us-_" \
+            -H "Content-Type: application/json" -d '{}')
+          echo "HTTP $code"; cat "$RUNNER_TEMP/ping.json"; echo
+          case "$code" in 401|403) ;; *) echo "expected 401 or 403 from Postgres"; exit 1;; esac
+          grep -q '"code":"42501"' "$RUNNER_TEMP/ping.json"
+      - name: Touch stamp
+        run: |
+          date -u +%Y-%m-%dT%H:%M:%SZ > .keepalive
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .keepalive
+          git commit -m "keep-alive $(cat .keepalive)" || exit 0
+          git push

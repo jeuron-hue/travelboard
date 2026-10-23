@@ -8,7 +8,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { chromium, startServer, makeMock, attachMock, newContext } = require('./harness.cjs');
+const { chromium, launch, startServer, makeMock, attachMock, newContext } = require('./harness.cjs');
 
 const PORT = 8731;
 const APP_VERSION = fs.readFileSync(path.join(__dirname, '..', '..', 'trip.html'), 'utf8').match(/const APP_VERSION = (\d+);/)[1];
@@ -65,7 +65,7 @@ async function gotoDay(page, ymd) {
 
 (async () => {
   const srv = await startServer(PORT);
-  const browser = await chromium.launch();
+  const browser = await launch();
   let dialogs = 0;
 
   // ================= A: phone in Asia/Bangkok, signed in, starts in "airplane mode" =================
@@ -415,7 +415,7 @@ async function gotoDay(page, ymd) {
 
   // ================= C: service worker, offline shell, update bar =================
   const ctxC = await newContext(browser, { tz: 'Asia/Bangkok', session: false, swBlock: false });
-  await ctxC.route('https://nyjsrnntxdgfykkmihpx.supabase.co/**', (r) => r.abort('internetdisconnected'));
+  await ctxC.route('https://nnnnonspfljdkrxstslw.supabase.co/**', (r) => r.abort('internetdisconnected'));
   const pc = await ctxC.newPage();
   await pc.goto(BASE + 'trip.html');
   await pc.waitForFunction(() => navigator.serviceWorker.controller || navigator.serviceWorker.ready.then(() => true), null, { timeout: 10000 });

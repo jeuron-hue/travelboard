@@ -3,10 +3,11 @@
 // Drives trip.html in Chromium against the RPC and tb-journal mocks in harness.cjs: Journal
 // tab, composer and drafts, send and reply, airplane-mode queue, lost responses, errors and
 // Retry, thread order, journal captures inline, day list and titles, pull on a second
-// device, 0400 rule, IndexedDB upgrade from v1, sending with no session.
+// device, 0400 rule, IndexedDB upgrade from v1, sending with no session, and the v6 move to
+// the travelboard project (SPEC.md 6.8 step 6).
 // Exit code 0 only when every check passes.
 'use strict';
-const { chromium, startServer, makeMock, attachMock, newContext, SUPA } = require('./harness.cjs');
+const { chromium, launch, startServer, makeMock, attachMock, newContext, sessionJson, SUPA } = require('./harness.cjs');
 
 const PORT = 8732;
 const BASE = `http://127.0.0.1:${PORT}/`;
@@ -56,7 +57,7 @@ const settle = (page) => page.waitForFunction(() => !syncing, null, { timeout: 1
 
 (async () => {
   const srv = await startServer(PORT);
-  const browser = await chromium.launch();
+  const browser = await launch();
 
   // ================= A: phone in Asia/Bangkok, signed in, online =================
   const mock = makeMock();
@@ -401,7 +402,14 @@ const settle = (page) => page.waitForFunction(() => !syncing, null, { timeout: 1
     sv: await meta.get('schema_version'), draft: await idb.get('drafts', 'new') }));
   check('K12 upgrade v1 to v2: capture, draft and meta kept, schema_version 2', up.v === 2 && up.caps.length === 1
     && up.caps[0].body === 'M1 capture' && up.sv === 2 && up.draft && up.draft.body === 'M1 draft');
-  check('K12 the queued M1 capture still syncs after the upgrade', mockC.rows.has('00000000-0000-4000-8000-00000000f001'));
+  // v6: data from before the move is from the old project, so the session is cleared and the pill asks to sign in.
+  check('K12 v6: the pre-move session is cleared, nothing sent, pill "sign in, 1 queued"', !mockC.rows.size
+    && (await pill(pc)) === 'sign in, 1 queued' && !(await pc.evaluate(() => localStorage.getItem('tb-auth'))), await pill(pc));
+  await pc.reload();                 // the context's init script puts a session back: signed in
+  await pc.waitForFunction(() => document.getElementById('day-label').textContent !== '-');
+  await settle(pc);
+  await syncIdle(pc);
+  check('K12 the queued M1 capture syncs once signed in', mockC.rows.has('00000000-0000-4000-8000-00000000f001'));
 
   // ================= D: no session: a turn still saves and queues =================
   const ctxD = await newContext(browser, { tz: 'Asia/Bangkok', session: false });
@@ -436,6 +444,98 @@ const settle = (page) => page.waitForFunction(() => !syncing, null, { timeout: 1
   const re = await jrows(pe);
   check('K14 401 from tb-journal: turn stays pending (not failed), pill asks to sign in', re[0].state === 'pending'
     && /^sign in/.test(await pill(pe)), `${re[0].state} / ${await pill(pe)}`);
+
+  // ================= L: v6 project move (SPEC.md 6.8 step 6) =================
+  // A v5 phone: everything synced with weatherboard, a stored session, a pull cursor. The new
+  // server already holds the copied turn and reply (step 3) but only one of the two captures.
+  const L = { c1: '00000000-0000-4000-8000-0000000c0001', c2: '00000000-0000-4000-8000-0000000c0002',
+    u1: '00000000-0000-4000-8000-0000000a0001', a1: '00000000-0000-4000-8000-0000000b0001', u2: '00000000-0000-4000-8000-0000000a0002' };
+  const ctxL = await newContext(browser, { tz: 'Asia/Singapore', session: false });
+  const mockL = makeMock();
+  await attachMock(ctxL, mockL);
+  const capL = (id, body, extra) => Object.assign({ id, body, kind: 'note', captured_at: '2026-10-23T13:53:08.150Z', tz: 'Asia/Singapore',
+    local_date: '2026-10-23', lat: 1.355, lng: 103.946, accuracy_m: 13.4, trip_id: null, place_id: null,
+    updated_at: '2026-10-23T13:53:09.926Z', deleted_at: null }, extra || {});
+  mockL.upsertBatch([capL(L.c1, 'copied capture')]);
+  mockL.jrows.set(L.u1, { id: L.u1, local_date: '2026-10-23', role: 'user', content: 'copied turn', reply_to: null, model: null,
+    input_tokens: null, output_tokens: null, created_at: '2026-10-23T14:00:08.671Z', server_ts: mockL.serverTs() });
+  mockL.jrows.set(L.a1, { id: L.a1, local_date: '2026-10-23', role: 'assistant', content: 'copied reply', reply_to: L.u1, model: 'claude-sonnet-5-5',
+    input_tokens: 892, output_tokens: 186, created_at: '2026-10-23T14:00:12.691Z', server_ts: mockL.serverTs() });
+  const pl = await ctxL.newPage();
+  await pl.clock.setFixedTime(new Date('2026-10-23T23:00:00+08:00'));
+  await pl.goto(BASE + 'index.html');
+  await pl.evaluate(({ L, c1, c2, old }) => new Promise((resolve, reject) => {
+    localStorage.setItem('tb-auth', old);
+    const r = indexedDB.open('travelboard', 2);
+    r.onupgradeneeded = () => {
+      const db = r.result;
+      const s = db.createObjectStore('captures', { keyPath: 'id' });
+      s.createIndex('local_date', 'local_date'); s.createIndex('dirty', 'dirty');
+      db.createObjectStore('drafts', { keyPath: 'id' });
+      db.createObjectStore('meta', { keyPath: 'key' });
+      const j = db.createObjectStore('journal', { keyPath: 'id' });
+      j.createIndex('local_date', 'local_date'); j.createIndex('state', 'state');
+      db.createObjectStore('jdays', { keyPath: 'local_date' });
+    };
+    r.onsuccess = () => {
+      const db = r.result;
+      const t = db.transaction(['captures', 'meta', 'journal', 'jdays'], 'readwrite');
+      t.objectStore('captures').put(Object.assign(c1, { server_ts: '2026-10-23T13:53:10.000001+00:00', dirty: 0 }));
+      t.objectStore('captures').put(Object.assign(c2, { server_ts: '2026-10-23T13:59:10.000001+00:00', dirty: 0 }));
+      const j = t.objectStore('journal');
+      j.put({ id: L.u1, local_date: '2026-10-23', role: 'user', content: 'copied turn', reply_to: null, model: null, input_tokens: null,
+        output_tokens: null, created_at: '2026-10-23T14:00:08.671Z', server_ts: 'old', state: 'sent', error: null });
+      j.put({ id: L.a1, local_date: '2026-10-23', role: 'assistant', content: 'copied reply', reply_to: L.u1, model: 'claude-sonnet-5-5',
+        input_tokens: 892, output_tokens: 186, created_at: '2026-10-23T14:00:12.691Z', server_ts: 'old', state: 'sent', error: null });
+      j.put({ id: L.u2, local_date: '2026-10-23', role: 'user', content: 'failed after the key went', reply_to: null, model: null, input_tokens: null,
+        output_tokens: null, created_at: '2026-10-23T14:30:00.000Z', server_ts: null, state: 'error', error: 'anthropic_auth' });
+      t.objectStore('jdays').put({ local_date: '2026-10-23', suffix: 'Singapore test', suffix_dirty: 0, server_last_ts: 'old', server_messages: 2 });
+      t.objectStore('meta').put({ key: 'schema_version', value: 2 });
+      t.objectStore('meta').put({ key: 'pull_cursor', value: { server_ts: '2026-10-23T14:00:12.900001+00:00', id: L.a1 } });
+      t.oncomplete = () => { db.close(); resolve(); };
+      t.onerror = () => reject(t.error);
+    };
+    r.onerror = () => reject(r.error);
+  }), { L, c1: capL(L.c1, 'copied capture'), c2: capL(L.c2, 'made on v5 after the copy',
+    { captured_at: '2026-10-23T13:58:03.643Z', updated_at: '2026-10-23T14:58:05.437Z', deleted_at: '2026-10-23T14:58:05.437Z' }), old: sessionJson() });
+  await pl.goto(BASE + 'trip.html');
+  await pl.waitForFunction(() => document.getElementById('day-label').textContent !== '-');
+  await settle(pl);
+  const sL = await pl.evaluate(async () => ({ ref: await meta.get('project_ref'), cursor: await meta.get('pull_cursor'),
+    caps: await idb.all('captures'), journal: await idb.all('journal'), jday: await idb.get('jdays', '2026-10-23'),
+    auth: Object.keys(localStorage).filter((k) => k.startsWith('tb-auth')) }));
+  check('L1 v6 on a v5 phone: session cleared, pull cursor cleared, project_ref recorded',
+    sL.auth.length === 0 && sL.cursor === null && sL.ref === 'nnnnonspfljdkrxstslw', JSON.stringify(sL.auth));
+  check('L1 nothing deleted: 2 captures (the soft-deleted one kept), 3 journal rows', sL.caps.length === 2 && sL.journal.length === 3
+    && sL.caps.some((c) => c.id === L.c2 && c.deleted_at));
+  check('L1 every capture dirty again', sL.caps.every((c) => c.dirty === 1 && c.server_ts === null));
+  const jl = (id) => sL.journal.find((r) => r.id === id);
+  check('L1 sent turn back to pending; failed turn left failed; reply untouched', jl(L.u1).state === 'pending'
+    && jl(L.u2).state === 'error' && jl(L.a1).state === 'sent' && jl(L.a1).content === 'copied reply');
+  check('L1 day title re-queued and the day re-fetched', sL.jday.suffix_dirty === 1 && sL.jday.server_last_ts === null && sL.jday.server_messages === null);
+  check('L1 nothing sent before sign in; pill "sign in, 3 queued"', mockL.calls.length === 0 && (await pill(pl)) === 'sign in, 3 queued', (await pill(pl)) + ' ' + mockL.calls.join(','));
+  await pl.evaluate((s) => localStorage.setItem('tb-auth', s), sessionJson());
+  await pl.reload();
+  await pl.waitForFunction(() => document.getElementById('day-label').textContent !== '-');
+  await settle(pl);
+  await syncIdle(pl);
+  const aL = await pl.evaluate(async () => ({ caps: await idb.all('captures'), journal: await idb.all('journal'), jday: await idb.get('jdays', '2026-10-23') }));
+  check('L2 after sign in: both captures on the server, the deleted one still deleted, none dirty', mockL.rows.size === 2
+    && !!mockL.rows.get(L.c2).deleted_at && aL.caps.every((c) => c.dirty === 0), `${mockL.rows.size}`);
+  check('L2 the copied turn went through tb-journal once and got the stored reply, no Claude call', mockL.fnCalls.length === 1
+    && mockL.fnCalls[0].message_id === L.u1 && mockL.claude.length === 0);
+  check('L2 still one reply to that turn, same id', aL.journal.filter((r) => r.reply_to === L.u1).length === 1
+    && aL.journal.find((r) => r.reply_to === L.u1).id === L.a1 && aL.journal.find((r) => r.id === L.u1).state === 'sent');
+  check('L2 the failed turn is not resent automatically', aL.journal.find((r) => r.id === L.u2).state === 'error');
+  check('L2 day title on the server, pill synced', (mockL.jdays.get('2026-10-23') || {}).suffix === 'Singapore test'
+    && aL.jday.suffix_dirty === 0 && (await pill(pl)) === 'synced', await pill(pl));
+  const callsL = mockL.calls.length, fnL = mockL.fnCalls.length;
+  await pl.reload();
+  await pl.waitForFunction(() => document.getElementById('day-label').textContent !== '-');
+  await settle(pl);
+  check('L3 next launch: no reset again (session kept, nothing re-queued, nothing resent)', mockL.fnCalls.length === fnL
+    && (await pl.evaluate(() => idb.countByIndex('captures', 'dirty', 1))) === 0 && (await pill(pl)) === 'synced'
+    && !!(await pl.evaluate(() => localStorage.getItem('tb-auth'))), `${mockL.calls.length - callsL} calls`);
 
   await browser.close();
   srv.close();

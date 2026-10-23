@@ -9,6 +9,7 @@
 // - no Anthropic API key anywhere in the repo (SPEC.md 8.7 item 4)
 // - tb-journal: prompt.ts is current with prompts/journal.md; the function reads its key
 //   only from TB_ANTHROPIC_API_KEY and uses no service key
+// - keep-alive workflow pings the project and key trip.html uses, daily, with no secret
 'use strict';
 
 const fs = require('fs');
@@ -117,7 +118,7 @@ if (pre) {
 // scanned for JWTs whose role is service_role and for sb_secret_ keys. The docs and the
 // checks themselves name the role in prose, so they are exempt from the string check only.
 const PROSE = new Set(['SPEC.md', 'CLAUDE.md', 'TESTS.md', 'checks/static.cjs', 'checks/smoke.sql', 'checks/catalogue.sql']);
-const textLike = (f) => /\.(html|js|cjs|mjs|json|webmanifest|md|sql|ts|txt|css)$/i.test(f) || !path.extname(f);
+const textLike = (f) => /\.(html|js|cjs|mjs|json|webmanifest|md|sql|ts|txt|css|ya?ml)$/i.test(f) || !path.extname(f);
 let secretHits = 0;
 for (const f of walk('')) {
   if (!textLike(f)) continue;
@@ -152,6 +153,20 @@ if (exists(`${FN}/index.ts`)) {
   check(/const MODEL = 'claude-sonnet-5-5';/.test(fn) && /const MAX_TOKENS = 1500;/.test(fn), 'tb-journal: model claude-sonnet-5-5, max_tokens 1500');
 }
 if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(`${FN}/context.mjs`)), 'tb-journal: 40-turn cap');
+
+// ---------- keep-alive workflow (SPEC.md 6.8 step 5) ----------
+const KA = '.github/workflows/keepalive.yml';
+check(exists(KA), 'keep-alive: workflow exists');
+if (exists(KA)) {
+  const ka = read(KA);
+  const trip = read('trip.html');
+  const ref = (trip.match(/const PROJECT_REF = '([a-z0-9]+)';/) || [])[1];
+  const key = (trip.match(/const SUPABASE_PUBLISHABLE_KEY = '([^']+)';/) || [])[1];
+  check(!!ref && ka.includes(`https://${ref}.supabase.co/rest/v1/rpc/tb_whoami`), `keep-alive: pings the project trip.html uses (${ref})`);
+  check(!!key && ka.includes(`apikey: ${key}`), 'keep-alive: uses the same publishable key as trip.html');
+  check(/schedule:\s*\n\s*- cron: '\d+ \d+ \* \* \*'/.test(ka), 'keep-alive: runs daily, well inside the 7-day pause window');
+  check(!/secrets\./.test(ka), 'keep-alive: no secret beyond the publishable key');
+}
 
 // ---------- report ----------
 for (const p of passes) console.log('PASS ' + p);

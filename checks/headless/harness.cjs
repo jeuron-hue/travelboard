@@ -14,7 +14,7 @@ const path = require('path');
 const { chromium } = require('playwright');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const SUPA = 'https://nyjsrnntxdgfykkmihpx.supabase.co';
+const SUPA = 'https://nnnnonspfljdkrxstslw.supabase.co';
 const UID = '11111111-2222-4333-8444-555555555555';
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.webmanifest': 'application/manifest+json',
   '.png': 'image/png', '.woff2': 'font/woff2', '.json': 'application/json' };
@@ -236,4 +236,7 @@ async function newContext(browser, { tz, session, swBlock = true }) {
   return ctx;
 }
 
-module.exports = { chromium, startServer, makeMock, attachMock, newContext, loadContext, SUPA, UID, ROOT };
+// TB_CHROMIUM=/path/to/chrome runs against an installed Chromium instead of Playwright's own.
+const launch = () => chromium.launch(process.env.TB_CHROMIUM ? { executablePath: process.env.TB_CHROMIUM } : {});
+
+module.exports = { chromium, launch, startServer, makeMock, attachMock, newContext, sessionJson, loadContext, SUPA, UID, ROOT };

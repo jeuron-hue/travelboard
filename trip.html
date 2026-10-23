@@ -22,6 +22,13 @@
     the whole day (captures and conversation) as plain text to another app.
 
   Change log (newest first)
+  - 23/10/26 v6. Backend moved to its own Supabase project travelboard (SPEC.md 6.8):
+    SUPABASE_URL and the publishable key point at it. meta.project_ref records the project
+    the local data was synced with; when it differs from this build's, the pull cursor and
+    the stored session are cleared, every capture is queued again, every sent journal turn
+    is queued again (the server returns its stored reply, so no new Claude call), day titles
+    are re-sent and every day is re-fetched, and the pill asks to sign in. Nothing local is
+    deleted. A fresh install just records the project.
   - 23/10/26 v5. Journal bar gains Share: the day's title, every live capture and the
     conversation as plain text, through the Android share sheet (Claude app, Copy and so
     on), or copied to the clipboard where sharing is not available. For pasting into
@@ -398,10 +405,11 @@
 'use strict';
 
 // Bump together with CACHE_VERSION in sw.js on every release.
-const APP_VERSION = 5;
+const APP_VERSION = 6;
 
-const SUPABASE_URL = 'https://nyjsrnntxdgfykkmihpx.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_q75DGiJBda-NwE3tdgPtFg_g3Rasmcg';
+const PROJECT_REF = 'nnnnonspfljdkrxstslw';           // Supabase project travelboard (SPEC.md D3, 6.8)
+const SUPABASE_URL = 'https://' + PROJECT_REF + '.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_uvuGUpCgEIMgWzDSBwOi8Q_56z6Us-_';
 const PUSH_BATCH = 50;
 const FETCH_TIMEOUT_MS = 20000;
 const PROBE_TIMEOUT_MS = 5000;
@@ -1574,6 +1582,48 @@ $('signout').addEventListener('click', async () => {
   await renderStatus();
 });
 
+// ---------- project change (SPEC.md 6.8 step 6) ----------
+
+// The local data was synced with another Supabase project (before v6: weatherboard). The
+// server side starts over; the phone keeps everything. Pull cursor and stored session are
+// cleared, every capture is marked dirty, every sent journal turn goes back to pending
+// (tb-journal returns the stored reply for a turn it already has, with no Claude call),
+// titles are re-sent and every day re-fetched. Pushes are idempotent, so the phone's copy
+// also fills any gap in the server copy. A fresh install only records the project.
+async function checkProject() {
+  const ref = await meta.get('project_ref');
+  if (ref === PROJECT_REF) return false;
+  const existing = ref !== undefined || (await meta.get('schema_version')) !== undefined;
+  if (existing) {
+    await idb.tx(['captures', 'journal', 'jdays', 'meta'], (t) => {
+      const each = (store, fn) => {
+        const req = t.objectStore(store).openCursor();
+        req.onsuccess = () => {
+          const c = req.result;
+          if (!c) return;
+          const next = fn(c.value);
+          if (next) c.update(next);
+          c.continue();
+        };
+      };
+      each('captures', (r) => Object.assign({}, r, { dirty: 1, server_ts: null }));
+      each('journal', (r) => r.role === 'user' && r.state === 'sent' ? Object.assign({}, r, { state: 'pending', error: null }) : null);
+      each('jdays', (d) => Object.assign({}, d, { suffix_dirty: d.suffix ? 1 : 0, server_last_ts: null, server_messages: null }));
+      t.objectStore('meta').put({ key: 'pull_cursor', value: null });
+      t.objectStore('meta').put({ key: 'project_ref', value: PROJECT_REF });
+    });
+    // Remove the stored session directly: signOut would send the old project's token to
+    // the new project's logout endpoint.
+    try {
+      for (const k of Object.keys(localStorage)) if (k.startsWith('tb-auth')) localStorage.removeItem(k);
+    } catch (e) {}
+    syncState.phase = 'signin';
+  } else {
+    await meta.set('project_ref', PROJECT_REF);
+  }
+  return existing;
+}
+
 // ---------- storage persistence (SPEC.md 6.4) ----------
 
 async function initPersistence() {
@@ -1723,6 +1773,7 @@ if (sb) sb.auth.onAuthStateChange(() => { renderAuth(); });
 (async function boot() {
   $('s-version').textContent = 'v' + APP_VERSION;
   await idb.open();
+  await checkProject();               // before the first sync and before schema_version is written
   if ((await meta.get('schema_version')) !== 2) await meta.set('schema_version', 2);
   // A reload while the capture screen was up leaves its history entry on top: pop it.
   popCaptureState();
