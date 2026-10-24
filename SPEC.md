@@ -539,6 +539,8 @@ Text pairs pass WCAG AA in both themes (checked 24/10/26). Theme choice Light, D
 
 **Type:** Newsreader (OFL; vendor 500, 600 and italic 500, Latin subset, woff2) for the wordmark (italic 500, 20 px), screen titles (600, 28 px), day titles (600, 34 px, tracking -0.01em), tab labels (18 px) and Claude's replies (17.5 px, line height 1.5). IBM Plex Sans 400, 500, 600 for everything else: place 17 px 600 (coordinates 500, muted, tabular figures), body 15 px, inputs 16 to 17 px, time stamp 16 px 600 tabular with "hrs" 11 px caps below, section labels 11 px 600 caps with 0.12em tracking.
 
+**App icon (option B, chosen 24/10/26):** a ruled notebook page (`#F4EEE2`, lines `#D9CFBD`, faint accent margin line) tilted -6deg on an ink ground `#1F2A36`, with a terracotta `#B4472A` map pin and a paper-coloured hole, as drawn in `design/m1.3/Icons.dc.html` (100-unit grid). Everything sits inside Android's maskable safe circle (radius 40% of the canvas), so the maskable file is the same art on a full-bleed ground. Built in session B: `icons/icon-192.png`, `icon-512.png`, `icon-maskable-512.png` and the shortcut icon regenerated from it; manifest paths unchanged.
+
 **Shapes and sizes:** side gutter 20 px (footer 16 px); sync pill as a stamp (1.5 px border, radius 4 px, rotated -2deg, caps 12 px); primary buttons 54 px high, radius 10 px; chips 36 px high, radius 18 px (own names solid blue, map suggestion dashed accent); photo prints with a 4 to 5 px `--print` border, a small shadow and a 1.5 to 2 deg tilt; Settings as a bottom sheet with a grabber, radius 14 px; rows separated by hairlines, no cards; day rows: 52 px time column, 26 px spine column with a 9 px dot (accent own, blue partner).
 
 ---
@@ -701,6 +703,7 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 24/10/26 7C.8: app icon option B (notebook page and pin) chosen by Gary; built in session B. Source in `design/m1.3/Icons.dc.html`.
 - 24/10/26 7C.8: Gary approved the M1.3 mockup. Tokens, type and sizes pinned; mockup source in `design/m1.3/`.
 - 24/10/26 7C.2, new 7C.2a, 7C.3, 7C.7 item 6a: Gary's decisions on the mockups. Capture kinds retired in the UI (no toggle, no label, journal captures no longer quoted in the thread; data kept, no migration). Journal Write button replaced by an inline field with Send at the foot of the screen.
 - 24/10/26 Status, D16, new D17, principles 7 and 9, 5, 7B intro, new section 7C: Gary's decisions. M1.3 Look and place before Bangkok: field-notebook redesign of every screen (serif headings, Plex body, terracotta and ink blue, both themes in full), editable `place_name` with own-name chips within 75 m and OpenStreetMap Nominatim chips when online, never auto-filled; editable journal prompt per person. Migration 0009. Two sessions after M1.2's build. M1.2's cut-off moves to 05/11 so its two-phone test runs on the new design; freeze moves from 01/11 to 06/11.

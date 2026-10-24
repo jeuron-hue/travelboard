@@ -6,5 +6,6 @@ Source of the mockup Gary approved on 24/10/26 for SPEC.md 7C. Each `.dc.html` i
 - `Capture.dc.html`: capture and edit
 - `Journal.dc.html`: journal with the inline field
 - `Panel.dc.html`: Settings sheet
+- `Icons.dc.html`: app icon options; B (notebook and pin) chosen
 
 Tokens, type and sizes are pinned in SPEC.md 7C.8. Sample text is invented for the mockup.
