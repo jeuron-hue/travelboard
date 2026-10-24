@@ -39,6 +39,12 @@
     never filled in automatically.
 
   Change log (newest first)
+  - 24/10/26 v12. Chips with no fresh fix at open (Pixel run of v11): indoors in airplane mode
+    a first satellite fix takes longer than 5 s, so a new capture got no position and no chips.
+    The open-time request now waits up to 30 s and accepts a fix up to 5 min old; the last fix
+    the app saw (meta last_fix, from any Save or opening) stands in at once when under 5 min
+    old, for own-name chips only (no OpenStreetMap lookup until a fresh fix). A Save still
+    takes its own fix with the 5 s limit, as before.
   - 24/10/26 v11. M1.3 session A (SPEC.md 7C.1, 7C.2, 7C.2a, 7C.4, 7C.8). Vendored Newsreader
     500, 600 and italic 500 and Plex Sans 500; the 7C.8 colour tokens in both themes; header
     with the italic wordmark and the sync pill as a stamp (sign in in ink blue, not the
@@ -689,7 +695,7 @@
 'use strict';
 
 // Bump together with CACHE_VERSION in sw.js on every release.
-const APP_VERSION = 11;
+const APP_VERSION = 12;
 
 const PROJECT_REF = 'nnnnonspfljdkrxstslw';           // Supabase project travelboard (SPEC.md D3, 6.8)
 const SUPABASE_URL = 'https://' + PROJECT_REF + '.supabase.co';
@@ -716,6 +722,11 @@ const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/reverse';
 const NOMINATIM_GAP_MS = 1000;      // at most one request a second (OSM usage policy)
 const NOMINATIM_TIMEOUT_MS = 8000;
 const GEO_CELL_DEG = 0.00045;       // cache cell: about 50 m of latitude
+// Chips need a position at open. Indoors in airplane mode a first satellite fix takes longer
+// than the 5 s a Save allows, so the open-time request waits longer and accepts a fix up to
+// 5 min old, and the last fix the app saw (meta last_fix) stands in until it comes.
+const CHIP_FIX_OPTS = { enableHighAccuracy: true, timeout: 30000, maximumAge: 300000 };
+const LAST_FIX_MAX_AGE_MS = 300000;
 
 const $ = (id) => document.getElementById(id);
 
@@ -999,6 +1010,7 @@ function requestGps(id) {
   try {
     navigator.geolocation.getCurrentPosition((pos) => {
       const c = pos.coords;
+      rememberFix(pos);
       idb.update('captures', id, (row) => row && Object.assign({}, row, {
         lat: c.latitude,
         lng: c.longitude,
@@ -1124,7 +1136,9 @@ async function refreshPlaceChips() {
   const own = (await ownNamesNear(pos.lat, pos.lng)).filter((o) => o.name.toLowerCase() !== cur).slice(0, PLACE_CHIPS);
   if (seq !== chipSeq) return;
   drawChips(own, null);
-  if (own.length >= PLACE_CHIPS) return;
+  // A stand-in position (the last fix, see fixAtOpen) feeds own names only: the map lookup waits
+  // for a fresh fix, so it never asks OpenStreetMap about where the phone used to be.
+  if (own.length >= PLACE_CHIPS || pos.standIn) return;
   // One lookup per position for as long as the screen is up, so typing never asks again.
   const key = geoKey(pos.lat, pos.lng);
   if (!cap.osm || cap.osm.key !== key) {
@@ -1138,19 +1152,33 @@ async function refreshPlaceChips() {
   if (name && name.toLowerCase() !== cur && !own.some((o) => o.name.toLowerCase() === name.toLowerCase())) drawChips(own, name);
 }
 
+// The last position the app saw (at a Save or at an opening), for chips only.
+function rememberFix(pos) {
+  meta.set('last_fix', { lat: pos.coords.latitude, lng: pos.coords.longitude, at: new Date().toISOString() })
+    .catch(() => {});
+}
+
 // A new capture's position at open, for its chips. Asked only when location is already
-// granted, so the permission prompt still comes at the first Save (SPEC.md 7.2). Never awaited;
-// the capture's own coordinates still come from the fix taken at Save.
+// granted, so the permission prompt still comes at the first Save (SPEC.md 7.2). The last fix,
+// if under 5 min old, gives own-name chips at once (no map lookup); a fresh fix replaces it
+// when it arrives. Never
+// awaited; the capture's own coordinates still come from the fix taken at Save.
 async function fixAtOpen(seq) {
   if (!navigator.geolocation || !navigator.permissions || !navigator.permissions.query) return;
   try {
     if ((await navigator.permissions.query({ name: 'geolocation' })).state !== 'granted') return;
-    navigator.geolocation.getCurrentPosition((pos) => {
+    const use = (lat, lng, standIn) => {
       if (!cap.open || cap.seq !== seq || cap.mode !== 'new') return;
-      cap.fix = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      cap.fix = { lat, lng, standIn };
       updatePlaceField();
       refreshPlaceChips();
-    }, () => {}, GPS_OPTS);
+    };
+    const last = await meta.get('last_fix');
+    if (last && Date.now() - Date.parse(last.at) < LAST_FIX_MAX_AGE_MS && !cap.fix) use(last.lat, last.lng, true);
+    navigator.geolocation.getCurrentPosition((pos) => {
+      rememberFix(pos);
+      use(pos.coords.latitude, pos.coords.longitude, false);
+    }, () => {}, CHIP_FIX_OPTS);
   } catch (e) { /* no permission API or no position: no chips */ }
 }
 

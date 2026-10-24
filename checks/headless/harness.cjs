@@ -421,11 +421,11 @@ const GEO_INIT = `
   Object.defineProperty(navigator, 'geolocation', { configurable: true, value: {
     getCurrentPosition(ok, err, opts) {
       const g = window.__geo; g.calls++; g.lastOpts = opts;
-      const at = g.fix || { lat: 13.7466, lng: 100.5393 };    // g.fix (M1.3) moves the phone
-      const fix = { coords: { latitude: at.lat, longitude: at.lng, accuracy: 12.5 }, timestamp: Date.now() };
+      // g.fix (M1.3) moves the phone; read when the fix is delivered, so a held one gets the latest.
+      const fix = () => { const at = g.fix || { lat: 13.7466, lng: 100.5393 }; return { coords: { latitude: at.lat, longitude: at.lng, accuracy: 12.5 }, timestamp: Date.now() }; };
       if (g.mode === 'deny') setTimeout(() => err && err({ code: 1, message: 'User denied Geolocation' }), 10);
-      else if (g.mode === 'hold') g.pending.push(() => ok(fix));
-      else setTimeout(() => ok(fix), 10);
+      else if (g.mode === 'hold') g.pending.push(() => ok(fix()));
+      else setTimeout(() => ok(fix()), 10);
     },
     watchPosition() { return 0; }, clearWatch() {}
   }});

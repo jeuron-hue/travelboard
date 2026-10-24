@@ -392,6 +392,61 @@ async function chipsSettled(page) {
     check('N16 under the day title: the city and the count', sub === `Bangkok, ${nToday} captures`, sub);
     check('N16 rows: time stamp with "hrs", a timeline dot (blue for a partner row), no kind label', await G.$$eval('#records .row', (els) => els.every((e) =>
       /^\d{4} hrs$/.test(e.querySelector('.when').textContent) && !!e.querySelector('.spine .pin') && !/\b(note|journal)\b/i.test(e.querySelector('.line1').textContent))));
+
+    // ---------- no fresh fix at open (indoors, airplane mode), found on the Pixel 24/10/26 ----------
+    // A first satellite fix indoors with no network location takes longer than 5 s. The last fix
+    // the app saw (under 5 min old) gives chips at once; the open-time request waits up to 30 s
+    // and takes a fix up to 5 min old; a fresh fix replaces the stand-in when it comes.
+    await offline(true);
+    const minuteAgo = new Date(Date.now() - 60000).toISOString();
+    await G.evaluate(({ p, at }) => { __geo.mode = 'hold'; __geo.pending = []; return meta.set('last_fix', { lat: p.lat, lng: p.lng, at }); }, { p: spot, at: minuteAgo });
+    await openNew(G);
+    await G.waitForFunction(() => !!cap.fix, null, { timeout: 3000 }).catch(() => {});
+    await chipsSettled(G);
+    cs = await chips(G);
+    check('N17 no fix yet, last fix 1 min old at a named spot: own chips at once, offline, nearest first',
+      cs.map((c) => c.name).join() === 'Soi 23 noodle stall,Health Land Asoke', JSON.stringify(cs));
+    check('N17 the open-time request waits up to 30 s and accepts a fix up to 5 min old', await G.evaluate(() => __geo.lastOpts.timeout === 30000
+      && __geo.lastOpts.maximumAge === 300000 && __geo.lastOpts.enableHighAccuracy === true && __geo.pending.length === 1));
+    await G.evaluate((p) => { __geo.fix = p; __geo.pending.shift()(); }, move(spot, 2000, 0));
+    await G.waitForFunction(() => cap.fix && Math.abs(cap.fix.lat - __geo.fix.lat) < 1e-9, null, { timeout: 3000 }).catch(() => {});
+    await chipsSettled(G);
+    check('N17 the fresh fix replaces the stand-in: 2 km away, no chips', (await chips(G)).length === 0 && await G.evaluate(() => cap.fix.standIn === false)
+      && await G.evaluate(() => idb.get('meta', 'last_fix').then((m) => Math.abs(m.value.lat - __geo.fix.lat) < 1e-9)));
+    await G.click('#cap-close');
+    await waitCap(G, false);
+    await G.evaluate(() => idb.del('drafts', 'new'));
+    await G.evaluate(({ p, at }) => { __geo.pending = []; return meta.set('last_fix', { lat: p.lat, lng: p.lng, at }); }, { p: spot, at: new Date(Date.now() - 600000).toISOString() });
+    await openNew(G);
+    await G.waitForTimeout(400);
+    check('N17 a last fix 10 min old is not used: no chips, the hint says no GPS', (await chips(G)).length === 0
+      && await G.evaluate(() => cap.fix === null) && (await G.getAttribute('#cap-place', 'placeholder')) === 'no GPS');
+    await G.click('#cap-close');
+    await waitCap(G, false);
+    await G.evaluate(() => idb.del('drafts', 'new'));
+    await offline(false);
+    const osm5 = mock.osm.calls.length;
+    await G.evaluate(({ p, at }) => { __geo.mode = 'hold'; __geo.pending = []; return meta.set('last_fix', { lat: p.lat, lng: p.lng, at }); }, { p: later, at: minuteAgo });
+    await openNew(G);
+    await G.waitForFunction(() => !!cap.fix, null, { timeout: 3000 }).catch(() => {});
+    await chipsSettled(G);
+    check('N17 online with only a stand-in position: no OpenStreetMap request until a fresh fix', mock.osm.calls.length === osm5 && await G.evaluate(() => cap.fix.standIn === true));
+    await G.evaluate((p) => { __geo.fix = p; __geo.pending.shift()(); }, later);
+    await G.waitForFunction(() => cap.fix && cap.fix.standIn === false, null, { timeout: 3000 }).catch(() => {});
+    await chipsSettled(G);
+    check('N17 the fresh fix then gets the map chip (cached here, so still no new request)', (await chips(G)).some((c) => c.name === 'Chatuchak Market'), JSON.stringify(await chips(G)));
+    await G.click('#cap-close');
+    await waitCap(G, false);
+    await G.evaluate(() => idb.del('drafts', 'new'));
+    await offline(true);
+    await G.evaluate((p) => { __geo.mode = 'grant'; __geo.fix = p; }, move(spot, 10, 10));
+    await openNew(G);
+    await G.fill('#cap-body', 'Fix kept for next time');
+    await save(G);
+    await G.waitForFunction((p) => idb.get('meta', 'last_fix').then((m) => m && Math.abs(m.value.lat - p.lat) < 1e-9), move(spot, 10, 10), { timeout: 3000 }).catch(() => {});
+    check('N17 a Save\'s fix becomes the last fix', await G.evaluate((p) => idb.get('meta', 'last_fix').then((m) => !!m && Math.abs(m.value.lat - p.lat) < 1e-9), move(spot, 10, 10)));
+    await offline(false);
+    await syncIdle(G);
   } finally {
     await browser.close();
     srv.close();
