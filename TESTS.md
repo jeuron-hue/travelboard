@@ -55,7 +55,8 @@ From Gary's report and screenshot and the server rows (checked 1600 hrs).
 | 3 (item 6a) | 1548 | PASS. `Where am I today` sent with one tap; one reply stored (claude-sonnet-5-5, prompt cache written, 10,136 tokens). |
 | 6 (item 7, Gary) | 1551 to 1552 | PASS. Own text: `Prompt test one` reply ends "kopi"; the changed prompt wrote a new cache (10,150 tokens). After Reset to default: `Prompt test two` reply has no "kopi" and **read** the 1548 cache (10,136 tokens), so the restored text is byte for byte the file. `journal_prompt_custom` null for both people afterwards. Claude's second reply also remarked on its own earlier "kopi": it sees the day's thread, including replies written under the old prompt. Expected, not a defect. |
 | 7 | before 1553 | PASS (Gary). Offline Edit refused; screenshot at 1553 shows the OFFLINE stamp. |
-| 8 | | Moved to part B, done beside Eric's step 25. |
+| Type (item 1) | 1553 | Accepted by Gary 24/10/26, no change. Thread as the mockup: labels Plex caps in terracotta and blue, his text Plex 16 px ink, Claude's Newsreader 17.5 px ink. The serif renders a little heavier than the mockup (static Newsreader 500 for replies, no optical sizing); Gary chose to keep it. |
+| 8 | | Merged into step 25 (Gary 24/10/26): if Eric's password change passes, the same form and call pass for Gary. |
 | 9 (items 4, 6) | | Not run yet: needs a named place with signal. |
 
 ### Device steps (both phones), 0.14.0: M1.2 and M1.3 in one run
@@ -197,7 +198,7 @@ Decisions for Gary (asked in the session B report; answers to be recorded here)
 6. Answered 24/10/26: Gary said deepen. Light `--crit` is `#8A1538` from 0.14.1 (crimson; 8.1:1 on the paper, 7.5:1 on its tint). Dark `--crit` `#EC5F86` from 0.14.2 (Gary said deepen it too): a crimson, apart from the dark accent `#E07A55`; 5.4:1 on the night page, 4.8:1 on the sheet and its tint.
 
 Known, by design or minor
-7. Newsreader is the three static files 7C.8 names (default optical size); the mockup used the variable font, so the 34 px titles may look slightly heavier on the phone.
+7. Newsreader is the three static files 7C.8 names (default optical size, no 400), so titles and Claude's replies render a little heavier than the mockup. Seen on the Pixel 24/10/26; Gary chose no change.
 8. A cached map name shows offline too; the geocache never expires; Nominatim is called from the phone with the browser's Referer, no custom User-Agent.
 9. The prompt editor counts characters as the server does (code points); an emoji built from several code points counts as several.
 10. Saving the default text unchanged stores no custom text, so a later edit of `prompts/<key>.md` reaches that person; once someone saves their own text, file edits no longer reach them until Reset to default.
