@@ -7,8 +7,9 @@
 //   matches APP_VERSION in trip.html
 // - no service_role key or string, and no sb_secret_ key, anywhere it could ship
 // - no Anthropic API key anywhere in the repo (SPEC.md 8.7 item 4)
-// - tb-journal: prompt.ts is current with prompts/journal.md; the function reads its key
-//   only from TB_ANTHROPIC_API_KEY and uses no service key
+// - tb-journal: prompt.ts is current with every prompts/*.md (journal and, from M1.2,
+//   journal-eric); the function reads its key only from TB_ANTHROPIC_API_KEY and uses no
+//   service key
 // - keep-alive workflow pings the project and key trip.html uses, daily, with no secret
 // - M1.1: photo constants, IndexedDB v3, no file deletes, 20 photos and 1 h cache in
 //   tb-journal, migration 0006 shape
@@ -142,11 +143,16 @@ check(anthropicHits.length === 0, `secrets: no Anthropic API key in the repo${an
 const FN = 'supabase/functions/tb-journal';
 for (const f of ['index.ts', 'prompt.ts', 'context.mjs', 'bundle-prompt.cjs']) check(exists(`${FN}/${f}`), `tb-journal: ${f} exists`);
 check(exists('prompts/journal.md'), 'tb-journal: prompts/journal.md exists');
-if (exists(`${FN}/prompt.ts`) && exists('prompts/journal.md')) {
-  const m = read(`${FN}/prompt.ts`).match(/export const JOURNAL_PROMPT = (".*");\n/s);
-  let ok = false;
-  try { ok = !!m && JSON.parse(m[1]) === read('prompts/journal.md'); } catch (e) { /* not current */ }
-  check(ok, 'tb-journal: prompt.ts matches prompts/journal.md (run bundle-prompt.cjs after editing the prompt)');
+check(exists('prompts/journal-eric.md'), 'tb-journal: prompts/journal-eric.md exists (M1.2)');
+if (exists(`${FN}/prompt.ts`)) {
+  const m = read(`${FN}/prompt.ts`).match(/export const PROMPTS: Record<string, string> = (\{.*\});\n/s);
+  let bundled = null;
+  try { bundled = m && JSON.parse(m[1]); } catch (e) { /* not current */ }
+  const files = fs.readdirSync(path.join(ROOT, 'prompts')).filter((f) => f.endsWith('.md')).sort();
+  const ok = !!bundled && Object.keys(bundled).sort().join() === files.map((f) => f.slice(0, -3)).sort().join()
+    && files.every((f) => bundled[f.slice(0, -3)] === read('prompts/' + f));
+  check(ok, `tb-journal: prompt.ts matches prompts/*.md (${files.join(', ')}; run bundle-prompt.cjs after editing a prompt)`);
+  check(!!bundled && !/\bGary\b/.test(bundled['journal-eric'] || 'Gary'), 'tb-journal: journal-eric names Eric, not Gary');
 }
 if (exists(`${FN}/index.ts`)) {
   const fn = read(`${FN}/index.ts`);

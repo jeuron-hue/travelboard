@@ -6,15 +6,20 @@
 // Checks the request it sends to Claude, idempotent retries, error mapping and the 40-turn cap;
 // from M1.1 (SPEC.md 7A.4) also a fake of Storage: the day's photos as labelled images (most
 // recent 20, the rest listed), a failed download listed, the cache breakpoint, cache counts.
+// From M1.2 (SPEC.md 7B.4, 7B.5 item 10), G1 to G7: Eric's calls (his own JWT): his prompt
+// (prompts/journal-eric.md), Gary's captures only when linked and shared, labelled by name,
+// an unshared one absent from the whole request, the photos combined to 30, unknown prompt.
 'use strict';
 const http = require('http');
 const path = require('path');
 const { spawn } = require('child_process');
-const { makeMock, ROOT } = require('./harness.cjs');
+const { makeMock, ROOT, UID, ERIC_UID } = require('./harness.cjs');
 
 const FAKE = 8742, FN = 8000;   // Deno.serve listens on 8000 by default
 const DENO = process.env.DENO || 'deno';
-const JWT = 'Bearer eyJ.fake.jwt';
+const JWT = 'Bearer eyJ.fake.jwt';            // Gary
+const ERIC_JWT = 'Bearer eyJ.eric.jwt';       // Eric (M1.2)
+const uidOf = (auth) => (auth === JWT ? UID : auth === ERIC_JWT ? ERIC_UID : null);
 const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok }); console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail && !ok ? '  [' + detail + ']' : '')); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -51,16 +56,18 @@ function fake(req, res) {
     if (st && req.method === 'GET') {
       storageGets.push({ path: decodeURIComponent(st[1]), auth: req.headers.authorization, apikey: req.headers.apikey });
       const o = m.objects.get(decodeURIComponent(st[1]));
-      if (req.headers.authorization !== JWT || !o) return send(400, { statusCode: '404', error: 'not_found', message: 'Object not found' });
+      const who = uidOf(req.headers.authorization);
+      if (!who || !o || !m.canRead(decodeURIComponent(st[1]), who)) return send(400, { statusCode: '404', error: 'not_found', message: 'Object not found' });
       res.writeHead(200, { 'content-type': 'image/jpeg' });
       return res.end(o.bytes);
     }
     if (req.url.startsWith('/rest/v1/rpc/')) {
-      if (req.headers.authorization !== JWT) return send(401, { code: 'PGRST301', message: 'JWT expired' });
+      const who = uidOf(req.headers.authorization);
+      if (!who) return send(401, { code: 'PGRST301', message: 'JWT expired' });
       if (req.headers.apikey !== 'pk_test') return send(401, { message: 'bad apikey' });
       try {
-        if (req.url.endsWith('/tb_journal_turn')) return send(200, m.turn(body.p));
-        if (req.url.endsWith('/tb_journal_reply')) return send(200, m.reply(body.p));
+        if (req.url.endsWith('/tb_journal_turn')) return send(200, m.turn(body.p, who));
+        if (req.url.endsWith('/tb_journal_reply')) return send(200, m.reply(body.p, who));
       } catch (e) { return send(400, { code: '22023', message: e.message }); }
     }
     send(404, { message: 'not faked: ' + req.url });
@@ -247,6 +254,117 @@ const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
     const b15 = anth.calls[n15] ? anth.calls[n15].body.messages[0].content : [];
     check('F15 a photo that fails to download is listed as could not be loaded; the other is sent; reply stored', r.status === 200
       && b15.filter((b) => b.type === 'image').length === 1 && (b15[0].text.match(/could not be loaded/g) || []).length === 1);
+
+    // ---------- M1.2 (SPEC.md 7B.4, 7B.5 item 10) ----------
+    const E = { Authorization: ERIC_JWT };
+    const G = UID, EU = ERIC_UID;
+    const fs = require('fs');
+    // Gary's day 2026-11-13: shared with a photo, unshared with a photo, shared with the photo off for Claude.
+    m.upsertBatch([
+      { id: uid(701), body: 'Gary shared: Chatuchak stall 12, mango sticky rice', kind: 'note', tz: 'Asia/Bangkok', local_date: '2026-11-13',
+        captured_at: '2026-11-13T03:00:00Z', updated_at: '2026-11-13T03:00:00Z', shared: true, photo_path: `${G}/${uid(701)}.jpg` },
+      { id: uid(702), body: 'GARY PRIVATE NOTE', kind: 'note', tz: 'Asia/Bangkok', local_date: '2026-11-13',
+        captured_at: '2026-11-13T04:00:00Z', updated_at: '2026-11-13T04:00:00Z', shared: false, photo_path: `${G}/${uid(702)}.jpg` },
+      { id: uid(703), body: 'Gary shared, photo not for Claude', kind: 'journal', tz: 'Asia/Bangkok', local_date: '2026-11-13',
+        captured_at: '2026-11-13T05:00:00Z', updated_at: '2026-11-13T05:00:00Z', shared: true, photo_path: `${G}/${uid(703)}.jpg`, photo_to_claude: false }
+    ], G);
+    for (const n of [701, 702, 703]) m.objects.set(`${G}/${uid(n)}.jpg`, { bytes: Buffer.from('GARY-' + n), contentType: 'image/jpeg' });
+    m.upsertBatch([{ id: uid(711), body: 'Eric: boat to Wat Arun', kind: 'note', tz: 'Asia/Bangkok', local_date: '2026-11-13',
+      captured_at: '2026-11-13T06:00:00Z', updated_at: '2026-11-13T06:00:00Z' }], EU);
+
+    // G1 not linked: Eric's call has his prompt and only his own capture
+    let nG = anth.calls.length, gG = storageGets.length;
+    r = await call(turn(uid(801), 'Long day on the river.', '2026-11-13T14:00:00Z', '2026-11-13'), E);
+    let cG = anth.calls[nG] && anth.calls[nG].body;
+    let allG = JSON.stringify(cG || {});
+    check('G1 Eric: 200, system is prompts/journal-eric.md', r.status === 200 && !!cG
+      && String(cG.system) === fs.readFileSync(path.join(ROOT, 'prompts/journal-eric.md'), 'utf8').trim() && !String(cG.system).includes('Gary'), JSON.stringify(r.body));
+    check('G1 not linked: only Eric\'s capture, introduced as Eric\'s; nothing of Gary\'s fetched or sent',
+      allG.includes('Eric: boat to Wat Arun') && allG.includes("Eric's captures for this day") && !allG.includes('Gary shared')
+      && !allG.includes('GARY PRIVATE NOTE') && storageGets.length === gG, cG && cG.messages[0].content[0].text.slice(0, 400));
+    const rowG1 = [...m.jrows.values()].find((x) => x.reply_to === uid(801));
+    check('G1 Eric\'s reply is stored as Eric\'s', !!rowG1 && rowG1.owner === EU);
+
+    // G2 linked: Gary's shared captures appear labelled, the unshared one is absent from the request
+    m.partnerAdd(EU, G); m.partnerAdd(G, EU);
+    nG = anth.calls.length; gG = storageGets.length;
+    r = await call(turn(uid(802), 'Did Gary find the mango place?', '2026-11-13T14:10:00Z', '2026-11-13'), E);
+    cG = anth.calls[nG] && anth.calls[nG].body;
+    allG = JSON.stringify(cG || {});
+    const bG = cG ? cG.messages[0].content : [];
+    const ctxG = bG[0] && bG[0].text || '';
+    check('G2 linked: Gary\'s 2 shared captures and Eric\'s own, each with by=; intro names both', r.status === 200
+      && /<capture n="1" time="1000 hrs Bangkok time" by="Gary" kind="note"/.test(ctxG) && ctxG.includes('Chatuchak stall 12')
+      && /by="Gary" kind="journal"[^>]*>\nGary shared, photo not for Claude/.test(ctxG) && /by="Eric" kind="note"/.test(ctxG)
+      && ctxG.includes("Eric's own, and those Gary shared with Eric"), ctxG.slice(0, 600));
+    check('G2 a capture Gary did not share is absent from the whole request to Claude (item 10)', !allG.includes('GARY PRIVATE NOTE')
+      && !allG.includes(Buffer.from('GARY-702').toString('base64')) && !storageGets.slice(gG).some((g) => g.path.endsWith(uid(702) + '.jpg')));
+    const imgsG = bG.filter((b) => b.type === 'image');
+    check('G2 Gary\'s shared switched-on photo fetched as Eric and sent, labelled by Gary; the switched-off one not fetched, sent or mentioned',
+      imgsG.length === 1 && imgsG[0].source.data === Buffer.from('GARY-701').toString('base64')
+      && storageGets.slice(gG).length === 1 && storageGets.slice(gG)[0].auth === ERIC_JWT
+      && bG.some((b) => b.type === 'text' && /^Photo from capture 1 \(by Gary\), 1000 hrs Bangkok time, note: Gary shared/.test(b.text))
+      && !allG.includes(Buffer.from('GARY-703').toString('base64')) && !/photo=/.test((ctxG.match(/<capture n="2"[^>]*>/) || [''])[0]), JSON.stringify(storageGets.slice(gG)));
+    check('G2 the thread is Eric\'s: his first turn, its reply, his second turn', cG.messages.length === 3
+      && cG.messages[0].content[cG.messages[0].content.length - 1].text === 'Long day on the river.'
+      && cG.messages[1].role === 'assistant' && cG.messages[2].content === 'Did Gary find the mango place?');
+
+    // G3 Gary's own call that day: his prompt, his 3 captures (the private one too) and Eric's? (not shared: absent)
+    nG = anth.calls.length;
+    r = await call(turn(uid(803), 'Mango place was great.', '2026-11-13T14:20:00Z', '2026-11-13'));
+    cG = anth.calls[nG] && anth.calls[nG].body;
+    allG = JSON.stringify(cG || {});
+    check('G3 Gary: his prompt, his 3 captures including the private one; Eric\'s unshared capture absent; Eric\'s thread absent',
+      r.status === 200 && String(cG.system) === fs.readFileSync(path.join(ROOT, 'prompts/journal.md'), 'utf8').trim()
+      && allG.includes('GARY PRIVATE NOTE') && !allG.includes('boat to Wat Arun') && !allG.includes('Long day on the river.')
+      && allG.includes("Gary's captures for this day"), allG.slice(0, 300));
+
+    // G4 Eric shares his: Gary's call lists it by="Eric"
+    m.upsertBatch([{ id: uid(711), body: 'Eric: boat to Wat Arun', kind: 'note', tz: 'Asia/Bangkok', local_date: '2026-11-13',
+      captured_at: '2026-11-13T06:00:00Z', updated_at: '2026-11-13T07:00:00Z', shared: true }], EU);
+    nG = anth.calls.length;
+    r = await call(turn(uid(804), 'And Eric?', '2026-11-13T14:30:00Z', '2026-11-13'));
+    cG = anth.calls[nG] && anth.calls[nG].body;
+    check('G4 Gary\'s call: Eric\'s shared capture listed by="Eric"', r.status === 200
+      && /by="Eric" kind="note">\nEric: boat to Wat Arun/.test(cG.messages[0].content[0].text));
+
+    // G5 unlinked: Gary's shared captures leave Eric's context again
+    m.partnerRemove(G, EU);
+    nG = anth.calls.length;
+    r = await call(turn(uid(805), 'Later that night.', '2026-11-13T15:00:00Z', '2026-11-13'), E);
+    allG = JSON.stringify(anth.calls[nG] && anth.calls[nG].body || {});
+    check('G5 link removed: none of Gary\'s captures reach Eric\'s request', r.status === 200 && !allG.includes('Gary shared') && !allG.includes('GARY-'));
+
+    // G6 the 30 photos are combined: Eric 20 switched-on, Gary 15 shared switched-on -> 30 images, 5 not shown
+    m.partnerAdd(G, EU);
+    const day6 = [], dayG6 = [];
+    for (let i = 0; i < 35; i++) {
+      const who = dayG6.length < 15 && i % 2 === 1 ? G : EU;   // Gary's 15 spread among Eric's 20
+      const id = uid(950 + i);
+      const row = { id, body: `${who === G ? 'G' : 'E'}${i}`, kind: 'note', tz: 'Asia/Bangkok', local_date: '2026-11-14',
+        captured_at: `2026-11-14T${String(1 + Math.floor(i / 4)).padStart(2, '0')}:${String((i % 4) * 15).padStart(2, '0')}:00Z`,
+        updated_at: '2026-11-14T12:00:00Z', shared: true, photo_path: `${who}/${id}.jpg` };
+      (who === G ? dayG6 : day6).push(row);
+      m.objects.set(`${who}/${id}.jpg`, { bytes: Buffer.from('P' + i), contentType: 'image/jpeg' });
+    }
+    m.upsertBatch(dayG6, G); m.upsertBatch(day6, EU);
+    nG = anth.calls.length; gG = storageGets.length;
+    r = await call(turn(uid(806), 'All those photos.', '2026-11-14T14:00:00Z', '2026-11-14'), E);
+    const b6 = anth.calls[nG] ? anth.calls[nG].body.messages[0].content : [];
+    const img6 = b6.filter((b) => b.type === 'image');
+    check('G6 ' + dayG6.length + ' of Gary\'s and ' + day6.length + ' of Eric\'s photos: 30 images, the most recent across both, 5 listed not shown, all fetched as Eric',
+      r.status === 200 && dayG6.length === 15 && img6.length === 30 && img6[0].source.data === Buffer.from('P5').toString('base64')
+      && img6[29].source.data === Buffer.from('P34').toString('base64') && (b6[0].text.match(/, not shown"/g) || []).length === 5
+      && storageGets.slice(gG).length === 30 && storageGets.slice(gG).every((g) => g.auth === ERIC_JWT)
+      && storageGets.slice(gG).some((g) => g.path.startsWith(G + '/')), `${img6.length} ${dayG6.length}`);
+
+    // G7 a person whose prompt key is not in this deploy: 502 no_prompt, no Claude call
+    m.people.get(EU).prompt = 'journal-nobody';
+    nG = anth.calls.length;
+    r = await call(turn(uid(807), 'Unknown prompt.', '2026-11-14T15:00:00Z', '2026-11-14'), E);
+    check('G7 unknown journal_prompt: 502 no_prompt, no Claude call, nothing stored as a reply', r.status === 502 && r.body.error === 'no_prompt'
+      && anth.calls.length === nG && ![...m.jrows.values()].some((x) => x.reply_to === uid(807)), JSON.stringify(r.body));
+    m.people.get(EU).prompt = 'journal-eric';
 
     // F11 database rejects the JWT
     r = await call(turn(uid(6), 'x', '2026-11-09T15:00:00Z'), { Authorization: 'Bearer eyJ.other' });

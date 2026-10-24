@@ -257,6 +257,7 @@ async function save(page) {
   await page.fill('#cap-body', 'Draft photo saved');
   await save(page);
   await settle(page);
+  await syncIdle(page);         // its photo uploads before uploads start failing (P10 counted it otherwise)
 
   // --- acceptance 5: upload fails; text and GPS still sync; photo follows later
   await page.evaluate(() => { window.__geo.mode = 'grant'; });
@@ -279,7 +280,10 @@ async function save(page) {
   await page.waitForFunction(() => /queued 1|sync error/.test(document.getElementById('status-text').textContent), null, { timeout: 3000 }).catch(() => {});
   check('P10 the photo stays queued; pill counts it and shows the error; row chip queued', ph5 && ph5.uploaded === 0
     && /queued 1|sync error/.test(await pill(page)) && await page.$eval(`.row[data-id="${c5.id}"] .chip.queued`, () => true).catch(() => false)
-    && /photo upload/.test(await page.$eval('#s-error', (e) => e.textContent)), await pill(page));
+    && /photo upload/.test(await page.$eval('#s-error', (e) => e.textContent)),
+    (await pill(page)) + ' ' + JSON.stringify(await page.evaluate(async () => ({
+      dirty: (await idb.byIndex('captures', 'dirty', 1)).map((r) => [r.body, r.updated_at]),
+      photos: (await idb.byIndex('photos', 'uploaded', 0)).map((p) => p.id) }))) + ' c5 ' + c5.id);
   mock.uploadFail = null;
   await syncIdle(page);
   const s5b = mock.rows.get(c5.id);
