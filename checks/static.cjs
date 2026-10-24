@@ -220,7 +220,7 @@ if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(
   const T = [['ground', '#F4EEE2', '#141C26'], ['surface', '#FBF8F1', '#1B2531'], ['ink', '#1F2A36', '#ECE6DA'], ['muted', '#5E6670', '#A3ACB6'],
     ['line', '#D9CFBD', '#2C3846'], ['ruled', '#E4DBCB', '#28333F'], ['accent', '#B4472A', '#E07A55'], ['accent-bg', '#F3DDD2', '#3A2620'],
     ['on-accent', '#FFF8EE', '#141C26'], ['blue', '#2F5577', '#8DB4D9'], ['blue-bg', '#DCE6EF', '#1F3247'], ['good', '#2E6B4A', '#6FC596'],
-    ['good-bg', '#DDEBDF', '#173025'], ['warn', '#8A5A00', '#E2B355'], ['crit', '#b42318', '#e5534b'], ['photo', '#C2B08F', '#4A5566'], ['print', '#FFFDF8', '#2E3946']];
+    ['good-bg', '#DDEBDF', '#173025'], ['warn', '#8A5A00', '#E2B355'], ['crit', '#8A1538', '#e5534b'], ['photo', '#C2B08F', '#4A5566'], ['print', '#FFFDF8', '#2E3946']];
   const bad = T.filter(([n, l, d]) => !tok(light, n, l) || !tok(dark, n, d)).map((x) => x[0]);
   check(bad.length === 0, `M1.3: the 7C.8 colour tokens in both themes${bad.length ? ' (wrong: ' + bad.join(', ') + ')' : ''}`);
   check(/<meta name="theme-color" content="#141C26">/.test(trip) && manifest && manifest.theme_color === '#141C26' && manifest.background_color === '#141C26', 'M1.3: theme colour and manifest from the dark ground');

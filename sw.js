@@ -6,7 +6,7 @@
    Bump CACHE_VERSION on every release, together with APP_VERSION in trip.html. Both are
    0.<minor>.<patch> from 0.13.0 (24/10/26). */
 
-const CACHE_VERSION = '0.14.0';
+const CACHE_VERSION = '0.14.1';
 const CACHE = 'tb-shell-v' + CACHE_VERSION;
 
 const PRECACHE = [

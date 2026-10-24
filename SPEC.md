@@ -473,7 +473,7 @@ Added 24/10/26 on Gary's decision (D17). The phone app gets its own visual ident
 
 ### 7C.4 Place names (migration 0009)
 
-- 0009, `travel` and `public.tb_*` only: `alter table travel.captures add place_name text check (place_name is null or char_length(place_name) between 1 and 120)`. Replace `tb_capture_upsert` and `tb_captures_upsert` so they carry it. `tb_captures_since` and `tb_partner_captures` return whole rows, so they carry it unchanged. Replace `tb_journal_turn` so each capture carries `place_name`. Catalogue snapshot before and after.
+- 0009, `travel` and `public.tb_*` only: `alter table travel.captures add place_name text check (place_name is null or char_length(place_name) between 1 and 120)`. Replace `tb_capture_upsert` so it carries it; `tb_captures_upsert` passes each item to `tb_capture_upsert` unchanged, so it carries it as it is (reworded 24/10/26). `tb_captures_since` and `tb_partner_captures` return whole rows, so they carry it unchanged. Replace `tb_journal_turn` so each capture carries `place_name`. Catalogue snapshot before and after.
 - **Display:** a row shows `place_name` if set, otherwise the coordinates to 4 decimals (`13.7380, 100.5601`), otherwise "no GPS". Partner rows show the owner's name.
 - **Editing:** tap the place on the capture or edit screen to type a name; clearing it returns to coordinates. Works offline; bumps `updated_at` and marks the capture dirty like any edit. Only the owner can name his capture.
 - **Chips, never auto-filled.** With GPS, the place field offers up to three one-tap chips, own names first:
@@ -534,7 +534,7 @@ Approved by Gary 24/10/26: the Design canvas "travelboard field notebook" (claud
 | `--blue-bg` | `#DCE6EF` | `#1F3247` | Blue tint |
 | `--good` / `--good-bg` | `#2E6B4A` / `#DDEBDF` | `#6FC596` / `#173025` | Synced stamp |
 | `--warn` | `#8A5A00` | `#E2B355` | Queued |
-| `--crit` | keep current | keep current | Error (must stay distinct from accent) |
+| `--crit` | `#8A1538` (from 0.14.1; was `#b42318`) | `#e5534b` | Error (must stay distinct from accent) |
 | `--photo`, `--print` | `#C2B08F`, `#FFFDF8` | `#4A5566`, `#2E3946` | Photo placeholder and print border |
 
 Text pairs pass WCAG AA in both themes (checked 24/10/26). Theme choice Light, Dark or Auto (Auto follows the phone).
@@ -705,6 +705,7 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 24/10/26 7C.4, 7C.8: Gary's decisions on the two session A questions. 7C.4 reworded: 0009 replaces `tb_capture_upsert` only; `tb_captures_upsert` is a pass-through and carries `place_name` unchanged (as built). Light `--crit` deepened from `#b42318` to `#8A1538` (crimson, 8.1:1 on the paper, 7.5:1 on `--crit-bg`), so errors stand apart from the terracotta accent; dark unchanged. Client 0.14.1.
 - 24/10/26 7C.2, 7C.2a, 7C.5, 7C.8, 7B.3, 4.2: details settled at the M1.3 session B build (no change to what Gary decided). Journal: the inline field shows on a day's thread, not on the day list; it holds the draft of the day on screen and is never moved to another day (0400 rollover included) while in use; it grows to 40% of the screen, then scrolls; a force-close returns to the Journal tab on that day with the text. Each thread entry carries a caps label, name and time ("Gary, 2105 hrs"). The day's title suffix sits under the serif date; tapping either edits it. Settings: the status block repeats the pill's stamp; the account row shows the email; signed out, Account is the sign-in form and Travelling with and My journal prompt are hidden; Export reads "Every capture on this phone, as JSON" (the mockup's "Captures and journal" was sample text; Export has always held captures only). Theme Auto stores nothing and follows the phone's setting live. Prompt editor: the count is in characters as the server counts them; blank text cannot be saved; saving text equal to the default stores no custom text, so later edits to `prompts/<key>.md` still apply; Reset to default asks first and shows the file text again; a lost signal at Save says so and keeps the text. Remove and Reset to default ask in the app's own confirm sheet; every former alert is the same sheet with OK, so the app opens no browser dialog. Photo, partner view and day title sheets take the paper style. Journal Share labels turns with the phone owner's name (it said "Gary" on Eric's phone, 7B.3). Icons rendered from `design/m1.3/icon-b.svg` (all marks within 36 of the 40-unit safe radius) by `design/m1.3/make-icons.cjs`; the shortcut keeps `icons/icon-192.png`. Client 0.14.0.
 - 24/10/26 6.4: Gary's decision. Version numbers become `0.<minor>.<patch>`, starting at 0.13.0 (was v13). `APP_VERSION` in `trip.html` and `CACHE_VERSION` in `sw.js` carry the same string; the cache is `tb-shell-v0.13.0`; the panel shows 0.13.0.
 - 24/10/26 7C.4: Gary's decision after the v11 Pixel run. Where Nominatim has no name for the spot (his HDB block came back as `238, Tampines Street 21` with an empty name), the map chip offers the address, house number and street. Still one tap, never filled in. The geocache key changes, so empty answers cached by v11 and v12 are asked again once. Client v13.
