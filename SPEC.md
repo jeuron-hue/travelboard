@@ -511,9 +511,35 @@ Run one after the other: both change `trip.html`.
 8. Catalogue diff for 0009 touches only `travel.*` and `public.tb_*`.
 9. `checks/static.cjs`, `checks/smoke.sql`, `fn.test.cjs` and the M1, M1.1, M2 and M1.2 headless suites pass; a new M1.3 headless suite covers 7C.4 and 7C.5.
 
-### 7C.8 Mockups
+### 7C.8 Approved mockup and tokens (24/10/26)
 
-Approved mockup: to be linked here once Gary approves it. Session A starts from it.
+Approved by Gary 24/10/26: the Design canvas "travelboard field notebook" (claude.ai, private to Gary), source copied to `design/m1.3/` in this repo. Session A works from those files and these values.
+
+**Colour tokens** (light, then dark):
+
+| Token | Light | Dark | Use |
+|---|---|---|---|
+| `--ground` | `#F4EEE2` | `#141C26` | Page (paper / night page) |
+| `--surface` (sheet) | `#FBF8F1` | `#1B2531` | Capture sheet, Settings sheet, inputs |
+| `--ink` | `#1F2A36` | `#ECE6DA` | Text |
+| `--muted` | `#5E6670` | `#A3ACB6` | Secondary text, coordinates, labels |
+| `--line` (rule) | `#D9CFBD` | `#2C3846` | Hairlines, spine, borders |
+| `--ruled` | `#E4DBCB` | `#28333F` | Ruled lines in the capture textarea, every 32 px |
+| `--accent` | `#B4472A` | `#E07A55` | Stamp terracotta: times, primary buttons, own turns, Claude-sees switch |
+| `--accent-bg` | `#F3DDD2` | `#3A2620` | Accent tint |
+| `--on-accent` | `#FFF8EE` | `#141C26` | Text on accent |
+| `--blue` | `#2F5577` | `#8DB4D9` | Ink blue: Claude's replies, partner label and dot, own-name chips, Share switch |
+| `--blue-bg` | `#DCE6EF` | `#1F3247` | Blue tint |
+| `--good` / `--good-bg` | `#2E6B4A` / `#DDEBDF` | `#6FC596` / `#173025` | Synced stamp |
+| `--warn` | `#8A5A00` | `#E2B355` | Queued |
+| `--crit` | keep current | keep current | Error (must stay distinct from accent) |
+| `--photo`, `--print` | `#C2B08F`, `#FFFDF8` | `#4A5566`, `#2E3946` | Photo placeholder and print border |
+
+Text pairs pass WCAG AA in both themes (checked 24/10/26). Theme choice Light, Dark or Auto (Auto follows the phone).
+
+**Type:** Newsreader (OFL; vendor 500, 600 and italic 500, Latin subset, woff2) for the wordmark (italic 500, 20 px), screen titles (600, 28 px), day titles (600, 34 px, tracking -0.01em), tab labels (18 px) and Claude's replies (17.5 px, line height 1.5). IBM Plex Sans 400, 500, 600 for everything else: place 17 px 600 (coordinates 500, muted, tabular figures), body 15 px, inputs 16 to 17 px, time stamp 16 px 600 tabular with "hrs" 11 px caps below, section labels 11 px 600 caps with 0.12em tracking.
+
+**Shapes and sizes:** side gutter 20 px (footer 16 px); sync pill as a stamp (1.5 px border, radius 4 px, rotated -2deg, caps 12 px); primary buttons 54 px high, radius 10 px; chips 36 px high, radius 18 px (own names solid blue, map suggestion dashed accent); photo prints with a 4 to 5 px `--print` border, a small shadow and a 1.5 to 2 deg tilt; Settings as a bottom sheet with a grabber, radius 14 px; rows separated by hairlines, no cards; day rows: 52 px time column, 26 px spine column with a 9 px dot (accent own, blue partner).
 
 ---
 
@@ -675,6 +701,7 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 24/10/26 7C.8: Gary approved the M1.3 mockup. Tokens, type and sizes pinned; mockup source in `design/m1.3/`.
 - 24/10/26 7C.2, new 7C.2a, 7C.3, 7C.7 item 6a: Gary's decisions on the mockups. Capture kinds retired in the UI (no toggle, no label, journal captures no longer quoted in the thread; data kept, no migration). Journal Write button replaced by an inline field with Send at the foot of the screen.
 - 24/10/26 Status, D16, new D17, principles 7 and 9, 5, 7B intro, new section 7C: Gary's decisions. M1.3 Look and place before Bangkok: field-notebook redesign of every screen (serif headings, Plex body, terracotta and ink blue, both themes in full), editable `place_name` with own-name chips within 75 m and OpenStreetMap Nominatim chips when online, never auto-filled; editable journal prompt per person. Migration 0009. Two sessions after M1.2's build. M1.2's cut-off moves to 05/11 so its two-phone test runs on the new design; freeze moves from 01/11 to 06/11.
 - 24/10/26 7B.2, 7B.4, 4.2, 11: details settled at the M1.2 build (no change to what Gary decided). 0008 adds `tb_link_state(p_other)` (the four link states, used by `tb_whoami`, `tb_partner_add` and `tb_partner_remove`); `tb_can_read_photo` returns false rather than raising without `auth.uid()`, because it runs inside a Storage policy; `tb_photos_select` is changed with `alter policy`, not dropped. `tb_journal_turn` also returns `me` (display name and prompt key) and `own` per capture, so `tb-journal` picks the prompt and labels whose each capture is. `prompt.ts` bundles every `prompts/*.md` by file name. Eric's prompt is Gary's with Eric's name in place of Gary's, conventions line included (Gary, 24/10/26; Eric tunes it later). Client v10: the other person's captures sit in their own IndexedDB stores (`partner`, `pphotos`), so they can never be pushed. Headless: `m12.test.cjs` runs two phones on one mock.

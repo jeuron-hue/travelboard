@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Capture and edit</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&amp;family=Newsreader:opsz,wght@6..72,500;6..72,600&amp;display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: {{t.ground}}; color: {{t.ink}}; font-family: 'IBM Plex Sans', system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden">
+
+  <header style="display: flex; align-items: center; justify-content: space-between; padding: 12px 8px 4px 20px">
+    <h1 style="margin: 0; font-family: 'Newsreader', Georgia, serif; font-weight: 600; font-size: 28px">New capture</h1>
+    <a href="Main.dc.html" aria-label="Close, draft kept" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: {{t.muted}}">
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><path d="M5.5 5.5l11 11M16.5 5.5l-11 11" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"></path></svg>
+    </a>
+  </header>
+
+  <div style="flex-grow: 1; margin: 8px 12px 0; padding: 16px 16px 14px; border-radius: 6px 6px 0 0; background: {{t.sheet}}; box-shadow: 0 1px 3px {{t.shadow}}; display: flex; flex-direction: column; gap: 14px; overflow: hidden">
+
+    <span style="display: flex; align-items: baseline; gap: 8px">
+      <span style="font-weight: 600; font-size: 16px; font-variant-numeric: tabular-nums; color: {{t.accent}}">1132 hrs</span>
+      <span style="font-size: 14px; color: {{t.muted}}">Mon 09/11/26</span>
+    </span>
+
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <label for="place" style="font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: {{t.muted}}">Place</label>
+      <div style="display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 10px; border: 1px solid {{t.rule}}; border-radius: 6px; background: {{t.ground}}">
+        <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true" style="flex: none; color: {{t.muted}}"><path d="M9 16s5-5 5-8.6A5 5 0 0 0 4 7.4C4 11 9 16 9 16z" fill="none" stroke="currentColor" stroke-width="1.5"></path><circle cx="9" cy="7.4" r="1.8" fill="none" stroke="currentColor" stroke-width="1.5"></circle></svg>
+        <input id="place" placeholder="13.7380, 100.5601" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; font: inherit; font-size: 16px; font-variant-numeric: tabular-nums; color: {{t.ink}}; outline: none">
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 8px">
+        <button type="button" style="min-height: 36px; display: flex; align-items: center; gap: 6px; padding: 0 12px; border: 1.5px solid {{t.blue}}; border-radius: 18px; background: {{t.blueBg}}; color: {{t.blue}}; font-size: 14px; font-weight: 600; cursor: pointer">
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7.5 5.8 10 11 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          Asok BTS stairs <span style="font-weight: 400">40 m</span>
+        </button>
+        <button type="button" style="min-height: 36px; display: flex; align-items: center; gap: 6px; padding: 0 12px; border: 1.5px dashed {{t.accent}}; border-radius: 18px; background: transparent; color: {{t.accent}}; font-size: 14px; font-weight: 600; cursor: pointer">
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 3.5l3.3-1.3 3.4 1.3 3.3-1.3v8.3l-3.3 1.3-3.4-1.3L2 11.8z M5.3 2.2v8.3 M8.7 3.5v8.3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"></path></svg>
+          Terminal 21
+        </button>
+      </div>
+      <span style="font-size: 11.5px; color: {{t.muted}}">Map suggestion © OpenStreetMap contributors</span>
+    </div>
+
+    <div style="display: flex; gap: 12px; align-items: flex-start">
+      <div role="img" aria-label="Attached photo" style="flex: none; width: 112px; height: 84px; box-sizing: border-box; border: 5px solid {{t.print}}; background: {{t.photo}}; box-shadow: 0 1px 3px {{t.shadow}}; transform: rotate(-1.5deg); display: flex; align-items: center; justify-content: center; color: {{t.print}}">
+        <svg width="26" height="26" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6.5h3l1.5-2h5L14 6.5h3v9H3z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"></path><circle cx="10" cy="11" r="2.8" fill="none" stroke="currentColor" stroke-width="1.4"></circle></svg>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <button type="button" style="min-height: 40px; padding: 0 4px; border: 0; background: transparent; color: {{t.ink}}; font-size: 15px; font-weight: 500; text-align: left; text-decoration: underline; text-underline-offset: 3px; cursor: pointer">Replace photo</button>
+        <button type="button" style="min-height: 40px; padding: 0 4px; border: 0; background: transparent; color: {{t.muted}}; font-size: 15px; text-align: left; cursor: pointer">Remove</button>
+      </div>
+    </div>
+
+    <label for="body" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Note</label>
+    <textarea id="body" style="flex-grow: 1; min-height: 160px; resize: none; border: 0; outline: none; padding: 4px 2px 0; font: inherit; font-size: 17px; line-height: 32px; color: {{t.ink}}; background: {{ruled}}">Coconut ice cream cart by the BTS stairs. Cold and not too sweet, 40 baht. Eric had the mango one.</textarea>
+
+    <div style="display: flex; flex-direction: column; border-top: 1px solid {{t.rule}}">
+      <label style="min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid {{t.rule}}">
+        <span style="font-size: 15px">Claude sees this photo</span>
+        <span aria-hidden="true" style="width: 44px; height: 26px; border-radius: 13px; background: {{t.accent}}; position: relative; flex: none"><span style="position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; border-radius: 50%; background: {{t.onAccent}}"></span></span>
+        <input type="checkbox" checked style="position: absolute; opacity: 0; width: 1px; height: 1px">
+      </label>
+      <label style="min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 12px">
+        <span style="font-size: 15px">Share with Eric</span>
+        <span aria-hidden="true" style="width: 44px; height: 26px; border-radius: 13px; background: {{t.blue}}; position: relative; flex: none"><span style="position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; border-radius: 50%; background: {{t.sheet}}"></span></span>
+        <input type="checkbox" checked style="position: absolute; opacity: 0; width: 1px; height: 1px">
+      </label>
+    </div>
+  </div>
+
+  <footer style="display: flex; gap: 10px; padding: 12px 16px 22px; border-top: 1px solid {{t.rule}}">
+    <button type="button" style="min-height: 54px; flex: 1; border-radius: 10px; border: 1.5px solid {{t.rule}}; background: transparent; color: {{t.ink}}; font-size: 17px; font-weight: 500; cursor: pointer">Photo</button>
+    <a href="Main.dc.html" style="min-height: 54px; flex: 2.2; display: flex; align-items: center; justify-content: center; border-radius: 10px; background: {{t.accent}}; color: {{t.onAccent}}; font-size: 18px; font-weight: 600; text-decoration: none">Save</a>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  theme() {
+    const light = { ground: '#F4EEE2', sheet: '#FBF8F1', ink: '#1F2A36', muted: '#5E6670', rule: '#D9CFBD', accent: '#B4472A', accentBg: '#F3DDD2', blue: '#2F5577', blueBg: '#DCE6EF', onAccent: '#FFF8EE', good: '#2E6B4A', goodBg: '#DDEBDF', warn: '#8A5A00', photo: '#C2B08F', print: '#FFFDF8', shadow: 'rgba(31,42,54,0.18)', line: '#E4DBCB' };
+    const dark = { ground: '#141C26', sheet: '#1B2531', ink: '#ECE6DA', muted: '#A3ACB6', rule: '#2C3846', accent: '#E07A55', accentBg: '#3A2620', blue: '#8DB4D9', blueBg: '#1F3247', onAccent: '#141C26', good: '#6FC596', goodBg: '#173025', warn: '#E2B355', photo: '#4A5566', print: '#2E3946', shadow: 'rgba(0,0,0,0.55)', line: '#28333F' };
+    return this.props.dark ? dark : light;
+  }
+  renderVals() {
+    const t = this.theme();
+    const ruled = 'repeating-linear-gradient(to bottom, transparent 0, transparent 31px, ' + t.line + ' 31px, ' + t.line + ' 32px)';
+    return { t, ruled };
+  }
+}
+</script>
+</body>
+</html>

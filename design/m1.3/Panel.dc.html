@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Panel</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&amp;family=Newsreader:opsz,wght@6..72,500;6..72,600&amp;display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: {{t.scrim}}; color: {{t.ink}}; font-family: 'IBM Plex Sans', system-ui, sans-serif; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden">
+
+  <div role="dialog" aria-label="travelboard panel" style="height: 770px; box-sizing: border-box; background: {{t.sheet}}; border-radius: 14px 14px 0 0; padding: 8px 20px 22px; display: flex; flex-direction: column; gap: 14px; overflow: hidden">
+    <div aria-hidden="true" style="align-self: center; width: 40px; height: 4px; border-radius: 2px; background: {{t.rule}}"></div>
+
+    <div style="display: flex; align-items: center; justify-content: space-between">
+      <h2 style="margin: 0; font-family: 'Newsreader', Georgia, serif; font-weight: 600; font-size: 28px">Settings</h2>
+      <a href="Main.dc.html" aria-label="Close panel" style="width: 44px; height: 44px; margin-right: -10px; display: flex; align-items: center; justify-content: center; color: {{t.muted}}">
+        <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><path d="M5.5 5.5l11 11M16.5 5.5l-11 11" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"></path></svg>
+      </a>
+    </div>
+
+    <section style="display: flex; flex-direction: column; gap: 8px; padding: 12px 14px 6px; border: 1px solid {{t.rule}}; border-radius: 8px; background: {{t.ground}}">
+      <div style="display: flex; align-items: center; justify-content: space-between">
+        <span style="display: flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1.5px solid {{t.good}}; border-radius: 4px; color: {{t.good}}; font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; transform: rotate(-2deg)">Synced</span>
+        <button type="button" style="min-height: 44px; padding: 0 4px; border: 0; background: transparent; color: {{t.ink}}; font-size: 15px; font-weight: 500; text-decoration: underline; text-underline-offset: 3px; cursor: pointer">Sync now</button>
+      </div>
+      <dl style="margin: 0; display: grid; grid-template-columns: 96px minmax(0, 1fr); row-gap: 5px; column-gap: 12px; font-size: 14px">
+        <dt style="color: {{t.muted}}">Sync</dt><dd style="margin: 0">Synced, nothing queued</dd>
+        <dt style="color: {{t.muted}}">Last sync</dt><dd style="margin: 0; font-variant-numeric: tabular-nums">24/10/26 2214 hrs</dd>
+        <dt style="color: {{t.muted}}">Last error</dt><dd style="margin: 0">None</dd>
+        <dt style="color: {{t.muted}}">Storage</dt><dd style="margin: 0">Persistent</dd>
+        <dt style="color: {{t.muted}}">Version</dt><dd style="margin: 0">v11</dd>
+      </dl>
+    </section>
+
+    <sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+      <section style="display: flex; flex-direction: column">
+        <h3 style="margin: 0 0 2px; font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: {{t.muted}}">{{g.title}}</h3>
+        <sc-for list="{{g.rows}}" as="r" hint-placeholder-count="2">
+          <div style="min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid {{t.rule}}">
+            <div style="display: flex; flex-direction: column; gap: 1px; min-width: 0">
+              <span style="font-size: 16px">{{r.label}}</span>
+              <span style="font-size: 13px; color: {{r.detailColor}}">{{r.detail}}</span>
+            </div>
+            <button type="button" style="min-height: 44px; padding: 0 4px; flex: none; border: 0; background: transparent; color: {{r.actionColor}}; font-size: 15px; font-weight: 500; text-decoration: underline; text-underline-offset: 3px; cursor: pointer">{{r.action}}</button>
+          </div>
+        </sc-for>
+      </section>
+    </sc-for>
+
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: {{t.muted}}">Theme</span>
+      <div role="radiogroup" aria-label="Theme" style="display: flex; border: 1px solid {{t.rule}}; border-radius: 8px; overflow: hidden">
+        <button type="button" role="radio" aria-checked="false" style="flex: 1; min-height: 44px; border: 0; background: transparent; color: {{t.muted}}; font-size: 15px; cursor: pointer">Light</button>
+        <button type="button" role="radio" aria-checked="false" style="flex: 1; min-height: 44px; border: 0; border-left: 1px solid {{t.rule}}; background: transparent; color: {{t.muted}}; font-size: 15px; cursor: pointer">Dark</button>
+        <button type="button" role="radio" aria-checked="true" style="flex: 1; min-height: 44px; border: 0; border-left: 1px solid {{t.rule}}; background: {{t.ink}}; color: {{t.sheet}}; font-size: 15px; font-weight: 600; cursor: pointer">Auto</button>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  theme() {
+    const light = { ground: '#F4EEE2', sheet: '#FBF8F1', ink: '#1F2A36', muted: '#5E6670', rule: '#D9CFBD', accent: '#B4472A', blue: '#2F5577', blueBg: '#DCE6EF', good: '#2E6B4A', scrim: 'rgba(31,42,54,0.5)' };
+    const dark = { ground: '#141C26', sheet: '#1B2531', ink: '#ECE6DA', muted: '#A3ACB6', rule: '#2C3846', accent: '#E07A55', blue: '#8DB4D9', blueBg: '#1F3247', good: '#6FC596', scrim: 'rgba(4,7,11,0.7)' };
+    return this.props.dark ? dark : light;
+  }
+  renderVals() {
+    const t = this.theme();
+    const row = (label, detail, action, opts) => ({ label, detail, action, detailColor: (opts && opts.blue) ? t.blue : t.muted, actionColor: (opts && opts.danger) ? t.accent : t.ink });
+    const groups = [
+      { title: 'Travelling with', rows: [ row('Eric', 'Linked. New captures shared by default', 'Remove', { blue: true, danger: true }) ] },
+      { title: 'Journal', rows: [ row('My journal prompt', 'Edited 24/10/26', 'Edit'), row('Export', 'Captures and journal as JSON', 'Export') ] },
+      { title: 'Account', rows: [ row('gary@travelboard.local', 'Signed in', 'Sign out'), row('Password', 'Set your own password', 'Change') ] }
+    ];
+    return { t, groups };
+  }
+}
+</script>
+</body>
+</html>

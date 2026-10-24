@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Journal</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&amp;family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;1,6..72,500&amp;display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: {{t.ground}}; color: {{t.ink}}; font-family: 'IBM Plex Sans', system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden">
+
+  <header style="display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 6px 20px">
+    <span style="font-family: 'Newsreader', Georgia, serif; font-style: italic; font-weight: 500; font-size: 20px; color: {{t.muted}}">travelboard</span>
+    <button type="button" aria-label="Sync status: synced. Open panel" style="min-height: 44px; display: flex; align-items: center; padding: 0 12px; background: transparent; border: 0; cursor: pointer">
+      <span style="display: flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1.5px solid {{t.good}}; border-radius: 4px; color: {{t.good}}; font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; transform: rotate(-2deg)">
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6.5 4.8 9 10 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        Synced
+      </span>
+    </button>
+  </header>
+
+  <section style="display: flex; align-items: flex-end; justify-content: space-between; padding: 6px 8px 14px 20px; border-bottom: 1px solid {{t.rule}}">
+    <div style="display: flex; flex-direction: column; gap: 2px">
+      <h1 style="margin: 0; font-family: 'Newsreader', Georgia, serif; font-weight: 600; font-size: 34px; line-height: 1.1; letter-spacing: -0.01em">Mon 09/11/26</h1>
+      <span style="font-size: 15px; color: {{t.muted}}">Tom yum and a massage</span>
+    </div>
+    <div style="display: flex">
+      <button type="button" style="min-height: 44px; padding: 0 10px; border: 0; background: transparent; color: {{t.ink}}; font-size: 15px; font-weight: 500; text-decoration: underline; text-underline-offset: 3px; cursor: pointer">Days</button>
+      <button type="button" style="min-height: 44px; padding: 0 10px; border: 0; background: transparent; color: {{t.ink}}; font-size: 15px; font-weight: 500; text-decoration: underline; text-underline-offset: 3px; cursor: pointer">Share</button>
+    </div>
+  </section>
+
+  <article style="flex-grow: 1; overflow: hidden; padding: 16px 20px 0 20px; display: flex; flex-direction: column; gap: 18px">
+    <sc-for list="{{turns}}" as="m" hint-placeholder-count="4">
+      <div style="display: flex; gap: 12px">
+        <div style="width: 3px; flex: none; border-radius: 2px; background: {{m.ruleColor}}"></div>
+        <div style="display: flex; flex-direction: column; gap: 4px; min-width: 0">
+          <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: {{m.labelColor}}">{{m.who}}, {{m.time}} hrs</span>
+          <p style="margin: 0; font-size: {{m.size}}; line-height: 1.5; font-family: {{m.font}}; color: {{t.ink}}">{{m.text}}</p>
+        </div>
+      </div>
+    </sc-for>
+  </article>
+
+  <footer style="display: flex; flex-direction: column; gap: 10px; padding: 10px 16px 22px; border-top: 1px solid {{t.rule}}; background: {{t.ground}}">
+    <nav aria-label="Sections" style="display: flex; gap: 8px">
+      <a href="Main.dc.html" style="flex: 1; min-height: 44px; display: flex; align-items: center; justify-content: center; font-family: 'Newsreader', Georgia, serif; font-size: 18px; font-weight: 500; color: {{t.muted}}; text-decoration: none; border-bottom: 2.5px solid transparent">Captures</a>
+      <a href="Journal.dc.html" aria-current="page" style="flex: 1; min-height: 44px; display: flex; align-items: center; justify-content: center; font-family: 'Newsreader', Georgia, serif; font-size: 18px; font-weight: 600; color: {{t.ink}}; text-decoration: none; border-bottom: 2.5px solid {{t.accent}}">Journal</a>
+    </nav>
+    <div style="display: flex; align-items: flex-end; gap: 8px">
+      <label for="turn" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Write to your journal</label>
+      <textarea id="turn" rows="1" placeholder="Tell Claude about today" style="flex-grow: 1; min-height: 54px; box-sizing: border-box; resize: none; padding: 14px 14px; border: 1.5px solid {{t.rule}}; border-radius: 10px; background: {{t.sheet}}; color: {{t.ink}}; font: inherit; font-size: 17px; line-height: 1.4; outline: none"></textarea>
+      <button type="button" aria-label="Send" style="width: 54px; height: 54px; flex: none; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 10px; background: {{t.accent}}; color: {{t.onAccent}}; cursor: pointer">
+        <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><path d="M4 11h13M12 5.5 17.5 11 12 16.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      </button>
+    </div>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  theme() {
+    const light = { ground: '#F4EEE2', sheet: '#FBF8F1', ink: '#1F2A36', muted: '#5E6670', rule: '#D9CFBD', accent: '#B4472A', accentBg: '#F3DDD2', blue: '#2F5577', blueBg: '#DCE6EF', onAccent: '#FFF8EE', good: '#2E6B4A', goodBg: '#DDEBDF', warn: '#8A5A00' };
+    const dark = { ground: '#141C26', sheet: '#1B2531', ink: '#ECE6DA', muted: '#A3ACB6', rule: '#2C3846', accent: '#E07A55', accentBg: '#3A2620', blue: '#8DB4D9', blueBg: '#1F3247', onAccent: '#141C26', good: '#6FC596', goodBg: '#173025', warn: '#E2B355' };
+    return this.props.dark ? dark : light;
+  }
+  renderVals() {
+    const t = this.theme();
+    const raw = [
+      { me: true, time: '2231', text: 'Long day. The tom yum at Thon Krueng was the best one yet, the crispy rice thing again.' },
+      { me: false, time: '2231', text: 'That crispy rice keeps coming back. You noted less sugar next time, so was it sweeter than last year’s bowl?' },
+      { me: true, time: '2236', text: 'Bit sweeter. Health Land after, two hours.' },
+      { me: false, time: '2236', text: 'Two hours after a day in that heat sounds earned.' }
+    ];
+    const serif = "'Newsreader', Georgia, serif";
+    const sans = "'IBM Plex Sans', system-ui, sans-serif";
+    const turns = raw.map((m) => ({
+      ...m,
+      who: m.me ? 'Gary' : 'Claude',
+      ruleColor: m.me ? t.accent : t.blue,
+      labelColor: m.me ? t.accent : t.blue,
+      font: m.me ? sans : serif,
+      size: m.me ? '16px' : '17.5px'
+    }));
+    return { t, turns };
+  }
+}
+</script>
+</body>
+</html>

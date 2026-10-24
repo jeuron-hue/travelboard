@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Day view</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&amp;family=Newsreader:opsz,wght@6..72,500;6..72,600&amp;display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: {{t.ground}}; color: {{t.ink}}; font-family: 'IBM Plex Sans', system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden">
+
+  <header style="display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 6px 20px">
+    <span style="font-family: 'Newsreader', Georgia, serif; font-style: italic; font-weight: 500; font-size: 20px; color: {{t.muted}}">travelboard</span>
+    <button type="button" aria-label="Sync status: synced. Open panel" style="min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: transparent; border: 0; cursor: pointer">
+      <span style="display: flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1.5px solid {{t.good}}; border-radius: 4px; color: {{t.good}}; font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; transform: rotate(-2deg)">
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6.5 4.8 9 10 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        Synced
+      </span>
+    </button>
+  </header>
+
+  <section style="display: flex; align-items: flex-end; justify-content: space-between; padding: 6px 12px 14px 20px; border-bottom: 1px solid {{t.rule}}">
+    <div style="display: flex; flex-direction: column; gap: 2px">
+      <h1 style="margin: 0; font-family: 'Newsreader', Georgia, serif; font-weight: 600; font-size: 34px; line-height: 1.1; letter-spacing: -0.01em">Mon 09/11/26</h1>
+      <span style="font-size: 15px; color: {{t.muted}}">Bangkok, 5 captures</span>
+    </div>
+    <div style="display: flex; gap: 0">
+      <button type="button" aria-label="Previous day" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: transparent; border: 0; color: {{t.ink}}; cursor: pointer">
+        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 4 6.5 10l6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      </button>
+      <button type="button" aria-label="Next day" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: transparent; border: 0; color: {{t.muted}}; cursor: pointer">
+        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      </button>
+    </div>
+  </section>
+
+  <ol style="list-style: none; margin: 0; padding: 4px 16px 0 12px; flex-grow: 1; overflow: hidden; display: flex; flex-direction: column">
+    <sc-for list="{{rows}}" as="r" hint-placeholder-count="5">
+      <li style="display: flex; gap: 0; align-items: stretch">
+        <div style="width: 52px; flex: none; padding-top: 14px; text-align: right">
+          <span style="display: block; font-weight: 600; font-size: 16px; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; color: {{t.accent}}">{{r.time}}</span>
+          <span style="display: block; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: {{t.muted}}">hrs</span>
+        </div>
+        <div style="width: 26px; flex: none; position: relative; display: flex; justify-content: center">
+          <span style="position: absolute; top: 0; bottom: 0; width: 1.5px; background: {{t.rule}}"></span>
+          <span style="position: relative; margin-top: 19px; width: 9px; height: 9px; border-radius: 50%; background: {{t.ground}}; border: 2px solid {{r.dot}}"></span>
+        </div>
+        <div style="flex-grow: 1; min-width: 0; display: flex; gap: 12px; padding: 12px 4px 14px 4px; border-bottom: 1px solid {{t.rule}}">
+          <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap">
+              <span style="font-size: 17px; font-weight: {{r.placeWeight}}; color: {{r.placeColor}}; font-variant-numeric: tabular-nums">{{r.place}}</span>
+              <sc-if value="{{r.partner}}" hint-placeholder-val="{{false}}">
+                <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 6px; border-radius: 3px; background: {{t.blueBg}}; color: {{t.blue}}">Eric</span>
+              </sc-if>
+            </div>
+            <p style="margin: 0; font-size: 15px; line-height: 1.4">{{r.text}}</p>
+          </div>
+          <sc-if value="{{r.photo}}" hint-placeholder-val="{{false}}">
+            <div role="img" aria-label="Photo" style="flex: none; width: 58px; height: 58px; margin-top: 4px; box-sizing: border-box; border: 4px solid {{t.print}}; background: {{t.photo}}; box-shadow: 0 1px 3px {{t.shadow}}; transform: rotate({{r.tilt}}); display: flex; align-items: center; justify-content: center; color: {{t.print}}">
+              <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6.5h3l1.5-2h5L14 6.5h3v9H3z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path><circle cx="10" cy="11" r="2.8" fill="none" stroke="currentColor" stroke-width="1.5"></circle></svg>
+            </div>
+          </sc-if>
+        </div>
+      </li>
+    </sc-for>
+  </ol>
+
+  <footer style="display: flex; flex-direction: column; gap: 10px; padding: 10px 16px 22px; border-top: 1px solid {{t.rule}}; background: {{t.ground}}">
+    <nav aria-label="Sections" style="display: flex; gap: 8px">
+      <a href="Main.dc.html" aria-current="page" style="flex: 1; min-height: 44px; display: flex; align-items: center; justify-content: center; font-family: 'Newsreader', Georgia, serif; font-size: 18px; font-weight: 600; color: {{t.ink}}; text-decoration: none; border-bottom: 2.5px solid {{t.accent}}">Captures</a>
+      <a href="Journal.dc.html" style="flex: 1; min-height: 44px; display: flex; align-items: center; justify-content: center; font-family: 'Newsreader', Georgia, serif; font-size: 18px; font-weight: 500; color: {{t.muted}}; text-decoration: none; border-bottom: 2.5px solid transparent">Journal</a>
+    </nav>
+    <a href="Capture.dc.html" style="min-height: 54px; display: flex; align-items: center; justify-content: center; gap: 10px; border-radius: 10px; background: {{t.accent}}; color: {{t.onAccent}}; font-size: 18px; font-weight: 600; text-decoration: none">
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path></svg>
+      Capture
+    </a>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  theme() {
+    const light = { ground: '#F4EEE2', sheet: '#FBF8F1', ink: '#1F2A36', muted: '#5E6670', rule: '#D9CFBD', accent: '#B4472A', accentBg: '#F3DDD2', blue: '#2F5577', blueBg: '#DCE6EF', onAccent: '#FFF8EE', good: '#2E6B4A', goodBg: '#DDEBDF', warn: '#8A5A00', photo: '#C2B08F', print: '#FFFDF8', shadow: 'rgba(31,42,54,0.22)' };
+    const dark = { ground: '#141C26', sheet: '#1B2531', ink: '#ECE6DA', muted: '#A3ACB6', rule: '#2C3846', accent: '#E07A55', accentBg: '#3A2620', blue: '#8DB4D9', blueBg: '#1F3247', onAccent: '#141C26', good: '#6FC596', goodBg: '#173025', warn: '#E2B355', photo: '#4A5566', print: '#2E3946', shadow: 'rgba(0,0,0,0.55)' };
+    return this.props.dark ? dark : light;
+  }
+  renderVals() {
+    const t = this.theme();
+    const raw = [
+      { time: '2214', place: 'Thon Krueng, Soi 49', named: true, text: 'Tom yum with the crispy rice again. Ask for less sugar next time.', kind: 'Note', photo: true, tilt: '2deg' },
+      { time: '1940', place: 'Health Land Asoke', named: true, text: 'Two hours oil massage. Book her again.', kind: 'Note', photo: false, tilt: '0deg' },
+      { time: '1605', place: 'Palladium Mall', named: true, partner: true, text: 'Second fitting Thu 12/11, 1500 hrs. Shoulders to take in.', kind: 'Note', photo: true, tilt: '-2deg' },
+      { time: '1132', place: '13.7380, 100.5601', named: false, text: 'Coconut ice cream cart by the BTS stairs. Cold and not too sweet.', kind: 'Journal', photo: false, tilt: '0deg' },
+      { time: '0841', place: 'Suvarnabhumi Airport', named: true, text: 'Through immigration in 20 min.', kind: 'Note', photo: false, tilt: '0deg' }
+    ];
+    const rows = raw.map((r) => ({
+      ...r,
+      partner: !!r.partner,
+      placeWeight: r.named ? '600' : '500',
+      placeColor: r.named ? t.ink : t.muted,
+      kindColor: r.kind === 'Journal' ? t.blue : t.muted,
+      dot: r.partner ? t.blue : t.accent
+    }));
+    return { t, rows };
+  }
+}
+</script>
+</body>
+</html>
