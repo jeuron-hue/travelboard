@@ -38,7 +38,7 @@ Wanderlog was used for Switzerland (Jan 2025) and liked, but its AI layer and jo
 | D13 | Map layer is locate-and-reach only: day map, coordinates, copyable address, deep link to Google Maps. No offline vector tiles | 04/10/26 |
 | D14 | Apify is a plan-time enrichment tool only, never in a street-time path | 04/10/26 |
 | D15 | Photo captures (M1.1): one photo per capture from the in-app camera or gallery, shrunk on the phone, stored offline first, synced to a private Supabase Storage bucket `tb-photos`. Claude sees the day's photos in the journal. Each photo has a "Claude sees this" switch, default on: switched off, the photo is kept, synced and shared like any other but never goes to Claude. At most 30 switched-on photos per day reach Claude (combined across both travellers from M1.2); switched-off photos have no limit (24/10/26). Built before Bangkok with a cut-off of 27/10/26; if it is not passing on the Pixel by then, it ships after Bangkok | 23/10/26, switch 24/10/26 |
-| D16 | Two travellers (M1.2): Eric gets his own login on his own Android phone. All captures, photos included, are shared between Gary and Eric; journal threads stay private to their owner. Privacy is by what each chooses to put in. Each has his own journal prompt; both share the `travelboard` workspace. Built after M1.1 for Bangkok, cut-off 31/10/26 | 23/10/26 |
+| D16 | Two travellers (M1.2): Eric gets his own login on his own Android phone. Separate by default: each sees only his own captures and journals. Each can add the other in the app; the link is live only when both have added, and either can remove it. While linked, each capture has a "Share with" switch, default on; a shared capture, photo included, appears read-only on the other's phone. Journal threads stay private. Each has his own journal prompt; both share the `travelboard` workspace. Built after M1.1 for Bangkok, cut-off 31/10/26 | 23/10/26, separate by default 24/10/26 |
 
 ## 3. Design principles
 
@@ -135,7 +135,7 @@ travelboard/
 | M2 Journal | Thread per local day, Claude via `tb-journal`, day's captures as context | 19/10 to 25/10 | One real evening conversation that references the day's captures |
 | Move to own project | travelboard out of `weatherboard` into its own Supabase project (6.8) | 23/10 to 24/10 | 6.8 step 8 passes on the Pixel |
 | M1.1 Photo capture | Photo on a capture (camera or gallery), offline first, Storage bucket `tb-photos`, photos in the journal | 24/10 to 27/10 | Section 7A acceptance passes on the Pixel by 27/10, or it moves to after Bangkok |
-| M1.2 Two travellers | Eric's login, shared captures and photos, private journals (7B) | after M1.1, by 31/10 | Section 7B acceptance passes on both phones by 31/10, or it moves to after Bangkok |
+| M1.2 Two travellers | Eric's login, separate by default, add each other, per-capture share, private journals (7B) | after M1.1, by 31/10 | Section 7B acceptance passes on both phones by 31/10, or it moves to after Bangkok |
 | Shakedown | Daily use in Singapore. Fixes only, no features (the move, M1.1 and M1.2 are the agreed exceptions, 23/10) | 26/10 to 01/11 | Freeze on 01/11 |
 | Bangkok pilot | Use it for real, keep a friction log | 09/11 to 12/11 | Friction log written |
 | M3 Trip model + planner | Trips, days, items, places, hours validation | after Bangkok | skeleton below |
@@ -377,7 +377,7 @@ Sonnet 5.5 reads images at high resolution: a 1280 x 960 photo is ceil(1280/28) 
 
 ## 7B. M1.2 Two travellers (full)
 
-Added 23/10/26 on Gary's decision (D16). Eric, Gary's travel companion, gets his own login on his own Android phone. Captures, photos included, are shared between the two; each journal thread stays private to its owner. Privacy is by choice of what goes in: anything either of them does not want the other to see stays out of travelboard. Built after M1.1 passes, cut-off 31/10/26; if it is not passing on both phones by then, Gary pilots Bangkok alone and M1.2 follows the trip.
+Added 23/10/26 on Gary's decision (D16); sharing model rewritten 24/10/26. Eric, Gary's travel companion, gets his own login on his own Android phone. Separate by default: each sees only his own captures and journals. Each can add the other in the app; the link is live only when both have added, and either can remove it. While linked, each capture carries a "Share with Eric" (or "Share with Gary") switch, default on; a shared capture, photo included, appears on the other's phone, labelled and read-only. Journal threads stay private to their owner. Built after M1.1 passes, cut-off 31/10/26; if it is not passing on both phones by then, Gary pilots Bangkok alone and M1.2 follows the trip.
 
 ### 7B.1 Accounts (Gary, dashboard)
 
@@ -387,39 +387,47 @@ Added 23/10/26 on Gary's decision (D16). Eric, Gary's travel companion, gets his
 ### 7B.2 Schema (migration 0008, after M1.1's 0005 to 0007)
 
 - `travel.people (uid uuid primary key references auth.users(id), display_name text not null, journal_prompt text not null)`. Rows: Gary (`journal`), Eric (`journal-eric`).
-- `travel.partners (a uuid references auth.users(id), b uuid references auth.users(id), primary key (a, b), check (a <> b))`, one row per direction, so Gary and Eric are two rows.
-- `public.tb_can_read(p_owner uuid) returns boolean`: true when `p_owner = auth.uid()` or a `partners` row links them. `SECURITY DEFINER`, same guardrails as the other RPCs, executable by `authenticated`. Used by the RPCs and by the Storage policy.
-- `tb_captures_since` returns the caller's rows and their partners' rows, each with `owner` and `owner_name`. The keyset cursor is unchanged (it already orders across all rows).
-- `tb_capture_upsert` and `tb_captures_upsert` unchanged in rule: a row whose existing `owner` differs from the caller is rejected, so nobody can edit or delete the other's captures.
-- `tb_whoami` also returns `display_name` and the partners' uids and names.
-- `tb_journal_turn` returns the day's non-deleted captures of the caller and partners, each with `owner_name`. Journal rows themselves stay owner-only; no RPC returns another person's thread.
-- Storage: replace `tb_photos_select` so it admits `public.tb_can_read(((storage.foldername(name))[1])::uuid)`. Insert and update stay own folder only.
+- `travel.partner_adds (adder uuid references auth.users(id), added uuid references auth.users(id), added_at timestamptz not null default now(), removed_at timestamptz, primary key (adder, added), check (adder <> added))`. One row per direction. The link between two people is live when both directions exist with `removed_at` null. Removing sets `removed_at`; adding again clears it.
+- `alter table travel.captures add shared boolean not null default false`. Every existing row stays unshared.
+- `public.tb_linked(p_other uuid) returns boolean`: true when the link between `auth.uid()` and `p_other` is live. `SECURITY DEFINER`, same guardrails as the other RPCs, executable by `authenticated`.
+- `tb_partner_add(p_uid uuid)` and `tb_partner_remove(p_uid uuid)`: set or clear the caller's own direction only; `p_uid` must be a row in `people` other than the caller.
+- `tb_whoami` also returns the caller's `display_name`, the other people (uid, name) and, for each, the link state: none, added by me, added me, or live.
+- Own rows: `tb_captures_since` returns the caller's own rows as now, each with `owner` and the new `shared`. `tb_capture_upsert` and `tb_captures_upsert` carry `shared`; a row whose existing `owner` differs from the caller is still rejected, so nobody can edit or delete the other's captures.
+- Partner rows: `tb_partner_captures()` returns every capture currently visible to the caller from others: `shared` true, not deleted, and owner linked live. Each with `owner_name`. Full set, no cursor: a trip's shared rows are a few hundred text rows, and a full set makes unsharing, unlinking and relinking need no special handling. Photo files are fetched once by path, so the set stays cheap.
+- `tb_journal_turn` returns the day's non-deleted captures of the caller plus those visible to the caller from a live partner, each with `owner_name`. `photo_path` only where the owner's `photo_to_claude` is true (7A.1). Journal rows themselves stay owner-only; no RPC returns another person's thread.
+- Storage: replace `tb_photos_select` so it admits the caller's own folder, or `public.tb_can_read_photo(name)`: a definer function, true when `name` is the `photo_path` of a capture that is shared, not deleted, and whose owner is linked live to the caller. An unshared photo in a partner's folder stays unreadable. Insert and update stay own folder only.
 - Catalogue snapshot before and after, as for every migration.
 
 ### 7B.3 Client (the release after M1.1's last)
 
-- IndexedDB: captures carry `owner` and `owner_name`. Only the device user's own rows can be dirty; the partner's rows are read-only mirrors.
-- Day view shows both people's captures together, newest first. The partner's rows carry a small name label ("Eric" or "Gary"). Tapping a partner row opens a read-only view (text, photo, time, place); no Edit, no Delete.
-- The pill and queue counts cover own rows only. Photos of the partner are downloaded when online and kept locally like own photos (7A.2), so they show offline.
-- Export: every capture on the phone, own and partner, with `owner_name`.
+- **Partner panel** (in the pill panel): lists the other people from `tb_whoami` with Add or Remove, and the state in words: "You added Eric. Waiting for Eric to add you", "Eric added you. Add him to link", "Linked with Eric". Add and Remove need a connection; they are not queued.
+- **Share switch:** on the capture and edit screens, "Share with Eric" (or Gary), shown only while linked. Default on for a new capture made while linked; captures made while not linked are saved with `shared` false and stay unshared unless switched on later in edit. Changing it bumps `updated_at` and marks the capture dirty like any edit. The draft keeps it.
+- **Partner rows:** IndexedDB keeps partner captures as read-only mirrors with `owner` and `owner_name`; only the device user's own rows can be dirty. Each sync, after pulling own rows, call `tb_partner_captures()` and replace the mirror with the result; a partner row no longer in the set is removed from the phone along with its cached photo. Partner photos are downloaded when online and kept locally like own photos (7A.2), so they show offline.
+- **Day view:** own and partner captures together, newest first. Partner rows carry a small name label. Tapping one opens a read-only view (text, photo, time, place); no Edit, no Delete, no switches.
+- The pill and queue counts cover own rows only.
+- Export: own captures plus partner captures on the phone, with `owner_name` and `shared`.
 - Journal tab is unchanged in shape: the device user's own threads only.
 
 ### 7B.4 Journal
 
 - `tb-journal` picks the system prompt from `travel.people.journal_prompt`: `prompts/journal.md` for Gary, `prompts/journal-eric.md` for Eric. The Eric file starts as the Gary file with everything specific to Gary taken out and his name in its place; Eric tunes it later.
-- The context block lists the day's captures from both people, each labelled with whose it is, and includes switched-on photos from both (most recent 30 in total, 7A.4). Each person's switch holds in both threads: a photo Eric switches off reaches neither journal.
+- The context block lists the day's own captures and those shared with the caller by a live partner, each labelled with whose it is, and includes switched-on photos from both (most recent 30 in total, 7A.4). A capture its owner has not shared reaches neither the partner's phone nor the partner's journal. The owner's "Claude sees this" switch holds in both threads.
 - Same model, limits and caching as M2 and 7A. Both people draw on the one `travelboard` workspace (USD 30 a month). Token counts stay per reply, so usage splits by person with one query.
 
 ### 7B.5 M1.2 acceptance
 
-1. Eric signs in on his Android phone and, for a day, sees his own captures and Gary's, Gary's labelled and read-only.
-2. Gary sees Eric's captures and photos the same way on the Pixel.
-3. Neither can edit or delete the other's capture: no controls in the app, and the RPC rejects it (smoke test).
-4. A photo of Eric's shows on Gary's phone, including offline after one online sync. Reading the partner's folder in `tb-photos` is allowed; writing it is refused; a third synthetic uid (in a rolled-back transaction) can read neither person's folder.
-5. Neither can read the other's journal thread (smoke test on the RPCs, and nothing in either app).
-6. Eric's journal uses his prompt, and on a day with captures from both, his reply can refer to one of Gary's captures by content.
-7. An airplane-mode capture on Eric's phone syncs on reconnect and appears on Gary's phone after his next sync.
-8. `checks/static.cjs`, `checks/smoke.sql` and the M1, M1.1 and M2 headless suites pass; a new M1.2 headless suite passes.
+1. Not linked: Eric signs in on his Android phone and sees only his own captures; Gary sees only his. `tb_partner_captures()` returns nothing (smoke test).
+2. Linking: Gary adds Eric; nothing is shared and Gary's panel reads "Waiting for Eric to add you". Eric adds Gary; both panels read "Linked".
+3. While linked, a new capture has "Share with" on by default. It appears on the other phone after his next sync, labelled and read-only, photo included, and shows offline after one online sync.
+4. A capture with "Share with" switched off never appears on the other phone. Switching an already shared capture off removes it, and its photo, from the other phone at his next sync.
+5. Captures made before linking stay unshared unless switched on in edit.
+6. Neither can edit or delete the other's capture: no controls in the app, and the RPC rejects it (smoke test).
+7. Storage (smoke test with synthetic uids in a rolled-back transaction, plus a REST check): a linked partner can read a shared photo; cannot read an unshared photo in the same folder; cannot write the other's folder; a third uid reads nothing; after the link is removed, the shared photo is refused too.
+8. Removing the link from either side: the other's captures disappear from both phones at their next sync. Adding again shows the captures that are still shared.
+9. Neither can read the other's journal thread (smoke test on the RPCs, and nothing in either app).
+10. Eric's journal uses his prompt, and on a day with captures from both, his reply can refer to one Gary shared by content. A capture Gary did not share is absent from the request to Claude (`fn.test.cjs`).
+11. An airplane-mode capture on Eric's phone syncs on reconnect and, shared, appears on Gary's phone after his next sync.
+12. `checks/static.cjs`, `checks/smoke.sql` and the M1, M1.1 and M2 headless suites pass; a new M1.2 headless suite passes.
 
 ---
 
@@ -581,6 +589,7 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 24/10/26 D16, 5, 7B: M1.2 sharing model rewritten on Gary's decision, before the M1.2 build. Separate by default; each adds the other in the app and the link is live only when both have; per-capture "Share with" switch, default on while linked; captures from before linking stay unshared; unsharing or unlinking removes rows and photos from the other phone at the next sync. Schema: `travel.partner_adds` replaces `travel.partners`, `captures.shared`, `tb_partner_captures()` as a full set, `tb_can_read_photo` per capture. Journals private as before.
 - 24/10/26 D15, 7A.1, 7A.2, 7A.4, 7A.5, 7A.6 item 9 and new item 11, 7B.2, 7B.3, 7B.4: Gary's decision. Per-photo "Claude sees this" switch, default on, in migration 0007 (0005 and 0006 already applied); `tb_journal_turn` withholds the path of a switched-off photo. Photos to Claude per day raised from 20 to 30, counting switched-on photos only, combined across both travellers in M1.2; switched-off photos have no limit. M1.2's migration becomes 0008 and its client the release after M1.1's last.
 - 24/10/26 7A.1, 7A.4: corrections agreed with Gary at the M1.1 build. 0005 also replaces `tb_journal_turn` (returns `photo_path` per capture) and `tb_journal_reply` (stores the cache counts), which 7A.4 needs and 7A.1 did not name; `tb_captures_since` needs no replacement (it returns whole rows). The cache breakpoint keeps for 1 h. The day's captures move from the system prompt into the context block.
 
