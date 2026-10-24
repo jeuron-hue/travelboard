@@ -7,7 +7,47 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ## M1.1 Photo capture (SPEC.md 7A)
 
-**Status 24/10/26: 0005, 0006 and 0007 applied; `checks/smoke.sql` 74 of 74; `tb-journal` v3 and client v8 ("Claude sees this" switch, SPEC change 009b70f) live. v7 shipped first and was not run on the Pixel; the device steps below are for v8. Cut-off on the Pixel 27/10/26.**
+**Status 24/10/26: v8 run on the Pixel 0927 to 0936 hrs: items 2 to 11 pass. Item 1 (camera photo offline) could not run: Photo opened the Google Photos picker with no camera (SPEC 7A.2 corrected). v9 adds Camera and Gallery; the v9 steps below finish item 1. Cut-off on the Pixel 27/10/26.**
+
+### Device results, v8 (Pixel, Gary), 24/10/26
+
+Gary used existing photos (screenshots and one street photo) wherever a step said to take one. Server rows, Storage objects and function logs read by Claude at 0944 hrs.
+
+| Step | Result | Evidence |
+|---|---|---|
+| 2 Camera photo offline (item 1) | NOT RUN | Photo opened the Google Photos picker; no camera. The v8 input has no `capture`, and on current Android Chrome a plain image input goes to the system photo picker. Fixed in v9 (Camera and Gallery). No offline photo capture on record: every object was stored within a second of its capture. |
+| 3 Gallery photo (item 2) | PASS | `Photo test 2`, 0927 hrs, synced with `photo_path`; file in `tb-photos`. |
+| 4 Photo only (item 3) | PASS | 0928 hrs, empty body, 575 x 1280, 72 761 B, row and file both 0928 hrs. |
+| 5 Force-close with a photo (item 4) | PASS (Gary) | `Photo draft` saved 0929 hrs with its photo and the switch off. |
+| 6 The switch (item 11) | PASS | `Photo draft` `photo_to_claude` false; `Private photo` false until Gary switched it on at 0935 hrs (Claude did not see it at 0933 hrs). |
+| 7 Edit | PASS | Replace on `Photo test 2`: same path, file rewritten 0932 hrs, sizes now 1280 x 1072, 193 916 B. Remove on `Photo test 1 replacement`: the four fields null, its file kept in Storage. |
+| 8 Claude sees the photo (items 6, 11) | PASS | 0933 hrs reply described the two switched-on photos, including the police car and ambulance that no text mentions; nothing on `Photo draft` or `Private photo`. Files at most 1280 px, all under 200 KB. |
+| 9 Cache (item 7) | PASS | 0935 hrs reply: `cache_read_tokens` 3746, log `photos: 2`. |
+| 10 Switch back on | PASS | 0936 hrs reply described three photos including `Private photo` (correctly called a copy of the 0928 screenshot: same file, 72 761 B); log `photos: 3`, `cache_write_tokens` 4751, read 0 as expected. |
+| 11 Failed upload (item 5) | PASS headless, nothing stuck on the Pixel | No photo left queued after its text synced. |
+| Item 8 anonymous access | PASS | 01:47 UTC, from outside this sandbox (Apify web-fetch, several browsers and retries) for `Private photo`'s path: `/storage/v1/object/public/tb-photos/...` and `/storage/v1/object/tb-photos/...` with only the publishable key. Supabase's edge log shows every request answered 400; nothing served. Other-user access: smoke P9. |
+
+### v9: Camera and Gallery, 24/10/26
+
+| Check | Result | Evidence |
+|---|---|---|
+| SPEC 7A.2 | Corrected on Gary's choice | Photo opens a sheet: Camera (`capture="environment"`), Gallery (plain input), Cancel. Change-log line 24/10/26. |
+| `m11.test.cjs` | PASS, 58 of 58, six runs | P1 now: two inputs (Camera with `capture="environment"`, Gallery without); Photo opens the sheet; Cancel opens no picker; Gallery and Camera each close the sheet and open their own input (Playwright file chooser); acceptance 1 attaches through Camera, acceptance 2 and Replace through Gallery. P10 and P17 waited a fixed time for a re-render and failed about one run in two on v8 as well; they now wait for the render. |
+| `m1`, `m2`, `fn.test.cjs`, `static.cjs` | PASS, 103, 80, 37, 74 | No server change. |
+
+### Device steps (Pixel, Chrome), v9
+
+To be run once v9 is live (Claude confirms `const CACHE_VERSION = 9;`).
+
+1. **Update.** Update the app as before; Version v9.
+2. **Sheet.** Tap Capture, then Photo: a sheet slides up with Camera, Gallery and Cancel. Tap Cancel: it closes and nothing else opens.
+3. **Camera photo offline (item 1).** Turn airplane mode on (pill "offline"). Capture, Photo, Camera: the rear camera opens. Photograph something with detail. Confirm the shot. Back in travelboard the photo shows with its size (about 1280 x 960) and a ticked "Claude sees this". Type `Camera test`, Save: thumbnail and yellow "queued" chip, the pill counts the capture and the photo. Turn airplane mode off; within about 35 s it reads "synced". Note the time. If travelboard restarts while the camera is open and the photo is lost, report it.
+4. **Gallery still works.** Capture, Photo, Gallery: the Google Photos picker opens. Pick a photo, type `Gallery test`, Save. It syncs.
+5. **Replace by camera.** Tap `Camera test`, tap Replace, Camera, take another photo, Save. The thumbnail changes.
+
+Claude then checks the `Camera test` file (at most 1280 px, under 500 KB) and both rows.
+
+### Applied and deployed, 24/10/26
 
 | Applied, 24/10/26 | Result | Evidence |
 |---|---|---|
@@ -44,7 +84,7 @@ Headless M1.1 groups (`m11.test.cjs`, Storage mock with the own-folder rule, 2 M
 - Export carries the four photo fields, no image data. The journal composer has no Photo button.
 - A second phone (reinstall) downloads every photo once, keeps them, shows thumbnails, and does not download again.
 
-### Device steps (Pixel, Chrome), v8: SPEC.md 7A.6
+### Device steps (Pixel, Chrome), v8: SPEC.md 7A.6 (run 24/10/26, results above)
 
 To be run once v8 is live (Claude confirms `const CACHE_VERSION = 8;`). Report the step number and what you saw for any step that does not match.
 

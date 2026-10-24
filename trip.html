@@ -26,13 +26,17 @@
     draft survives a force-close; photos missing on this phone are downloaded when online.
 
   Change log (newest first)
+  - 24/10/26 v9. Photo (and Replace) opens a small sheet: Camera or Gallery (SPEC.md 7A.2,
+    corrected 24/10/26). On the Pixel a plain image file input goes straight to the Google
+    Photos picker, which has no camera, so Camera is its own input with capture="environment"
+    and Gallery keeps the plain one. Both lead to the same shrink and attach as before.
   - 24/10/26 v8. "Claude sees this" switch per photo (SPEC.md D15, 7A.2), default on, shown
     with the photo on the capture and edit screens. Kept in the draft, on the capture
     (photo_to_claude, true when absent), pushed with it and in the export. Changing it in an
     edit bumps updated_at and queues the capture. Removing the photo resets it to on. Share
     leaves out "with a photo" for a photo switched off.
   - 24/10/26 v7. M1.1 Photo capture. Photo button on the capture screen (Android chooser:
-    camera or gallery), preview with Remove; shrunk to 1280 px on the long edge, JPEG 0.82;
+    camera or gallery; replaced in v9), preview with Remove; shrunk to 1280 px on the long edge, JPEG 0.82;
     Save works with a photo and no text. IndexedDB version 3 adds store photos
     { id, blob, w, h, bytes, uploaded, at }; drafts keep their photo. Rows show a thumbnail.
     Edit can add, replace or remove a photo (remove clears the four photo fields; the file
@@ -291,6 +295,8 @@
   .rows dt { color: var(--muted); }
   .rows dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+  .actions.pick { display: grid; gap: 12px; }
+  .actions.pick .btn { min-height: 56px; font-size: 17px; }
   .btn {
     min-height: 48px; padding: 0 16px; border-radius: 10px; cursor: pointer;
     border: 1px solid var(--line); background: var(--ground);
@@ -388,6 +394,7 @@
       <button id="kind-journal" type="button" aria-pressed="false">journal</button>
     </div>
     <button class="btn" id="cap-photo-btn" type="button">Photo</button>
+    <input id="cap-camera" type="file" accept="image/*" capture="environment" hidden>
     <input id="cap-file" type="file" accept="image/*" hidden>
     <span class="spacer"></span>
     <button class="save" id="cap-save" type="button" disabled>Save</button>
@@ -407,6 +414,17 @@
     <button class="btn danger" id="cap-delete" type="button">Delete</button>
   </div>
 </section>
+
+<dialog id="photo-dlg" aria-label="Add a photo">
+  <div class="sheet">
+    <h2>Photo</h2>
+    <div class="actions pick">
+      <button class="btn" id="photo-camera" type="button">Camera</button>
+      <button class="btn" id="photo-gallery" type="button">Gallery</button>
+      <button class="btn" id="photo-cancel" type="button">Cancel</button>
+    </div>
+  </div>
+</dialog>
 
 <dialog id="suffix-dlg">
   <form class="sheet" id="suffix-form" method="dialog">
@@ -451,7 +469,7 @@
 'use strict';
 
 // Bump together with CACHE_VERSION in sw.js on every release.
-const APP_VERSION = 8;
+const APP_VERSION = 9;
 
 const PROJECT_REF = 'nnnnonspfljdkrxstslw';           // Supabase project travelboard (SPEC.md D3, 6.8)
 const SUPABASE_URL = 'https://' + PROJECT_REF + '.supabase.co';
@@ -2016,12 +2034,23 @@ $('cap-delete').addEventListener('click', () => { deleteCapture(); });
 $('cap-body').addEventListener('input', () => { updateSaveEnabled(); writeDraft(); });
 $('kind-note').addEventListener('click', () => { setKind('note'); writeDraft(); });
 $('kind-journal').addEventListener('click', () => { setKind('journal'); writeDraft(); });
-$('cap-photo-btn').addEventListener('click', () => { if (cap.open) $('cap-file').click(); });
-$('cap-file').addEventListener('change', () => {
-  const f = $('cap-file').files && $('cap-file').files[0];
-  $('cap-file').value = '';
-  if (f) attachPhoto(f);
-});
+// Photo opens Camera or Gallery (SPEC.md 7A.2). The input is clicked inside the button's own
+// click, so the tap still counts as the user gesture Chrome needs to open a picker.
+$('cap-photo-btn').addEventListener('click', () => { if (cap.open) $('photo-dlg').showModal(); });
+function pickPhoto(input) {
+  $('photo-dlg').close();
+  if (cap.open) $(input).click();
+}
+$('photo-camera').addEventListener('click', () => { pickPhoto('cap-camera'); });
+$('photo-gallery').addEventListener('click', () => { pickPhoto('cap-file'); });
+$('photo-cancel').addEventListener('click', () => { $('photo-dlg').close(); });
+for (const id of ['cap-camera', 'cap-file']) {
+  $(id).addEventListener('change', () => {
+    const f = $(id).files && $(id).files[0];
+    $(id).value = '';
+    if (f) attachPhoto(f);
+  });
+}
 $('cap-photo-remove').addEventListener('click', () => { removePhoto(); });
 $('cap-photo-claude').addEventListener('change', () => { cap.toClaude = $('cap-photo-claude').checked; writeDraft(); });
 $('records').addEventListener('click', (ev) => {

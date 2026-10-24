@@ -66,9 +66,17 @@ async function makeImage(page, w, h, type) {
   }, { w, h, type });
   return Buffer.from(b64, 'base64');
 }
-async function attach(page, buf, name, mimeType) {
+// via: undefined sets the gallery input directly; 'camera' or 'gallery' taps Photo, then that
+// choice in the sheet, and answers the file chooser it opens (the path a tap takes on the phone).
+async function attach(page, buf, name, mimeType, via) {
   const before = await page.evaluate(() => cap.photo && cap.photo.blob);
-  await page.setInputFiles('#cap-file', { name, mimeType, buffer: buf });
+  if (via) {
+    await page.click('#cap-photo-btn');
+    const [chooser] = await Promise.all([page.waitForEvent('filechooser', { timeout: 5000 }), page.click('#photo-' + via)]);
+    await chooser.setFiles({ name, mimeType, buffer: buf });
+  } else {
+    await page.setInputFiles('#cap-file', { name, mimeType, buffer: buf });
+  }
   await page.waitForFunction((b) => cap.photo && cap.photo.state === 'new' && cap.photo.blob !== b, before, { timeout: 15000 }).catch(() => {});
   await page.waitForFunction(() => !document.getElementById('cap-photo').hidden, null, { timeout: 5000 }).catch(() => {});
 }
@@ -110,14 +118,35 @@ async function save(page) {
   await openCapture(page);
   check('P1 capture screen: Photo button shown, no preview, Save disabled', (await shown(page, '#cap-photo-btn')) && !(await shown(page, '#cap-photo'))
     && await page.$eval('#cap-save', (e) => e.disabled));
-  check('P1 Photo opens the Android chooser: a file input taking images, camera or gallery', await page.$eval('#cap-file', (e) =>
-    e.type === 'file' && e.accept === 'image/*' && !e.hasAttribute('capture') && !e.multiple));
+  check('P1 two file inputs for images: Camera with capture="environment", Gallery without capture', await page.evaluate(() => {
+    const c = document.getElementById('cap-camera'), g = document.getElementById('cap-file');
+    return c.type === 'file' && c.accept === 'image/*' && c.getAttribute('capture') === 'environment' && !c.multiple
+      && g.type === 'file' && g.accept === 'image/*' && !g.hasAttribute('capture') && !g.multiple;
+  }));
+  await page.click('#cap-photo-btn');
+  check('P1 Photo opens a sheet: Camera, Gallery, Cancel', await page.$eval('#photo-dlg', (d) => d.open)
+    && (await shown(page, '#photo-camera')) && (await shown(page, '#photo-gallery')) && (await shown(page, '#photo-cancel')));
+  let opened = 0;
+  const onChooser = () => { opened++; };
+  page.on('filechooser', onChooser);
+  await page.click('#photo-cancel');
+  await page.waitForTimeout(300);
+  page.off('filechooser', onChooser);
+  check('P1 Cancel closes the sheet, opens no picker, capture screen still open', !(await page.$eval('#photo-dlg', (d) => d.open)) && opened === 0
+    && await page.evaluate(() => cap.open && document.getElementById('cap-photo').hidden));
+  await page.click('#cap-photo-btn');
+  const [gch] = await Promise.all([page.waitForEvent('filechooser', { timeout: 5000 }), page.click('#photo-gallery')]);
+  const gid = await gch.element().evaluate((e) => e.id);
+  check('P1 Gallery closes the sheet and opens the gallery input', gid === 'cap-file' && !(await page.$eval('#photo-dlg', (d) => d.open)), gid);
+  await gch.setFiles([]);
 
   // --- acceptance 1: airplane mode, camera photo
   mock.offline = true;
   await page.evaluate(() => window.dispatchEvent(new Event('offline')));
   await page.fill('#cap-body', 'Jay Fai, the crab omelette');
-  await attach(page, big, 'PXL_20261109_183000.jpg', 'image/jpeg');
+  await attach(page, big, 'PXL_20261109_183000.jpg', 'image/jpeg', 'camera');
+  check('P1 Camera closes the sheet and opens the camera input; its photo attaches', !(await page.$eval('#photo-dlg', (d) => d.open))
+    && await page.evaluate(() => cap.photo.state === 'new'));
   const pv = await page.evaluate(() => ({ state: cap.photo.state, w: cap.photo.w, h: cap.photo.h, bytes: cap.photo.bytes, type: cap.photo.blob.type,
     src: document.getElementById('cap-photo-img').src, btn: document.getElementById('cap-photo-btn').textContent,
     info: document.getElementById('cap-photo-info').textContent }));
@@ -165,7 +194,7 @@ async function save(page) {
   // --- acceptance 2: gallery photo (PNG, portrait)
   await openCapture(page);
   await page.fill('#cap-body', 'Wat Pho from the gallery');
-  await attach(page, tall, 'IMG_0420.png', 'image/png');
+  await attach(page, tall, 'IMG_0420.png', 'image/png', 'gallery');
   const pv2 = await page.evaluate(() => ({ w: cap.photo.w, h: cap.photo.h, type: cap.photo.blob.type }));
   check('P5 gallery PNG 1500 x 2000 becomes a 960 x 1280 JPEG', pv2.w === 960 && pv2.h === 1280 && pv2.type === 'image/jpeg', JSON.stringify(pv2));
   await save(page);
@@ -246,6 +275,8 @@ async function save(page) {
     && s5.lat != null && s5.photo_path === null && !mock.objects.has(`${UID}/${c5.id}.jpg`)
     && mock.storageCalls.filter((c) => c.method === 'POST').length > posts0, JSON.stringify(s5));
   const ph5 = (await photos(page)).find((p) => p.id === c5.id);
+  // The pill and rows re-render after the sync settles; wait for that render, not a fixed time.
+  await page.waitForFunction(() => /queued 1|sync error/.test(document.getElementById('status-text').textContent), null, { timeout: 3000 }).catch(() => {});
   check('P10 the photo stays queued; pill counts it and shows the error; row chip queued', ph5 && ph5.uploaded === 0
     && /queued 1|sync error/.test(await pill(page)) && await page.$eval(`.row[data-id="${c5.id}"] .chip.queued`, () => true).catch(() => false)
     && /photo upload/.test(await page.$eval('#s-error', (e) => e.textContent)), await pill(page));
@@ -291,7 +322,7 @@ async function save(page) {
   await waitCap(page, true);
   check('P13 edit opens with the full preview of the saved photo', await page.evaluate(() => cap.photo.state === 'keep' && cap.photo.w === 1280
     && !document.getElementById('cap-photo').hidden && /^blob:/.test(document.getElementById('cap-photo-img').src)));
-  await attach(page, tall, 'replace.png', 'image/png');
+  await attach(page, tall, 'replace.png', 'image/png', 'gallery');
   await save(page);
   await settle(page);
   await syncIdle(page);
@@ -411,6 +442,7 @@ async function save(page) {
   await syncIdle(pb);
   check('P17 a second sync downloads nothing again', mock.storageCalls.filter((c) => c.method === 'GET').length === gets);
   await pb.click('#day-label');
+  await pb.waitForFunction(() => document.querySelectorAll('.row img.thumb').length >= 1, null, { timeout: 3000 }).catch(() => {});
   const dayB = await pb.$eval('#day-label', (e) => e.textContent);
   const thumbsB = await pb.$$eval('.row img.thumb', (e) => e.length);
   check('P17 rows on the second phone show thumbnails', thumbsB >= 1, `${dayB}: ${thumbsB}`);
