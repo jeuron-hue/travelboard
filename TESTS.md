@@ -163,7 +163,7 @@ From Gary's screenshots and the server rows (checked 1410 hrs).
 | 10 | 1405 | PASS. Edit sheet for the 0931 photo capture: own time and date, place hint, chips, print with size and Remove, "Claude sees this photo" switch, info line with Delete, Replace and Save. |
 | 11 (items 6, 6a part) | 1407 to 1408 | PASS in substance. No quoted captures in the thread. Asked "Where did I have lunch today", Claude said no capture mentions lunch and placed the later captures "around 238 and 240 Tampines Street 21" by their place names. One reply stored (claude-sonnet-5-5, 555 input tokens). The mall lunch question waits for step 8 at a named place. |
 
-Left for session A: step 8 at a named place, then ask the journal about it (step 11 as written).
+Session A retired 24/10/26. Its step 8 at a named place, with the journal question after it, is step 9 of the combined two-phone run above (Gary's decision, session B).
 
 ### Device steps (Pixel, Chrome), 0.13.0: session A
 
