@@ -1,7 +1,7 @@
 # travelboard: specification
 
 Owner: Gary Chan. Repo: `jeuron-hue/travelboard` (public). Written 04/10/26.
-Status: M0 Foundation done 04/10/26. M1 Capture done 10/10/26. M2 Journal done 23/10/26. Move to own project (6.8) done 24/10/26. M1.1 Photo capture done 24/10/26. M1.2 Two travellers (cut-off 31/10/26) in build from 24/10/26.
+Status: M0 Foundation done 04/10/26. M1 Capture done 10/10/26. M2 Journal done 23/10/26. Move to own project (6.8) done 24/10/26. M1.1 Photo capture done 24/10/26. M1.2 Two travellers built 24/10/26; its two-phone test waits for M1.3. M1.3 Look and place (7C) from 24/10/26. Both pass on the phones by 05/11/26; freeze 06/11/26.
 
 This file is the source of record for what travelboard is and how it is built. M0, M1 and M2 are specified in full because they ship before Bangkok (09/11/26). M3 to M8 are skeletons, to be expanded one at a time after Bangkok using the friction log from that trip.
 
@@ -38,7 +38,8 @@ Wanderlog was used for Switzerland (Jan 2025) and liked, but its AI layer and jo
 | D13 | Map layer is locate-and-reach only: day map, coordinates, copyable address, deep link to Google Maps. No offline vector tiles | 04/10/26 |
 | D14 | Apify is a plan-time enrichment tool only, never in a street-time path | 04/10/26 |
 | D15 | Photo captures (M1.1): one photo per capture from the in-app camera or gallery, shrunk on the phone, stored offline first, synced to a private Supabase Storage bucket `tb-photos`. Claude sees the day's photos in the journal. Each photo has a "Claude sees this" switch, default on: switched off, the photo is kept, synced and shared like any other but never goes to Claude. At most 30 switched-on photos per day reach Claude (combined across both travellers from M1.2); switched-off photos have no limit (24/10/26). Built before Bangkok with a cut-off of 27/10/26; if it is not passing on the Pixel by then, it ships after Bangkok | 23/10/26, switch 24/10/26 |
-| D16 | Two travellers (M1.2): Eric gets his own login on his own Android phone. Separate by default: each sees only his own captures and journals. Each can add the other in the app; the link is live only when both have added, and either can remove it. While linked, each capture has a "Share with" switch, default on; a shared capture, photo included, appears read-only on the other's phone. Journal threads stay private. Each has his own journal prompt; both share the `travelboard` workspace. Built after M1.1 for Bangkok, cut-off 31/10/26 | 23/10/26, separate by default 24/10/26 |
+| D16 | Two travellers (M1.2): Eric gets his own login on his own Android phone. Separate by default: each sees only his own captures and journals. Each can add the other in the app; the link is live only when both have added, and either can remove it. While linked, each capture has a "Share with" switch, default on; a shared capture, photo included, appears read-only on the other's phone. Journal threads stay private. Each has his own journal prompt; both share the `travelboard` workspace. Built after M1.1 for Bangkok, cut-off 05/11/26 (was 31/10; moved so Eric's first look is the M1.3 design) | 23/10/26, separate by default 24/10/26 |
+| D17 | Look and place (M1.3): a field-notebook visual identity for the phone app, designed in full for light and dark; serif headings, Plex Sans body. Captures get an editable place name, offered as one-tap chips from your own named places nearby (offline) and from OpenStreetMap (online); never filled in automatically. Each person can edit his own journal prompt in the app. Built before Bangkok in two sessions after M1.2's build; M1.2 and M1.3 pass on both phones by 05/11/26; freeze 06/11/26 | 24/10/26 |
 
 ## 3. Design principles
 
@@ -50,9 +51,9 @@ These bind every module.
 4. **Latency budgets.** Cached lookup on the phone under 2 s, works offline. Live query under 10 s to a usable answer. A feature that cannot meet its budget does not ship in that path.
 5. **Plain-language answer on top, detail behind.** Glanceable first, structure underneath, never one instead of the other.
 6. **Every fact carries its source and its age.** Places hours, a blog post and a photo of the door sign are not equal. Unverified facts are flagged, not presented as fact.
-7. **Store identity, not text.** A place is stored by `place_id` and coordinates from the source at add time, never by a typed address.
+7. **Store identity, not text.** A place is stored by `place_id` and coordinates from the source at add time, never by a typed address. A capture's `place_name` (M1.3) is a label the user chose, not a place identity: the capture's coordinates stay the record of where it was, and `place_id` stays reserved for M3.
 8. **Local day, not Singapore day, and the day ends at 0400.** The day is taken in the zone where the capture was made, and it rolls over at 0400 local, not midnight: a capture at 0030 hrs in Bangkok belongs to that Bangkok evening.
-9. **Ugly is fine. Friction is not.** Two users, Gary and Eric (from M1.2). Spend effort on taps saved, not polish.
+9. **Friction first, then looks.** Two users, Gary and Eric (from M1.2). Taps saved come first; from M1.3 the app should also read like a travel journal (7C), and the look never costs a tap.
 
 ## 4. Architecture
 
@@ -137,8 +138,9 @@ travelboard/
 | M2 Journal | Thread per local day, Claude via `tb-journal`, day's captures as context | 19/10 to 25/10 | One real evening conversation that references the day's captures |
 | Move to own project | travelboard out of `weatherboard` into its own Supabase project (6.8) | 23/10 to 24/10 | 6.8 step 8 passes on the Pixel |
 | M1.1 Photo capture | Photo on a capture (camera or gallery), offline first, Storage bucket `tb-photos`, photos in the journal | 24/10 to 27/10 | Section 7A acceptance passes on the Pixel by 27/10, or it moves to after Bangkok |
-| M1.2 Two travellers | Eric's login, separate by default, add each other, per-capture share, private journals (7B) | after M1.1, by 31/10 | Section 7B acceptance passes on both phones by 31/10, or it moves to after Bangkok |
-| Shakedown | Daily use in Singapore. Fixes only, no features (the move, M1.1 and M1.2 are the agreed exceptions, 23/10) | 26/10 to 01/11 | Freeze on 01/11 |
+| M1.2 Two travellers | Eric's login, separate by default, add each other, per-capture share, private journals (7B) | built 24/10; device test with M1.3, by 05/11 | Section 7B acceptance passes on both phones by 05/11, or it moves to after Bangkok |
+| M1.3 Look and place | Field-notebook redesign of every screen, place names with chips, editable journal prompt (7C) | 24/10 to 04/11, two sessions | Section 7C acceptance passes on both phones by 05/11 |
+| Shakedown | Daily use in Singapore. Fixes only, no features (the move, M1.1, M1.2 and M1.3 are the agreed exceptions) | 26/10 to 06/11 | Freeze on 06/11 |
 | Bangkok pilot | Use it for real, keep a friction log | 09/11 to 12/11 | Friction log written |
 | M3 Trip model + planner | Trips, days, items, places, hours validation | after Bangkok | skeleton below |
 | M4 Phone day view + lookup | Morning pre-fetch, cached lookup, live query | after M3 | skeleton below |
@@ -379,7 +381,7 @@ Sonnet 5.5 reads images at high resolution: a 1280 x 960 photo is ceil(1280/28) 
 
 ## 7B. M1.2 Two travellers (full)
 
-Added 23/10/26 on Gary's decision (D16); sharing model rewritten 24/10/26. Eric, Gary's travel companion, gets his own login on his own Android phone. Separate by default: each sees only his own captures and journals. Each can add the other in the app; the link is live only when both have added, and either can remove it. While linked, each capture carries a "Share with Eric" (or "Share with Gary") switch, default on; a shared capture, photo included, appears on the other's phone, labelled and read-only. Journal threads stay private to their owner. Built after M1.1 passes, cut-off 31/10/26; if it is not passing on both phones by then, Gary pilots Bangkok alone and M1.2 follows the trip.
+Added 23/10/26 on Gary's decision (D16); sharing model rewritten 24/10/26. Eric, Gary's travel companion, gets his own login on his own Android phone. Separate by default: each sees only his own captures and journals. Each can add the other in the app; the link is live only when both have added, and either can remove it. While linked, each capture carries a "Share with Eric" (or "Share with Gary") switch, default on; a shared capture, photo included, appears on the other's phone, labelled and read-only. Journal threads stay private to their owner. Built after M1.1 passes. Cut-off 05/11/26 (was 31/10/26): the two-phone test runs on the M1.3 design, so Eric's first look is the final one. If it is not passing on both phones by then, Gary pilots Bangkok alone and M1.2 follows the trip.
 
 ### 7B.1 Accounts (Gary, dashboard)
 
@@ -432,6 +434,79 @@ Added 23/10/26 on Gary's decision (D16); sharing model rewritten 24/10/26. Eric,
 11. An airplane-mode capture on Eric's phone syncs on reconnect and, shared, appears on Gary's phone after his next sync.
 12. `checks/static.cjs`, `checks/smoke.sql` and the M1, M1.1 and M2 headless suites pass; a new M1.2 headless suite passes.
 13. Change password: Eric changes his password on his phone, signs out, and signs back in with the new one; the old one is refused.
+
+## 7C. M1.3 Look and place (full)
+
+Added 24/10/26 on Gary's decision (D17). The phone app gets its own visual identity, a field notebook, on every screen, plus two small features that the new layout needs: a place name on each capture, and an editable journal prompt per person. Built in two sessions after M1.2's build (7C.6). M1.2's two-phone test runs on the result.
+
+### 7C.1 Identity
+
+- **Mood: field notebook.** Warm paper ground, ink-dark type, faint ruled lines, stamp-style labels for kind and time. Dark mode is a night page (deep ink-blue paper, not black) and is designed in full, not derived.
+- **Type:** a serif for screen and day titles and other headings, Plex Sans for body and UI. The serif is OFL-licensed, Latin subset, vendored as woff2 like Plex (rule 5). Weights limited to what the mockup uses.
+- **Colour:** stamp-ink red-terracotta as the accent and ink blue as the second colour, replacing the orange. Status colours (synced, queued, sign in, offline, error) stay distinct from the accent. Contrast at least WCAG AA for text in both themes.
+- **Hierarchy:** three levels on every screen: what the screen is, what each item is, its detail. Size, weight and colour carry it, not boxes.
+- **Exact tokens** (colours, type scale, spacing, radii) are taken from the mockup Gary approves (7C.8) and written into `trip.html`'s `:root` sets under weatherboard's token names where they exist.
+
+### 7C.2 Screens
+
+- **Header and pill:** serif app or day title; the sync pill restyled as a stamp, same states and wording.
+- **Day view:** the day title in the serif with its date. Each row leads with time (stamp-style, 24-hour) and place (7C.4), then the text, then the photo as a small framed print. Kind is a small stamp label. A thin timeline spine joins the day's rows. Partner rows (7B.3) keep their name label and read-only view. Ruled hairlines separate rows; no cards.
+- **Capture and edit:** a paper sheet. Place field with its chips (7C.4) under the time; ruled textarea; photo attached as a print with Remove; the switches ("Claude sees this", "Share with") grouped together at the foot. Save stays in thumb reach.
+- **Journal:** the day's thread as a notebook page. Gary's (or Eric's) turns and Claude's replies are told apart by a margin rule and type colour, not chat bubbles. Day list in the serif. Composer and Share unchanged in behaviour.
+- **Panels:** the pill panel, partner panel, Change password and the prompt editor (7C.5) in the same paper style.
+
+### 7C.3 Rules for the redesign
+
+- No behaviour changes beyond 7C.4 and 7C.5. Sync, drafts, queues, switches and the 0400 day rule are untouched.
+- The M1, M1.1, M2 and M1.2 headless suites stay the regression guard. Keep their hooks (ids, data attributes, roles). Where a suite asserts on copy or structure that the design changes, update the assertion and keep the behaviour it checks; never weaken a check to pass.
+- Tap targets at least 44 px. One-handed: primary actions at the bottom.
+- UI copy: dates dd/mm/yy, times 24-hour (0901 hrs), SI units, no em dashes.
+- Bump the service worker version on each release (rule 9).
+
+### 7C.4 Place names (migration 0009)
+
+- 0009, `travel` and `public.tb_*` only: `alter table travel.captures add place_name text check (place_name is null or char_length(place_name) between 1 and 120)`. Replace `tb_capture_upsert` and `tb_captures_upsert` so they carry it. `tb_captures_since` and `tb_partner_captures` return whole rows, so they carry it unchanged. Replace `tb_journal_turn` so each capture carries `place_name`. Catalogue snapshot before and after.
+- **Display:** a row shows `place_name` if set, otherwise the coordinates to 4 decimals (`13.7380, 100.5601`), otherwise "no GPS". Partner rows show the owner's name.
+- **Editing:** tap the place on the capture or edit screen to type a name; clearing it returns to coordinates. Works offline; bumps `updated_at` and marks the capture dirty like any edit. Only the owner can name his capture.
+- **Chips, never auto-filled.** With GPS, the place field offers up to three one-tap chips, own names first:
+  1. **Your names:** distinct `place_name`s on your own captures within 75 m, nearest first, from IndexedDB. Works offline.
+  2. **Map suggestion:** when online, the nearest named place from OpenStreetMap Nominatim's reverse endpoint (`format=jsonv2`, `zoom=18`, `accept-language=en`), called from the phone. At most one request per second; cached in IndexedDB by position rounded to about 50 m, so a place is looked up once. Network only, never cached by the service worker. A small "© OpenStreetMap contributors" credit shows under the chip. If the lookup fails or returns nothing, no chip.
+  - A capture saved offline gets its map chip when opened later with signal. Accepting a chip sets `place_name` to its text; nothing else is stored from OSM.
+- **Journal:** `tb-journal` labels each capture with its place name when set, and coordinates otherwise.
+- **Export:** includes `place_name`.
+
+### 7C.5 Editable journal prompt (migration 0009)
+
+- Same migration: `alter table travel.people add journal_prompt_custom text check (journal_prompt_custom is null or char_length(journal_prompt_custom) between 1 and 4000)`.
+- `tb_prompt_get()` returns the caller's `journal_prompt` key and `journal_prompt_custom`. `tb_prompt_set(p_text text)` sets the caller's own custom text; null resets to default. Same guardrails as every RPC (rule 3); the caller's own row only.
+- `tb-journal` uses the caller's `journal_prompt_custom` when set, otherwise the bundled `prompts/<journal_prompt>.md`. The day's captures and photos stay in the separate context block, so an edit cannot remove them.
+- **Client:** "My journal prompt" in the pill panel. Opens the current text: the custom text, or the default fetched from `prompts/<key>.md` on the live site. Save, Cancel, and Reset to default. Character count against 4,000. Needs a connection; not queued. Takes effect from the next journal turn.
+- Editing the prompt breaks that evening's prompt cache once; no other cost.
+
+### 7C.6 Sessions
+
+| Session | Builds | Ends when |
+|---|---|---|
+| A | Migration 0009 (7C.4 and 7C.5 schema and RPCs), `tb-journal` place names and custom prompt, tokens and type (7C.1), header, day view, capture and edit (7C.2), place field and chips | Deployed, automated checks pass, Gary's Pixel steps for A written |
+| B | Journal, pill and partner panels, Change password, prompt editor (7C.2, 7C.5 client); rewrite M1.2's device steps in TESTS.md for the new UI | Deployed, automated checks pass, the combined M1.2 and M1.3 steps for both phones written |
+
+Run one after the other: both change `trip.html`.
+
+### 7C.7 M1.3 acceptance
+
+1. Every screen matches the approved mockup in light and dark, on the Pixel and on Eric's phone.
+2. A capture with GPS shows coordinates until named; naming it offline syncs on reconnect and shows on the partner's phone when shared.
+3. Near a place you have named before, a new capture offers that name as a chip, offline.
+4. Online at a named place (for example Tampines Mall), the map chip offers its name with the OSM credit; tapping it fills the field; nothing is filled without a tap.
+5. A second capture at the same spot uses the cached lookup (no second Nominatim request, headless test).
+6. Journal: Claude refers to a capture by its place name.
+7. Each of you edits his prompt, the next reply follows it, and Reset to default restores the file text. Neither can read or set the other's prompt (smoke test).
+8. Catalogue diff for 0009 touches only `travel.*` and `public.tb_*`.
+9. `checks/static.cjs`, `checks/smoke.sql`, `fn.test.cjs` and the M1, M1.1, M2 and M1.2 headless suites pass; a new M1.3 headless suite covers 7C.4 and 7C.5.
+
+### 7C.8 Mockups
+
+Approved mockup: to be linked here once Gary approves it. Session A starts from it.
 
 ---
 
@@ -593,6 +668,7 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 24/10/26 Status, D16, new D17, principles 7 and 9, 5, 7B intro, new section 7C: Gary's decisions. M1.3 Look and place before Bangkok: field-notebook redesign of every screen (serif headings, Plex body, terracotta and ink blue, both themes in full), editable `place_name` with own-name chips within 75 m and OpenStreetMap Nominatim chips when online, never auto-filled; editable journal prompt per person. Migration 0009. Two sessions after M1.2's build. M1.2's cut-off moves to 05/11 so its two-phone test runs on the new design; freeze moves from 01/11 to 06/11.
 - 24/10/26 7B.2, 7B.4, 4.2, 11: details settled at the M1.2 build (no change to what Gary decided). 0008 adds `tb_link_state(p_other)` (the four link states, used by `tb_whoami`, `tb_partner_add` and `tb_partner_remove`); `tb_can_read_photo` returns false rather than raising without `auth.uid()`, because it runs inside a Storage policy; `tb_photos_select` is changed with `alter policy`, not dropped. `tb_journal_turn` also returns `me` (display name and prompt key) and `own` per capture, so `tb-journal` picks the prompt and labels whose each capture is. `prompt.ts` bundles every `prompts/*.md` by file name. Eric's prompt is Gary's with Eric's name in place of Gary's, conventions line included (Gary, 24/10/26; Eric tunes it later). Client v10: the other person's captures sit in their own IndexedDB stores (`partner`, `pphotos`), so they can never be pushed. Headless: `m12.test.cjs` runs two phones on one mock.
 - 24/10/26 7B.3, 7B.5 item 13: Change password in the pill panel for both users (Gary's decision): typed twice, at least 10 characters, `updateUser` as the signed-in user, needs a connection, shows success or the server's error; no server change; a forgotten password stays a dashboard reset by Gary.
 - 24/10/26 7A.2: correction agreed with Gary after the v8 Pixel run. A plain `accept="image/*"` input opens the Google Photos picker on the Pixel, which has no camera, so "the Android chooser: camera or gallery" does not hold. Photo now opens a sheet with Camera (`capture="environment"`) and Gallery (the plain input). Client v9.

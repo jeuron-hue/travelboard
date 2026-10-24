@@ -8,7 +8,7 @@ travelboard is Gary Chan's personal travel app: a phone PWA (`trip.html`) for ca
 
 ## Current module
 
-**Move to own project** (`SPEC.md` 6.8), then **M1.1 Photo capture** (`SPEC.md` 7A), then **M1.2 Two travellers** (`SPEC.md` 7B, in its own session after M1.1 passes). Gary's go 23/10/26. Cut-offs on the phones: M1.1 by 27/10/26, M1.2 by 31/10/26; if either is slipping, stop and tell Gary, and it moves to after Bangkok. M0 done 04/10/26, M1 done 10/10/26, M2 done 23/10/26. The shakedown (26/10 to 01/11) is fixes only apart from finishing these three. Do not start M3 or any later module until Gary says go.
+**M1.3 Look and place** (`SPEC.md` 7C), in two sessions (7C.6), from the approved mockup (7C.8). Gary's go 24/10/26. M1.2 Two travellers (7B) is built; its two-phone test runs on the M1.3 design. Both pass on the phones by 05/11/26; freeze 06/11/26. If either is slipping, stop and tell Gary. M0 done 04/10/26, M1 done 10/10/26, M2 done 23/10/26, the move and M1.1 done 24/10/26. The shakedown (26/10 to 06/11) is fixes only apart from finishing M1.2 and M1.3. Do not start M3 or any later module until Gary says go.
 
 ## Hard rules
 
@@ -26,7 +26,7 @@ travelboard is Gary Chan's personal travel app: a phone PWA (`trip.html`) for ca
 
 - Single-file pages (`trip.html`, later `planner.html`) with markup, styles and script inline. `sw.js` and `manifest.webmanifest` are separate files by necessity.
 - Each HTML file opens with a comment block: "SOURCE OF RECORD", what it does, then a dated change log, newest first (same convention as weatherboard's `index.html`).
-- Styling follows weatherboard: IBM Plex Sans, colour tokens on `:root` with light and dark sets, `data-theme` on `documentElement`, theme choice in `localStorage`. Reuse weatherboard's token names; travelboard gets its own accent.
+- Styling: travelboard's own field-notebook identity from M1.3 (`SPEC.md` 7C): a vendored serif for headings, IBM Plex Sans for body and UI, colour tokens on `:root` with light and dark sets, `data-theme` on `documentElement`, theme choice in `localStorage`. Reuse weatherboard's token names where they exist; exact values come from the approved mockup.
 - UI: dates dd/mm/yy, times 24-hour (for example 0901 hrs), SI units, no em dashes in UI copy.
 - Phone-first layout: primary actions in thumb reach at the bottom, large tap targets, works one-handed.
 
