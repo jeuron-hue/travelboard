@@ -112,8 +112,9 @@ travelboard/
   checks/
     static.cjs          parse inline scripts, validate manifest, sw cache list matches files
     smoke.sql           RPC and grant smoke tests
+    catalogue.sql       catalogue snapshot; catalogue_scoped.sql lists travelboard's objects, the rest as a count and hash
     headless/           Playwright tests of trip.html against an RPC mock (dev only, never shipped):
-                        m1, m2, m11, m12 (two phones on one mock), fn (tb-journal under Deno)
+                        m1, m2, m11, m12 (two phones on one mock), m13 (place names, OSM mock), fn (tb-journal under Deno)
   TESTS.md              manual test scripts, run on the Pixel
   SPEC.md               this file
   CLAUDE.md             standing brief for Claude Code
@@ -703,6 +704,7 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 24/10/26 7C.4, 7C.2, 7C.8, 4.2: details settled at the M1.3 session A build (no change to what Gary decided). 0009 replaces `tb_capture_upsert` and `tb_journal_turn`; `tb_captures_upsert` is not replaced because it passes each item to `tb_capture_upsert` unchanged, so it carries `place_name` as it is (smoke U10). A row pushed without `place_name` (an app before v11) keeps the stored name; a blank name is stored as null. A new capture takes a position at open for its chips only when location is already granted, so the permission prompt still comes at the first Save (7.2); the capture's coordinates still come from the fix at Save. Own-name chips show their distance; names differing only in case count as one; three own names in range mean no map lookup. A failed lookup is not cached; an empty answer is. The "sign in" stamp is ink blue, so no status uses the accent. Rows: a synced row shows no sync label, a queued row keeps a queued stamp; the city of a capture made in another zone follows its place. The day title's line reads the day's main city and its count. The Photo button keeps reading Replace once a photo is attached (7A.2). Newsreader is vendored as the three static files named in 7C.8. IndexedDB version 5 adds store `geocache`. Headless suite `m13.test.cjs`; `checks/catalogue_scoped.sql`.
 - 24/10/26 7C.8: app icon option B (notebook page and pin) chosen by Gary; built in session B. Source in `design/m1.3/Icons.dc.html`.
 - 24/10/26 7C.8: Gary approved the M1.3 mockup. Tokens, type and sizes pinned; mockup source in `design/m1.3/`.
 - 24/10/26 7C.2, new 7C.2a, 7C.3, 7C.7 item 6a: Gary's decisions on the mockups. Capture kinds retired in the UI (no toggle, no label, journal captures no longer quoted in the thread; data kept, no migration). Journal Write button replaced by an inline field with Send at the foot of the screen.

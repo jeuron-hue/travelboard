@@ -5,6 +5,86 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ---
 
+## M1.3 Look and place (SPEC.md 7C)
+
+**Status 24/10/26: session A built, v11 live, every automated check passing; Pixel steps for A below, not yet run. Session B not started.** Migration 0009 applied, `tb-journal` v6 deployed, client v11 live (`sw.js` CACHE_VERSION 11).
+
+### Automated results, 24/10/26 (session A)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Migration 0009 catalogue diff (**item 8**) | PASS | Scoped form (`checks/catalogue_scoped.sql`): objects outside travelboard 518 before and after, hash `493804029b51` both times. Added: constraints `captures_place_name_check`, `people_journal_prompt_custom_check`; functions `tb_prompt_get()`, `tb_prompt_set(text)`. Changed: `travel.captures` (column `place_name`), `travel.people` (column `journal_prompt_custom`), `tb_capture_upsert`, `tb_journal_turn`. Every other `travel` and `tb_` object, the three `tb_photos_*` policies and bucket `tb-photos` unchanged. Dry run (rolled back) before applying. |
+| `checks/smoke.sql` | PASS, 165 of 165 | The 129 earlier tests (T3 now counts 17 `tb_` functions) plus U1 to U14 on synthetic users A, B, C in the rolled-back transaction: anon denied on both new functions (U1); columns and checks, Gary and Eric start with no custom prompt (U2); **item 7**: each reads only his own key and text, B's set leaves A's alone, neither function takes a uid (U3); `tb_journal_turn` gives the caller's own custom text (U4); null and blank reset, 4001 refused, 4000 kept (U5); no people row or no caller refused (U6); `place_name` in through `tb_capture_upsert` trimmed, out through `tb_captures_since` (U7); a row without the field keeps the name (U8); null and blank clear, 121 refused, 120 kept (U9); the batch route carries it (U10); `tb_partner_captures` carries a shared capture's name, never an unshared one (U11); B cannot rename A's capture (U12); `tb_journal_turn` lists names for own and shared captures (U13) with coordinates still there (U14). |
+| `checks/static.cjs` | PASS, 107 of 107 | Adds: Newsreader 500, 600, italic 500 and Plex 500 vendored and declared, OFL licence; all 17 colour pairs of 7C.8 in both themes; theme colour and manifest from the dark ground; IndexedDB v5 with `geocache`; no kind toggle, new captures `note`; no kind label or journal quotes; place limits (120 characters, 75 m, 3 chips); Nominatim jsonv2, zoom 18, English, one a second, cached; OSM credit; service worker leaves cross-origin to the network; `tb-journal` labels by place, never kind, and takes the custom prompt; 0009 shape. |
+| `fn.test.cjs` | PASS, 62 of 62 | Deno 2.9.4, `deno check` clean. F13, G2, G4 rewritten: labels and capture tags carry no kind. New H1 to H6: a named capture tagged `place="..."` only, an unnamed one keeps `location`, quotes and angle brackets escaped, neither when nothing; photo label "at Tampines Mall"; no `kind=` anywhere (**item 6** on the request side); **item 7**: the custom text is the whole system prompt, the context block with captures and photos is unchanged, Eric's call untouched, null and blank go back to the file, custom text with an unknown key still works. |
+| `tb-journal` v6 | Deployed | 24/10/26, `verify_jwt` on, `index.ts`, `context.mjs`, `prompt.ts` from commit `2da27fc`. |
+| `m1.test.cjs` | PASS, 107 of 107 | A2 new: no kind toggle. A6, A12, A13 rewritten: every new capture is a note, an edit keeps the kind. Row checks rewritten to the new row (time stamp, place, sync stamp): A6 "no GPS", A18 coordinates to 4 decimals in place of the GPS dot, B1 no kind label on an old journal row and the heading line, new B2 editing an old journal-kind row keeps `journal` on the phone and the server. A21 export carries `place_name`. C1 15 shell files. |
+| `m2.test.cjs` | PASS, 80 of 80 | The journal-kind capture is now an old row from the server. K1 rewritten: no quoted capture, the empty hint counts both captures; K3: Claude still sees it, unlabelled; K3, K4, K11 thread order without the quote. K2: no toggle, place or switches in the composer. K0, K12 IndexedDB v5. |
+| `m11.test.cjs` | PASS, 59 of 59, three runs | P0 IndexedDB v5. New P18: ten overlapping renders leave exactly one row per capture. Found while porting P17: two renders at once (a sync and a tap) interleaved their rows, doubling them or leaving the list empty for a moment; v10 had the same pattern. The day list is now built off-screen and only the newest render writes it. |
+| `m12.test.cjs` | PASS, 54 of 54 | Hooks kept (`#cap-share`, `#partners`, `#pw-*`, `#view-dlg`); only M0 (v11, IndexedDB v5) and M12 (export version) changed. |
+| `m13.test.cjs` (new) | PASS, 54 of 54, four runs | Below. |
+| Visual | Checked | Headless screenshots at 390 x 844 of the day view, capture sheet with chips, edit sheet and journal, light and dark, against `design/m1.3/` (not committed). |
+| Deploy v11 | PASS | `main` at `01ff212`; Pages build succeeded. Live `sw.js` reads `const CACHE_VERSION = 11;` with the five new font files in its precache (Last-Modified 24/10/26 1322 hrs SGT), fetched through Apify. |
+
+Headless M1.3 groups (`m13.test.cjs`, Gary's and Eric's phones on one mock, Nominatim mocked):
+
+| Group | What it checks |
+|---|---|
+| N0 | v11, IndexedDB v5; Newsreader 600, italic 500 and Plex 500 load from `vendor/`; day title Newsreader 600 34 px, wordmark italic 20 px; paper and night-page grounds, accent in both themes; pill as a stamp; tabs at the foot; main button 54 px, radius 10; "sign in" in ink blue |
+| N1, N2 | No position asked at open until location is granted; "no GPS", then coordinates to 4 decimals until named (**item 2**) |
+| N3, N4 | Named offline: trimmed, `updated_at` bumped, queued, no OSM request; on reconnect on the server; shared, the name shows on Eric's phone in the read-only view; Eric's rename refused (**item 2**) |
+| N5, N6 | Clearing returns to coordinates on phone and server; a killed draft keeps the place |
+| N7 | Offline: own names within 75 m, nearest first, once each, with distance; not the 200 m one; no map chip, no request; nothing filled until a tap (**item 3**) |
+| N8 | Online: one map chip with the OSM name and the credit, dashed; one request with jsonv2, zoom 18, English, the position; typing asks nothing more; a tap fills it; only the name is stored; cached (**item 4**) |
+| N9 | A second capture at the same spot: no second request (**item 5**) |
+| N10, N11 | Three new places at once: three requests at least a second apart; an empty answer cached; an HTTP or network failure gives no chip and is not cached |
+| N12, N13 | Four own names: three chips, no lookup; a capture saved offline gets its map chip when opened later with signal |
+| N14 to N16 | Eric's phone never looks up Gary's rows; journal composer has no place field; export and Share text carry the name; heading reads city and count; rows: time, dot, no kind label |
+
+### Device steps (Pixel, Chrome), v11: session A
+
+v11 is live (`const CACHE_VERSION = 11;` confirmed 24/10/26 1323 hrs). Gary only; the two-phone steps come with session B. Location is already allowed for travelboard on the Pixel. Note the time of each step.
+
+1. **Update.** Open travelboard; tap "Update ready, tap to reload" when it shows. Pill, Version reads v11. Close. Captures, photos and journal days are all still there.
+2. **The look (item 1, day view).** Paper-coloured page; "travelboard" in italic at the top left; the pill is a small tilted stamp (green "SYNCED"). Day title in the serif with "Singapore, N captures" under it; arrows on the right. Rows: the time in terracotta with "HRS" under it, a thin line with a dot, the place in bold (or coordinates in grey, or "no GPS"), the text, a tilted photo print. No "note" or "journal" labels anywhere, old journal captures included. Captures and Journal tabs sit above the Capture button. Compare with the approved mockup; report anything that differs.
+3. **Dark (item 1).** Pill, Theme. Night-blue page, light text, orange-terracotta times and button; everything readable. Theme again back to light. Report anything hard to read in either.
+4. **Capture sheet (item 1, 6a).** Capture. "New capture" title with an X; a sheet with the time in terracotta and today's date; PLACE with the coordinates as a grey hint; ruled lines; Photo and Save at the bottom. No Note/Journal toggle. Tap in the text, check the Gboard mic works, type `M1.3 test one`.
+5. **Name offline (item 2).** Airplane mode on (pill reads offline). Type `Home test` in Place. Save. The row shows `Home test` in bold; pill "offline, 1 queued". Airplane mode off; within about 30 s the pill reads synced.
+6. **Your own name as a chip, offline (item 3).** Same spot, airplane mode on again. Capture: under Place, a blue chip `Home test` with a few metres; the field stays empty. Tap the chip: the field fills. Type `M1.3 test two`, Save. Airplane mode off.
+7. **Clear back to coordinates.** Tap `M1.3 test two`; tap the X at the end of the Place field; the field empties and shows the coordinates as a hint; Save. The row shows the coordinates in grey.
+8. **Map chip (items 4, 5).** At a named place with signal (for example Tampines Mall): Capture. Within a few seconds a dashed terracotta chip shows the place's name, with "Map suggestion © OpenStreetMap contributors" under it; nothing is filled in. Tap it: the field fills. Type `M1.3 mall`, Save. (Item 5, one lookup per spot, is proven headless.)
+9. **Draft keeps the place.** Capture, type `draft place` in Place and `draft text` in the text, swipe travelboard away, reopen: both come back. Close (X).
+10. **Edit sheet.** Tap any older capture: "Edit capture", its own time and date, its place, the date line and Delete at the foot of the sheet, the switches together above it. Close.
+11. **Journal (items 6, 6a part).** Journal tab: the thread shows only your turns and Claude's replies; no quoted captures, even on a day with old journal captures. (The journal screen keeps its present layout until session B.) Write `Where did I have lunch today?` and Send. The reply should name the mall from step 8 by its name.
+
+Report the times and anything that looks wrong. Claude then checks the names on the server and the journal call.
+
+### Open items for session B (24/10/26, end of session A)
+
+To build (SPEC 7C.6 B)
+1. Journal screen to the mockup (`design/m1.3/Journal.dc.html`): notebook page, margin rule, replies in the serif, day list in the serif, inline field with Send at the foot, draft per day, Share unchanged (7C.2, item 6a). Rewrite m2's composer checks to the inline field; the hooks there now are `#capture` reading Write and the `cap` sheet in journal mode.
+2. Settings sheet (`Panel.dc.html`): bottom sheet with grabber, status block, Travelling with, Journal (My journal prompt, Export), Account (Sign out, Change password), Theme as Light, Dark, Auto. Today Theme is a two-way toggle; with no stored choice the app follows the phone at launch only, with no live listener.
+3. Prompt editor (7C.5 client): `tb_prompt_get`, `tb_prompt_set` are live and in the harness mock; default text from `prompts/<key>.md` on the live site. Add its tests to `m13.test.cjs` (7C.7 items 7 and 9).
+4. Partner panel, Change password, partner view and photo sheet in the paper style. The partner view already shows the place and no kind.
+5. App icon option B (SPEC 7C.8, added by Gary 24/10/26 at `b2b4519`): regenerate `icons/*.png` and the shortcut icon; bump the cache.
+6. Rewrite M1.2's device steps (above, v10) for the new UI and merge them with M1.3's into one two-phone script (7C.6). Eric gets no chips on his first capture: the open-time position waits for location permission, which Android asks for at his first Save.
+7. `renderJournal` has the same overlapping-render pattern fixed in `renderCaptures` (rows appended while awaiting). Build it off-screen the same way.
+
+Decisions put to Gary at the end of session A (answers to be recorded here)
+8. SPEC 7C.4 says replace `tb_captures_upsert`; it is a pass-through and needed no change (change log 24/10/26). Agree to reword 7C.4?
+9. `--crit` light `#b42318` is close in hue to the accent `#B4472A` (7C.8 kept it). The error stamp still reads "sync error". Keep, or deepen `--crit`?
+
+Known, by design or minor
+10. Newsreader is vendored as the three static files 7C.8 names, which carry the default optical size. The mockup used Google's variable font, which sets optical size from the font size, so the 34 px title may look a little heavier on the phone than in the mockup. Check on the Pixel in step 2.
+11. A cached map name shows offline too, because it comes from the phone's own cache.
+12. The geocache never expires. A place renamed on OpenStreetMap keeps its old chip on that phone.
+13. Nominatim is called from the phone, about one request per new spot, with the browser's own Referer; no custom User-Agent is possible from a page.
+14. Catalogue baseline after 0009: outside 518, `493804029b51` (`checks/catalogue_scoped.sql`). Live: 2 people, both `journal_prompt_custom` null.
+15. Running the checks here: as M1.2 item 16; Deno from the GitHub release zip (2.9.4), fonts from the npm registry (`@fontsource/newsreader@5.3.0`, `@fontsource/ibm-plex-sans@5.3.0`; the Plex files already in `vendor/` match 5.3.0 byte for byte). The jsDelivr CDN is blocked here.
+16. M1.2 open items 1 and 3 to 12 above still stand. Item 2's selector worry is settled: the hooks were kept and m12 passes.
+
+---
+
 ## M1.2 Two travellers (SPEC.md 7B)
 
 **Status 24/10/26: built and passing every automated check; not yet run on the phones.** Migration 0008 applied, `tb-journal` v5 deployed, client v10 live. Item 13 (Change password) added on Gary's decision 24/10/26. Build session retired 24/10/26; M1.2 stays as built.
