@@ -34,6 +34,7 @@ Gary used existing photos (screenshots and one street photo) wherever a step sai
 | SPEC 7A.2 | Corrected on Gary's choice | Photo opens a sheet: Camera (`capture="environment"`), Gallery (plain input), Cancel. Change-log line 24/10/26. |
 | `m11.test.cjs` | PASS, 58 of 58, six runs | P1 now: two inputs (Camera with `capture="environment"`, Gallery without); Photo opens the sheet; Cancel opens no picker; Gallery and Camera each close the sheet and open their own input (Playwright file chooser); acceptance 1 attaches through Camera, acceptance 2 and Replace through Gallery. P10 and P17 waited a fixed time for a re-render and failed about one run in two on v8 as well; they now wait for the render. |
 | `m1`, `m2`, `fn.test.cjs`, `static.cjs` | PASS, 103, 80, 37, 74 | No server change. |
+| Deploy v9 | PASS | `main` at `aa51a09`. Live `sw.js` reads `const CACHE_VERSION = 9;` (Last-Modified 24/10/26 0950 hrs SGT), fetched through Apify. |
 
 ### Device steps (Pixel, Chrome), v9
 
