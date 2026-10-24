@@ -5,6 +5,65 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ---
 
+## M1.2 Two travellers (SPEC.md 7B)
+
+**Status 24/10/26: built and passing every automated check; device steps below to run on both phones. Cut-off 31/10/26.** Migration 0008 applied, `tb-journal` v4 deployed, client v10. Item 13 (Change password) added on Gary's decision 24/10/26.
+
+### Automated results, 24/10/26
+
+| Check | Result | Evidence |
+|---|---|---|
+| Migration 0008 catalogue diff | PASS | Objects outside travelboard's scope: 518 before and after, hash `b4ee4e5e7071` both times. Added: tables `travel.people`, `travel.partner_adds`, their 2 primary-key indexes and 8 constraints; functions `tb_linked`, `tb_link_state`, `tb_partner_add`, `tb_partner_remove`, `tb_partner_captures`, `tb_can_read_photo`. Changed: `travel.captures` (column `shared`), `tb_whoami`, `tb_capture_upsert`, `tb_captures_since`, `tb_journal_turn`, policy `tb_photos_select`. Unchanged: every other travel and `tb_` object, `tb_photos_insert`, `tb_photos_update`, bucket `tb-photos`. People rows: Gary (`journal`), Eric (`journal-eric`). No capture shared, no link. |
+| Security advisors after 0008 | As designed | `tb_*` definer functions callable by `authenticated` (rule 3), RLS on with no policies on the 5 travel tables (no grants by design). Nothing new for anon. |
+| `checks/smoke.sql` | PASS, 129 of 129 | Earlier 74 (test 11c now expects `owner` on pulled rows, 0008) plus T1 to T14 with synthetic users A, B, C inserted inside the rolled-back transaction: anon denied on the 6 new functions (T1); no direct reads of the new tables (T2); all 15 `tb_` functions definer, `search_path`, grants (T3); people rows and the `shared` default (T4); **item 1** not linked: no partner rows, own pull only, no photo of the other's (T5); **item 2** one-way add, `added_by_me` and `added_me`, then live (T6); linked: only shared, live captures, with `owner_name` (T7); **item 7** a linked partner reads the shared photo, not the unshared one or a file with no capture, cannot write, overwrite or delete in the other's folder, a third uid and Gary read nothing (T8), after unsharing (T12) and after either side removes the link (T13) the photo is refused; **item 6** edit, delete and batch on the other's capture rejected 42501, row unchanged (T9); **item 9** the partner's `tb_journal_day`, `tb_journal_days`, `tb_journal_turn` on the other's turn and `tb_journal_reply` to it all give nothing or are rejected (T10); item 10 SQL side: the partner's turn has its own prompt key, own capture plus the shared ones labelled, switched-off photo path withheld, unshared and deleted absent (T11); a row without `shared` keeps the stored value (T12); re-adding clears `removed_at` (T13). Afterwards: 2 auth users, 2 people, 0 adds, no test rows. |
+| `checks/static.cjs` | PASS, 81 of 81 | Adds: IndexedDB v4 with `partner` and `pphotos`; `shared` pushed, false when absent; partner rows never pushed; Change password via `updateUser`, 10 characters, no reauthentication workaround; 0008 shape; `prompt.ts` matches every `prompts/*.md`, Eric's names no Gary. |
+| `checks/headless/fn.test.cjs` | PASS, 49 of 49 | Deno 2.9.4. G1 Eric's call: system is `prompts/journal-eric.md`; not linked, nothing of Gary's fetched or sent. G2 linked: Gary's shared captures `by="Gary"`, his unshared capture absent from the whole request (**item 10**), Gary's shared switched-on photo fetched with Eric's JWT and sent labelled, the switched-off one not; Eric's thread only. G3 Gary's call: his prompt, his own 3 (the unshared one too), not Eric's unshared capture or thread. G4 Eric's shared capture in Gary's call `by="Eric"`. G5 link removed: nothing of Gary's in Eric's call. G6 15 shared and 20 own photos: 30 images, the most recent across both, 5 listed not shown. G7 unknown prompt key: 502 `no_prompt`, no Claude call. `deno check` clean. |
+| `checks/headless/m12.test.cjs` (new) | PASS, 54 of 54, three runs | Two phones (separate browser contexts) on one two-user mock. Below. |
+| `m1`, `m2`, `m11` on v10 | PASS, 103, 80, 58 | K0, K12 and P0 now expect IndexedDB v4. m11 P10 failed about one run in four: the earlier photo-only capture's upload sometimes ran into the failing window and was counted; the test now lets it finish first (5 clean runs after). |
+
+Headless M1.2 groups (`m12.test.cjs`):
+
+| Group | What it checks |
+|---|---|
+| M0, M1 | v10, IndexedDB v4; not linked: no Share with switch, new captures `shared` false, each phone shows only its own, panel "Not linked with Eric." (item 1) |
+| M2 | Gary adds: "You added Eric. Waiting for Eric to add you"; Eric's panel "Gary added you. Add him to link"; nothing shared; Eric adds: "Linked with Gary"; Gary after sync "Linked with Eric" (item 2) |
+| M3 | Share with Eric shown and on by default; shared with a photo; on Eric's phone after his sync with a "Gary" label, no sync chip, thumbnail and photo stored; not in his own captures or pill; still shows with the network off after a reload (item 3) |
+| M4 | Saved with the switch off: never on Eric's phone, its photo never fetched; switching a shared one off removes the row and photo at Eric's next sync, and a direct download as Eric is refused (item 4) |
+| M5 | Capture from before linking absent on Eric's phone, edit shows the switch off, switched on it appears (item 5) |
+| M6 | Partner row opens a read-only view (text, photo, name), no capture screen, no Delete, no switches; Eric's RPC edit and delete of Gary's capture rejected, Gary's row unchanged (item 6) |
+| M8 | Eric removes: both phones lose the other's captures and photos; panels update; switch gone; adding again brings back only the still-shared; Gary removes: cleared again (item 8) |
+| M9, M10 | Each phone holds only its own thread; the server counts only Eric's rows on a day Gary also wrote; Eric's journal call uses `journal-eric` and has Gary's shared capture `by="Gary"`, not the unshared one (items 9, 10) |
+| M11 | Eric offline, linked by the last known state: Share with Gary on; saved queued; on reconnect it lands and shows on Gary's phone labelled Eric (item 11) |
+| M12 | Export: own and partner captures with `owner_name`, `shared`, partner marked |
+| M13 | Killed mid-typing with the switch off: the draft comes back with it off and saves unshared |
+| M14, M15 | A failed partner pull keeps the shared rows and shows the error; Remove offline says "Needs a connection" and sends nothing |
+| P1 to P6 | Change password: under 10 characters and mismatched refused on the phone; offline "Needs a connection", not queued; a server reauthentication error shown as is, no workaround; success shown and the server holds the new password; signed out, the old password refused, the new one signs in and syncs; the same password again shows the server's error (item 13) |
+
+Item 7's REST part: the photo reads go through the Storage REST API with the user's JWT, on the phones in device steps 5 and 8 (admitted while shared, gone after). The refusals (unshared, other folder, third user, after unlinking) are proven at the policy level by smoke T8, T12 and T13, as M1.1 item 8 was.
+
+### Device steps (both phones), v10
+
+To be run once v10 is live (Claude confirms `const CACHE_VERSION = 10;`). Gary on the Pixel, Eric on his Android phone, side by side. "Sync" means tap the pill, then Sync now, then Close. Both phones on Asia/Singapore time.
+
+1. **Update Gary's Pixel.** Open travelboard; tap "Update ready, tap to reload" when it shows. Pill, Version reads v10. Gary's captures, photos and journal days are all still there.
+2. **Install on Eric's phone.** In Chrome open `https://jeuron-hue.github.io/travelboard/trip.html`, menu, Install app (or Add to home screen), open it from the new icon. Gboard as the keyboard, with the on-device English pack (Settings, System, Languages, Speech, On-device recognition); in airplane mode, tap the mic in a capture and check dictation works, then cancel.
+3. **Eric signs in (item 1).** Pill, enter `eric@travelboard.local` and his password, Sign in to sync. Pill reads "synced"; Version v10. The day view is empty.
+4. **Separate by default (item 1).** Eric: Capture, type `Eric before linking`, Save. Gary: Capture, type `Gary before linking`, Save. Neither capture screen shows a "Share with" line. Both Sync. Each phone shows only its own capture. Each pill panel shows the other person: Gary's reads "Not linked with Eric.", Eric's "Not linked with Gary."
+5. **Link (item 2).** Gary: pill, Add Eric. It reads "You added Eric. Waiting for Eric to add you". Eric: Sync, then pill: "Gary added you. Add him to link"; his day view still shows nothing of Gary's. Eric: Add Gary: "Linked with Gary". Gary: Sync, pill: "Linked with Eric".
+6. **Share with, default on (item 3).** Gary: Capture. Under the bar a "Share with Eric" line is ticked. Photo, Camera, take a photo, type `Shared test`, Save. Eric: Sync. `Shared test` shows with a green "Gary" label, no queued or synced chip, and the thumbnail. Tap it: a sheet with Gary's name, the time, the photo and the text; nothing to edit, no Delete, no switches. Close.
+7. **Offline on Eric's phone (items 3, 11).** Eric: airplane mode on (pill "offline"). Swipe travelboard away and reopen it: `Shared test` and its photo still show. Still in airplane mode: Capture; "Share with Gary" is ticked; type `Eric airplane`, Save: "queued". Airplane mode off; pill "synced" within about 30 s. Gary: Sync: `Eric airplane` shows with an "Eric" label.
+8. **Not shared, and unsharing (item 4).** Gary: Capture, untick "Share with Eric", type `Not for Eric`, Save. Eric: Sync: `Not for Eric` does not show. Gary: tap `Shared test`, untick "Share with Eric", Save. Eric: Sync: `Shared test` and its photo are gone.
+9. **From before linking (item 5).** On Eric's phone `Gary before linking` is not there. Gary: tap it; "Share with Eric" shows unticked. Tick it, Save. Eric: Sync: it appears, labelled Gary.
+10. **No editing the other's (item 6).** Eric: tap `Gary before linking`: only the read-only sheet opens. Gary: tap `Eric airplane`: the same.
+11. **Journals (items 9, 10).** Gary: Journal, Write `Gary private journal note`, Send; a reply comes. Eric: Journal: his day shows none of Gary's messages. Eric: Write `What did Gary note before we linked up?`, Send. His reply should mention Gary's `Gary before linking` capture by its content and should not mention `Not for Eric` or `Shared test`. Gary: Journal: none of Eric's messages.
+12. **Unlink and relink (item 8).** Eric: pill, Remove, confirm. It reads "Gary added you. Add him to link". Both Sync: Gary's captures are gone from Eric's phone and `Eric airplane` from Gary's. Gary's panel: "You added Eric. Waiting for Eric to add you". Eric: Add Gary. Both Sync: Eric sees `Gary before linking` again (not `Shared test` or `Not for Eric`); Gary sees `Eric airplane` again.
+13. **Eric changes his password (item 13).** Eric: pill, Change password. He types a new password of at least 10 characters twice, on his own phone only, and taps Save password: "Password changed". Sign out. Sign in with the old password: "Invalid login credentials". Sign in with the new password: "synced". If Save password shows an error about reauthentication instead, stop here and tell Claude; do not try to work round it.
+14. **Gary's Change password.** Gary: pill, Change password, then Cancel: the form closes. (Change it for real only if Gary wants a new password.)
+
+Report the time of each step, and anything that looks wrong. Claude then checks the rows, links, Storage reads and journal replies on the server.
+
+---
+
 ## M1.1 Photo capture (SPEC.md 7A)
 
 **Status 24/10/26 1000 hrs: M1.1 done. Every item in SPEC 7A.6 passes: items 2 to 11 on v8 (0927 to 0936 hrs), item 1 and the Camera and Gallery sheet on v9 (0956 to 0958 hrs). `checks/static.cjs` 74 of 74, `checks/smoke.sql` 74 of 74. Three days inside the 27/10/26 cut-off.**

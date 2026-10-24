@@ -11,8 +11,10 @@
 //   journal-eric); the function reads its key only from TB_ANTHROPIC_API_KEY and uses no
 //   service key
 // - keep-alive workflow pings the project and key trip.html uses, daily, with no secret
-// - M1.1: photo constants, IndexedDB v3, no file deletes, 20 photos and 1 h cache in
-//   tb-journal, migration 0006 shape
+// - M1.1: photo constants, IndexedDB v3 (v4 from M1.2), no file deletes, 30 photos and 1 h
+//   cache in tb-journal, migration 0006 shape
+// - M1.2: stores partner and pphotos, shared pushed, partner rows never pushed, Change
+//   password via updateUser (10 characters minimum), migration 0008 shape
 'use strict';
 
 const fs = require('fs');
@@ -167,7 +169,7 @@ if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(
   const trip = read('trip.html');
   check(/const BUCKET = 'tb-photos';/.test(trip) && /const PHOTO_EDGE = 1280;/.test(trip) && /const PHOTO_QUALITY = 0\.82;/.test(trip),
     'photos: client uses bucket tb-photos, 1280 px long edge, JPEG 0.82');
-  check(/indexedDB\.open\('travelboard', 3\)/.test(trip) && /createObjectStore\('photos', \{ keyPath: 'id' \}\)/.test(trip), 'photos: IndexedDB v3 with store photos');
+  check(/indexedDB\.open\('travelboard', 4\)/.test(trip) && /createObjectStore\('photos', \{ keyPath: 'id' \}\)/.test(trip), 'photos: IndexedDB v4 keeps store photos');
   check(!/storage\.from\([^)]*\)\.remove\(/.test(trip) && !/method: 'DELETE'/.test(trip), 'photos: the client never deletes a file (rule 8)');
   if (exists(`${FN}/context.mjs`)) {
     const ctx = read(`${FN}/context.mjs`);
@@ -177,6 +179,23 @@ if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(
   check(/values \('tb-photos', 'tb-photos', false, 2097152, array\['image\/jpeg'\]\)/.test(m6)
     && (m6.match(/create policy tb_photos_(select|insert|update) on storage\.objects for (select|insert|update) to authenticated/g) || []).length === 3
     && !/for delete/.test(m6) && !/\banon\b[^.]*\bto\b|to anon/.test(m6), 'photos: 0006 makes a private 2 MB JPEG bucket and three own-folder policies, no delete, nothing for anon');
+}
+
+// ---------- M1.2 two travellers (SPEC.md 7B) ----------
+{
+  const trip = read('trip.html');
+  check(/createObjectStore\('partner', \{ keyPath: 'id' \}\)/.test(trip) && /createObjectStore\('pphotos', \{ keyPath: 'id' \}\)/.test(trip),
+    'M1.2: IndexedDB v4 adds stores partner and pphotos');
+  check(/'photo_to_claude', 'shared', 'updated_at', 'deleted_at'\]/.test(trip) && /k === 'shared' \? row\[k\] === true/.test(trip),
+    'M1.2: captures push shared, false when absent');
+  check(/sb\.rpc\('tb_partner_captures'\)/.test(trip) && !/idb\.byIndex\('partner', 'dirty'/.test(trip) && !/toServer\([^)]*partner/.test(trip.replace(/idb\.all\('partner'\)\)\.map\(\(r\) => Object\.assign\(toServer\(r\)/, '')),
+    'M1.2: partner rows come from tb_partner_captures and are never pushed');
+  check(/const PASSWORD_MIN = 10;/.test(trip) && /sb\.auth\.updateUser\(\{ password: a \}\)/.test(trip) && !/reauthenticate\(/.test(trip),
+    'M1.2: Change password sets at least 10 characters with updateUser as the user; no reauthentication workaround');
+  const m8 = exists('supabase/migrations/0008_two_travellers.sql') ? read('supabase/migrations/0008_two_travellers.sql') : '';
+  check(/alter policy tb_photos_select on storage\.objects/.test(m8) && !/drop (policy|table|function|schema)/i.test(m8)
+    && !/grant [^;]* to (anon|public)/i.test(m8) && (m8.match(/security definer/g) || []).length === 10,
+    'M1.2: 0008 alters tb_photos_select, drops nothing, grants nothing to anon, 10 definer functions');
 }
 
 // ---------- keep-alive workflow (SPEC.md 6.8 step 5) ----------

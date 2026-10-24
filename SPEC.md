@@ -1,7 +1,7 @@
 # travelboard: specification
 
 Owner: Gary Chan. Repo: `jeuron-hue/travelboard` (public). Written 04/10/26.
-Status: M0 Foundation done 04/10/26. M1 Capture done 10/10/26. M2 Journal done 23/10/26. Move to own project (6.8), then M1.1 Photo capture (cut-off 27/10/26), then M1.2 Two travellers (cut-off 31/10/26), in build from 23/10/26.
+Status: M0 Foundation done 04/10/26. M1 Capture done 10/10/26. M2 Journal done 23/10/26. Move to own project (6.8) done 24/10/26. M1.1 Photo capture done 24/10/26. M1.2 Two travellers (cut-off 31/10/26) in build from 24/10/26.
 
 This file is the source of record for what travelboard is and how it is built. M0, M1 and M2 are specified in full because they ship before Bangkok (09/11/26). M3 to M8 are skeletons, to be expanded one at a time after Bangkok using the friction log from that trip.
 
@@ -98,19 +98,21 @@ travelboard/
   manifest.webmanifest  PWA manifest (must be a separate file)
   icons/                icon-192.png, icon-512.png, icon-maskable-512.png
   vendor/               supabase-js pinned build, served locally so it works offline
-  prompts/journal.md    journal system prompt, bundled into tb-journal at deploy
+  prompts/journal.md    Gary's journal system prompt, bundled into tb-journal at deploy
+  prompts/journal-eric.md  Eric's (M1.2)
   supabase/
     migrations/         numbered SQL files, one per applied block
     functions/tb-journal/
       index.ts          the function
       context.mjs       system prompt and thread building, shared with the checks
-      prompt.ts         generated from prompts/journal.md by bundle-prompt.cjs
+      prompt.ts         generated from prompts/*.md by bundle-prompt.cjs
   .github/workflows/
     keepalive.yml       daily keep-alive request to project travelboard (6.8 step 5)
   checks/
     static.cjs          parse inline scripts, validate manifest, sw cache list matches files
     smoke.sql           RPC and grant smoke tests
-    headless/           Playwright tests of trip.html against an RPC mock (dev only, never shipped)
+    headless/           Playwright tests of trip.html against an RPC mock (dev only, never shipped):
+                        m1, m2, m11, m12 (two phones on one mock), fn (tb-journal under Deno)
   TESTS.md              manual test scripts, run on the Pixel
   SPEC.md               this file
   CLAUDE.md             standing brief for Claude Code
@@ -407,6 +409,7 @@ Added 23/10/26 on Gary's decision (D16); sharing model rewritten 24/10/26. Eric,
 - The pill and queue counts cover own rows only.
 - Export: own captures plus partner captures on the phone, with `owner_name` and `shared`.
 - Journal tab is unchanged in shape: the device user's own threads only.
+- **Change password** (in the pill panel, both users; added 24/10/26): the new password typed twice, at least 10 characters, set with `supabase.auth.updateUser({ password })` as the signed-in user. Needs a connection; not queued. Shows success or the server's own error. No server, migration or RPC change. If the project's "secure password change" setting makes the server ask for reauthentication, the error is shown and nothing works round it. A forgotten password stays a reset by Gary in the dashboard (no email: the addresses are synthetic).
 
 ### 7B.4 Journal
 
@@ -428,6 +431,7 @@ Added 23/10/26 on Gary's decision (D16); sharing model rewritten 24/10/26. Eric,
 10. Eric's journal uses his prompt, and on a day with captures from both, his reply can refer to one Gary shared by content. A capture Gary did not share is absent from the request to Claude (`fn.test.cjs`).
 11. An airplane-mode capture on Eric's phone syncs on reconnect and, shared, appears on Gary's phone after his next sync.
 12. `checks/static.cjs`, `checks/smoke.sql` and the M1, M1.1 and M2 headless suites pass; a new M1.2 headless suite passes.
+13. Change password: Eric changes his password on his phone, signs out, and signs back in with the new one; the old one is refused.
 
 ---
 
@@ -589,6 +593,8 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 24/10/26 7B.2, 7B.4, 4.2, 11: details settled at the M1.2 build (no change to what Gary decided). 0008 adds `tb_link_state(p_other)` (the four link states, used by `tb_whoami`, `tb_partner_add` and `tb_partner_remove`); `tb_can_read_photo` returns false rather than raising without `auth.uid()`, because it runs inside a Storage policy; `tb_photos_select` is changed with `alter policy`, not dropped. `tb_journal_turn` also returns `me` (display name and prompt key) and `own` per capture, so `tb-journal` picks the prompt and labels whose each capture is. `prompt.ts` bundles every `prompts/*.md` by file name. Eric's prompt drops Gary's date, time, unit and em-dash line along with his name (Eric tunes it). Client v10: the other person's captures sit in their own IndexedDB stores (`partner`, `pphotos`), so they can never be pushed. Headless: `m12.test.cjs` runs two phones on one mock.
+- 24/10/26 7B.3, 7B.5 item 13: Change password in the pill panel for both users (Gary's decision): typed twice, at least 10 characters, `updateUser` as the signed-in user, needs a connection, shows success or the server's error; no server change; a forgotten password stays a dashboard reset by Gary.
 - 24/10/26 7A.2: correction agreed with Gary after the v8 Pixel run. A plain `accept="image/*"` input opens the Google Photos picker on the Pixel, which has no camera, so "the Android chooser: camera or gallery" does not hold. Photo now opens a sheet with Camera (`capture="environment"`) and Gallery (the plain input). Client v9.
 - 24/10/26 D16, 5, 7B: M1.2 sharing model rewritten on Gary's decision, before the M1.2 build. Separate by default; each adds the other in the app and the link is live only when both have; per-capture "Share with" switch, default on while linked; captures from before linking stay unshared; unsharing or unlinking removes rows and photos from the other phone at the next sync. Schema: `travel.partner_adds` replaces `travel.partners`, `captures.shared`, `tb_partner_captures()` as a full set, `tb_can_read_photo` per capture. Journals private as before.
 - 24/10/26 D15, 7A.1, 7A.2, 7A.4, 7A.5, 7A.6 item 9 and new item 11, 7B.2, 7B.3, 7B.4: Gary's decision. Per-photo "Claude sees this" switch, default on, in migration 0007 (0005 and 0006 already applied); `tb_journal_turn` withholds the path of a switched-off photo. Photos to Claude per day raised from 20 to 30, counting switched-on photos only, combined across both travellers in M1.2; switched-off photos have no limit. M1.2's migration becomes 0008 and its client the release after M1.1's last.

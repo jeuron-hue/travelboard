@@ -73,8 +73,8 @@ const settle = (page) => page.waitForFunction(() => !syncing, null, { timeout: 1
   await settle(page);
 
   const APP_VERSION = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'trip.html'), 'utf8').match(/const APP_VERSION = (\d+);/)[1];
-  check(`K0 version v${APP_VERSION}, IndexedDB v3 with journal, jdays and photos stores`, (await text(page, '#s-version')) === 'v' + APP_VERSION
-    && await page.evaluate(async () => { const db = await idb.open(); return db.version === 3 && db.objectStoreNames.contains('photos') && db.objectStoreNames.contains('journal') && db.objectStoreNames.contains('jdays'); }));
+  check(`K0 version v${APP_VERSION}, IndexedDB v4 with journal, jdays, photos, partner and pphotos stores`, (await text(page, '#s-version')) === 'v' + APP_VERSION
+    && await page.evaluate(async () => { const db = await idb.open(); return db.version === 4 && db.objectStoreNames.contains('photos') && db.objectStoreNames.contains('journal') && db.objectStoreNames.contains('jdays') && db.objectStoreNames.contains('partner') && db.objectStoreNames.contains('pphotos'); }));
   check('K0 opens on the Captures tab', await page.evaluate(() => tab === 'captures') && (await shown(page, '#daybar')) && !(await shown(page, '#jbar')));
 
   // Two captures today, one tagged journal; one note on another day (pulled from "the server").
@@ -400,8 +400,8 @@ const settle = (page) => page.waitForFunction(() => !syncing, null, { timeout: 1
   await settle(pc);
   const up = await pc.evaluate(async () => ({ v: (await idb.open()).version, caps: await idb.all('captures'),
     sv: await meta.get('schema_version'), draft: await idb.get('drafts', 'new') }));
-  check('K12 upgrade v1 to v3: capture, draft and meta kept, schema_version 3', up.v === 3 && up.caps.length === 1
-    && up.caps[0].body === 'M1 capture' && up.sv === 3 && up.draft && up.draft.body === 'M1 draft');
+  check('K12 upgrade v1 to v4: capture, draft and meta kept, schema_version 4', up.v === 4 && up.caps.length === 1
+    && up.caps[0].body === 'M1 capture' && up.sv === 4 && up.draft && up.draft.body === 'M1 draft');
   // v6: data from before the move is from the old project, so the session is cleared and the pill asks to sign in.
   check('K12 v6: the pre-move session is cleared, nothing sent, pill "sign in, 1 queued"', !mockC.rows.size
     && (await pill(pc)) === 'sign in, 1 queued' && !(await pc.evaluate(() => localStorage.getItem('tb-auth'))), await pill(pc));

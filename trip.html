@@ -24,8 +24,25 @@
     shrunk on the phone to 1280 px JPEG, kept offline in IndexedDB, uploaded to the private
     Storage bucket tb-photos before its capture is pushed; thumbnails on rows; a photo in a
     draft survives a force-close; photos missing on this phone are downloaded when online.
+  - M1.2 Two travellers (SPEC.md 7B): Gary and Eric each on their own login and phone,
+    separate by default. The pill panel lists the other person with Add or Remove (live only
+    when both have added) and Change password. While linked, a capture has a "Share with"
+    switch, default on; shared captures of the other person are kept read-only on this phone
+    (with their photos, so they show offline), shown in the day view with a name label and
+    opened in a read-only view. Journals stay private.
 
   Change log (newest first)
+  - 24/10/26 v10. M1.2 Two travellers. IndexedDB version 4 adds stores partner (the other
+    person's shared captures, replaced as a whole from tb_partner_captures on every sync) and
+    pphotos (their photos, downloaded when online). Captures carry shared (false when absent),
+    pushed with them; the Share with switch shows on the capture and edit screens only while
+    the link is live, defaults on for a new capture, and is kept in the draft. tb_whoami is
+    stored as meta me (name, people, link states) on every sync. Pill panel: partner panel
+    (Add, Remove, state in words; needs a connection, not queued) and Change password (typed
+    twice, at least 10 characters, supabase.auth.updateUser as the signed-in user; needs a
+    connection; shows success or the server's error). Day view merges own and partner rows,
+    partner rows with a name chip and no sync chip, opening a read-only view. Export adds
+    partner captures with owner_name and shared. Pill and queue counts stay own rows only.
   - 24/10/26 v9. Photo (and Replace) opens a small sheet: Camera or Gallery (SPEC.md 7A.2,
     corrected 24/10/26). On the Pixel a plain image file input goes straight to the Google
     Photos picker, which has no camera, so Camera is its own input with capture="environment"
@@ -248,6 +265,18 @@
     display: flex; align-items: center; gap: 10px; min-height: 44px; color: var(--ink); font-size: 16px; cursor: pointer;
   }
   .claude-switch input { width: 24px; height: 24px; accent-color: var(--accent); margin: 0; }
+  #cap-share { padding: 4px 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
+  .chip.who { background: var(--good-bg); color: var(--good); }
+  .row.partner { border-style: dashed; }
+  #view-dlg .sheet { max-height: 85vh; overflow-y: auto; }
+  #view-dlg img { display: block; max-width: 100%; max-height: 50vh; margin: 8px 0; border-radius: 8px; }
+  #view-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
+  .meta-line { color: var(--muted); font-size: 15px; margin: 4px 0; }
+  .partner-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .partner-row span { flex: 1; }
+  form.pw { display: grid; gap: 8px; margin: 12px 0; }
+  form.pw input { min-height: 48px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--ground); }
+  .ok { color: var(--good); font-size: 15px; min-height: 1.2em; margin: 0; }
 
   #toast {
     position: fixed; left: 16px; right: 16px; z-index: 4;
@@ -407,6 +436,9 @@
       <button class="btn" id="cap-photo-remove" type="button">Remove</button>
     </div>
   </div>
+  <div id="cap-share" hidden>
+    <label class="claude-switch"><input id="cap-share-on" type="checkbox"> <span id="cap-share-label">Share</span></label>
+  </div>
   <textarea id="cap-body" maxlength="20000" autocomplete="off" spellcheck="true"
     enterkeyhint="enter" placeholder="Type, or tap the mic on the keyboard"></textarea>
   <div class="capfoot" id="cap-foot" hidden>
@@ -423,6 +455,17 @@
       <button class="btn" id="photo-gallery" type="button">Gallery</button>
       <button class="btn" id="photo-cancel" type="button">Cancel</button>
     </div>
+  </div>
+</dialog>
+
+<dialog id="view-dlg" aria-label="Shared capture">
+  <div class="sheet">
+    <h2 id="view-head">-</h2>
+    <p class="meta-line" id="view-meta"></p>
+    <img id="view-img" alt="Photo on this shared capture" hidden>
+    <p class="meta-line" id="view-nophoto" hidden>Photo not on this phone yet; it downloads on the next sync.</p>
+    <div id="view-body"></div>
+    <div class="actions"><button class="btn" id="view-close" type="button">Close</button></div>
   </div>
 </dialog>
 
@@ -448,16 +491,28 @@
       <div><dt>Signed in</dt><dd id="s-user">no</dd></div>
       <div><dt>Version</dt><dd id="s-version">-</dd></div>
     </dl>
+    <div id="partners"></div>
     <form class="signin" id="signin" hidden>
       <input id="email" type="email" autocomplete="username" placeholder="Email" required>
       <input id="password" type="password" autocomplete="current-password" placeholder="Password" required>
       <button class="primary" type="submit">Sign in to sync</button>
       <p class="err" id="signin-err"></p>
     </form>
+    <form class="pw" id="pw-form" novalidate hidden>
+      <input id="pw-new" type="password" autocomplete="new-password" placeholder="New password, at least 10 characters" minlength="10" required>
+      <input id="pw-again" type="password" autocomplete="new-password" placeholder="New password again" minlength="10" required>
+      <div class="actions">
+        <button class="btn" id="pw-save" type="submit">Save password</button>
+        <button class="btn" id="pw-cancel" type="button">Cancel</button>
+      </div>
+    </form>
+    <p class="err" id="pw-err"></p>
+    <p class="ok" id="pw-ok"></p>
     <div class="actions">
       <button class="btn" id="sync-now" type="button">Sync now</button>
       <button class="btn" id="export" type="button">Export</button>
       <button class="btn" id="theme" type="button">Theme</button>
+      <button class="btn" id="pw-open" type="button" hidden>Change password</button>
       <button class="btn" id="signout" type="button" hidden>Sign out</button>
       <button class="btn" id="close" type="button" autofocus>Close</button>
     </div>
@@ -469,7 +524,7 @@
 'use strict';
 
 // Bump together with CACHE_VERSION in sw.js on every release.
-const APP_VERSION = 9;
+const APP_VERSION = 10;
 
 const PROJECT_REF = 'nnnnonspfljdkrxstslw';           // Supabase project travelboard (SPEC.md D3, 6.8)
 const SUPABASE_URL = 'https://' + PROJECT_REF + '.supabase.co';
@@ -488,6 +543,7 @@ const JOURNAL_DAYS_LIMIT = 400;
 const BUCKET = 'tb-photos';          // private Storage bucket, own folder <uid>/ (SPEC.md 7A.1)
 const PHOTO_EDGE = 1280;            // long edge after shrinking on the phone (SPEC.md 7A.2)
 const PHOTO_QUALITY = 0.82;
+const PASSWORD_MIN = 10;            // Change password (SPEC.md 7B.3)
 
 const $ = (id) => document.getElementById(id);
 
@@ -548,13 +604,16 @@ const deviceTz = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 // server_ts from the last pull, used to skip unchanged days). v3 (M1.1): photos, one per
 // capture by capture id: { id, blob, w, h, bytes, uploaded (0 queued, 1 on the server),
 // at (when this blob was set, so an upload never confirms a photo replaced meanwhile) }.
+// v4 (M1.2): partner, the other person's shared captures as read-only mirrors (keyPath id,
+// index local_date; replaced as a whole on every sync, never dirty, never pushed), and
+// pphotos, their photos by capture id: { id, blob, w, h, bytes }.
 
 const idb = (() => {
   let dbp = null;
   function open() {
     if (dbp) return dbp;
     dbp = new Promise((resolve, reject) => {
-      const r = indexedDB.open('travelboard', 3);
+      const r = indexedDB.open('travelboard', 4);
       r.onupgradeneeded = () => {
         const db = r.result;
         if (!db.objectStoreNames.contains('captures')) {
@@ -574,6 +633,11 @@ const idb = (() => {
           const ph = db.createObjectStore('photos', { keyPath: 'id' });
           ph.createIndex('uploaded', 'uploaded');
         }
+        if (!db.objectStoreNames.contains('partner')) {
+          const pc = db.createObjectStore('partner', { keyPath: 'id' });
+          pc.createIndex('local_date', 'local_date');
+        }
+        if (!db.objectStoreNames.contains('pphotos')) db.createObjectStore('pphotos', { keyPath: 'id' });
       };
       r.onsuccess = () => {
         const db = r.result;
@@ -642,6 +706,10 @@ const idb = (() => {
       const db = await open();
       return result(db.transaction(store).objectStore(store).getAll());
     },
+    async count(store) {
+      const db = await open();
+      return result(db.transaction(store).objectStore(store).count());
+    },
     async keys(store) {
       const db = await open();
       return result(db.transaction(store).objectStore(store).getAllKeys());
@@ -702,10 +770,23 @@ try {
 
 const SERVER_FIELDS = ['id', 'body', 'kind', 'captured_at', 'tz', 'local_date', 'lat', 'lng',
   'accuracy_m', 'trip_id', 'place_id', 'photo_path', 'photo_w', 'photo_h', 'photo_bytes',
-  'photo_to_claude', 'updated_at', 'deleted_at'];
+  'photo_to_claude', 'shared', 'updated_at', 'deleted_at'];
 // photo_to_claude: the "Claude sees this" switch, true when absent (rows from before v8).
+// shared: the "Share with" switch, false when absent (rows from before v10, SPEC.md 7B.3).
 const toServer = (row) => Object.fromEntries(SERVER_FIELDS.map((k) =>
-  [k, k === 'photo_to_claude' ? row[k] !== false : row[k] === undefined ? null : row[k]]));
+  [k, k === 'photo_to_claude' ? row[k] !== false : k === 'shared' ? row[k] === true
+    : row[k] === undefined ? null : row[k]]));
+
+// ---------- the other traveller (SPEC.md 7B) ----------
+
+// meta "me": the last tb_whoami { uid, email, display_name, people: [{ uid, name, link }] },
+// refreshed on every sync. link: none | added_by_me | added_me | live. Offline the last
+// known state holds, so the Share with switch still shows while linked.
+let me = null;
+async function loadMe() { me = (await meta.get('me')) || null; return me; }
+const livePartners = () => ((me && me.people) || []).filter((p) => p.link === 'live');
+const linkedNow = () => livePartners().length > 0;
+const partnerNames = () => livePartners().map((p) => p.name).join(' and ');
 
 // ---------- capture rows: save, edit, delete, GPS ----------
 
@@ -723,6 +804,7 @@ function newCaptureRow(body, kind) {
     lat: null, lng: null, accuracy_m: null,
     trip_id: null, place_id: null,
     photo_path: null, photo_w: null, photo_h: null, photo_bytes: null, photo_to_claude: true,
+    shared: false,
     updated_at: iso,
     deleted_at: null,
     server_ts: null,
@@ -754,7 +836,7 @@ function requestGps(id) {
 
 // mode 'new' (draft key "new"), 'edit' (draft key = capture id) or 'journal' (the same
 // screen as the journal composer, draft key "journal:<local_date>", Save reads Send).
-const cap = { open: false, mode: null, row: null, kind: 'note', busy: false, jdate: null, photo: null, toClaude: true };
+const cap = { open: false, mode: null, row: null, kind: 'note', busy: false, jdate: null, photo: null, toClaude: true, share: false };
 const draftKey = () => (cap.mode === 'new' ? 'new' : cap.mode === 'journal' ? 'journal:' + cap.jdate : cap.row.id);
 const capBody = () => $('cap-body').value.trim().slice(0, BODY_MAX);
 
@@ -826,6 +908,7 @@ function draftRecord(open) {
   const ph = draftPhoto();
   if (ph !== undefined) d.photo = ph;
   if (cap.mode !== 'journal' && hasPhoto()) d.photo_to_claude = cap.toClaude;
+  if (cap.mode !== 'journal') d.shared = cap.share;
   return d;
 }
 
@@ -883,6 +966,14 @@ async function openCapture(mode, row, draft) {
   // "Claude sees this": the draft's value, else the saved capture's (on when absent), else on.
   cap.toClaude = draft && typeof draft.photo_to_claude === 'boolean' ? draft.photo_to_claude
     : row ? row.photo_to_claude !== false : true;
+  // "Share with": the draft's value, else the saved capture's (off when absent), else on for a
+  // new capture while linked (SPEC.md 7B.3). Shown only while the link is live.
+  await loadMe();
+  cap.share = draft && typeof draft.shared === 'boolean' ? draft.shared
+    : row ? row.shared === true : linkedNow();
+  $('cap-share').hidden = mode === 'journal' || !linkedNow();
+  $('cap-share-on').checked = cap.share;
+  $('cap-share-label').textContent = 'Share with ' + partnerNames();
   if (mode === 'journal') setPhoto(null);
   else if (draft && draft.photo) setPhoto(Object.assign({ state: 'new' }, draft.photo));
   else if (draft && draft.photo === null && mode === 'edit') setPhoto({ state: 'removed' });
@@ -980,6 +1071,8 @@ async function saveCapture() {
     if (cap.mode === 'new') {
       const row = newCaptureRow(body, cap.kind);
       if (ph.state === 'new') row.photo_to_claude = cap.toClaude;
+      // Made while not linked: unshared, and stays so unless switched on later in edit.
+      row.shared = linkedNow() ? cap.share : false;
       // Local write first, atomically with the photo and clearing the draft. Never waits on
       // GPS or network; the photo uploads on a later sync (SPEC.md 7A.3).
       await idb.tx(['captures', 'drafts', 'photos'], (t) => {
@@ -996,6 +1089,7 @@ async function saveCapture() {
     } else {
       const id = cap.row.id, kind = cap.kind;
       const toClaude = hasPhoto() ? cap.toClaude : true;
+      const linked = linkedNow(), share = cap.share;
       // Body, kind and photo only; captured_at, tz and local_date never change on edit.
       // A new photo replaces the old one (uploaded to the same path on the next sync); a
       // removed photo clears the four fields, and the file stays in Storage (SPEC.md 7A.2).
@@ -1004,9 +1098,12 @@ async function saveCapture() {
         const g = s.get(id);
         g.onsuccess = () => {
           const row = g.result;
-          const change = ph.state === 'new' || ph.state === 'removed' || (row && (row.photo_to_claude !== false) !== toClaude);
+          // The switch is on screen only while linked; otherwise the saved value stands.
+          const shared = linked ? share : !!(row && row.shared === true);
+          const change = ph.state === 'new' || ph.state === 'removed' || (row && (row.photo_to_claude !== false) !== toClaude)
+            || (row && (row.shared === true) !== shared);
           if (!row || (row.body === body && row.kind === kind && !change)) return;
-          const next = Object.assign({}, row, { body, kind, photo_to_claude: toClaude,
+          const next = Object.assign({}, row, { body, kind, photo_to_claude: toClaude, shared,
             updated_at: nextUpdatedAt(row.updated_at), dirty: 1 });
           if (ph.state === 'new') {
             t.objectStore('photos').put({ id, blob: ph.blob, w: ph.w, h: ph.h, bytes: ph.bytes, uploaded: 0, at });
@@ -1128,18 +1225,25 @@ async function handleEntry() {
 // ---------- export ----------
 
 async function exportCaptures() {
+  await loadMe();
   const rows = (await idb.all('captures')).sort((a, b) => (a.captured_at < b.captured_at ? -1 : 1));
-  const captures = rows.map((r) => Object.assign(toServer(r), {
+  const mine = rows.map((r) => Object.assign(toServer(r), {
+    owner_name: (me && me.display_name) || null,
     deleted: !!r.deleted_at,
     synced: !r.dirty,
     server_ts: r.server_ts || null
   }));
+  // The other person's shared captures on this phone (SPEC.md 7B.3), marked partner.
+  const theirs = (await idb.all('partner')).map((r) => Object.assign(toServer(r), {
+    owner_name: r.owner_name || null, shared: true, partner: true, deleted: false, synced: true, server_ts: r.server_ts || null
+  }));
+  const captures = mine.concat(theirs).sort((a, b) => (a.captured_at < b.captured_at ? -1 : 1));
   const now = new Date();
   const p = partsIn(now, deviceTz());
   const name = `travelboard-captures-${p.day}${p.month}${p.year.slice(2)}-${p.hour}${p.minute}.json`;
   const json = JSON.stringify({
     app: 'travelboard', app_version: APP_VERSION, exported_at: now.toISOString(),
-    device_tz: deviceTz(), count: captures.length, captures
+    device_tz: deviceTz(), count: captures.length, own: mine.length, partner: theirs.length, captures
   }, null, 2);
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
@@ -1167,12 +1271,13 @@ async function render() {
 
 async function renderCaptures() {
   const live = (await idb.all('captures')).filter((r) => !r.deleted_at);
+  const theirs = await idb.all('partner');        // the other person's shared captures (read-only)
   const today = todayLocal();
   if (followToday || !viewDay) viewDay = today;
   if (viewDay === today) followToday = true;
 
-  // Arrows step to the nearest day with captures; today is always reachable.
-  const days = [...new Set(live.map((r) => r.local_date).concat([today]))].sort();
+  // Arrows step to the nearest day with captures, own or shared; today is always reachable.
+  const days = [...new Set(live.concat(theirs).map((r) => r.local_date).concat([today]))].sort();
   const prev = days.filter((d) => d < viewDay).pop();
   const next = days.find((d) => d > viewDay);
   $('day-prev').disabled = !prev;
@@ -1184,8 +1289,10 @@ async function renderCaptures() {
 
   const here = deviceTz();
   const rows = live.filter((r) => r.local_date === viewDay)
+    .concat(theirs.filter((r) => r.local_date === viewDay).map((r) => Object.assign({}, r, { partner: true })))
     .sort((a, b) => (a.captured_at < b.captured_at ? 1 : a.captured_at > b.captured_at ? -1 : 0));
   const photoIds = new Set(await idb.keys('photos'));
+  const pphotoIds = new Set(await idb.keys('pphotos'));
   for (const u of thumbUrls) URL.revokeObjectURL(u);
   thumbUrls = [];
   const ul = $('records');
@@ -1194,8 +1301,9 @@ async function renderCaptures() {
     const li = document.createElement('li');
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'row';
+    btn.className = r.partner ? 'row partner' : 'row';
     btn.dataset.id = r.id;
+    if (r.partner) btn.dataset.partner = '1';
 
     const l1 = document.createElement('div');
     l1.className = 'line1';
@@ -1221,13 +1329,20 @@ async function renderCaptures() {
       gps.setAttribute('aria-label', 'GPS fix recorded');
       l1.append(gps);
     }
-    // A photo still waiting to upload keeps the row queued even once its text is on the server.
-    const local = photoIds.has(r.id) ? await idb.get('photos', r.id) : null;
-    const queued = !!r.dirty || !!(local && !local.uploaded);
-    const chip = document.createElement('span');
-    chip.className = 'chip ' + (queued ? 'queued' : 'synced');
-    chip.textContent = queued ? 'queued' : 'synced';
-    l1.append(chip);
+    let local;
+    if (r.partner) {
+      // The other person's: a name label instead of a sync chip (it is never queued here).
+      local = pphotoIds.has(r.id) ? await idb.get('pphotos', r.id) : null;
+      l1.append(el('span', 'chip who', r.owner_name || 'shared'));
+    } else {
+      // A photo still waiting to upload keeps the row queued even once its text is on the server.
+      local = photoIds.has(r.id) ? await idb.get('photos', r.id) : null;
+      const queued = !!r.dirty || !!(local && !local.uploaded);
+      const chip = document.createElement('span');
+      chip.className = 'chip ' + (queued ? 'queued' : 'synced');
+      chip.textContent = queued ? 'queued' : 'synced';
+      l1.append(chip);
+    }
 
     const l2 = document.createElement('div');
     l2.className = 'line2';
@@ -1256,6 +1371,28 @@ async function renderCaptures() {
   }
   $('empty').textContent = viewDay === today ? 'Nothing captured today yet.' : 'No captures on this day.';
   $('empty').hidden = rows.length > 0;
+}
+
+// The other person's shared capture, read-only: text, photo, time, place. No Edit, no
+// Delete, no switches (SPEC.md 7B.3).
+let viewUrl = null;
+async function openPartnerView(id) {
+  const r = await idb.get('partner', id);
+  if (!r) return;
+  const ph = await idb.get('pphotos', id);
+  if (viewUrl) { URL.revokeObjectURL(viewUrl); viewUrl = null; }
+  const city = r.tz !== deviceTz() ? ' ' + cityOf(r.tz) : '';
+  $('view-head').textContent = `${r.owner_name || 'Shared'}, ${fmtDayLabel(r.local_date)}`;
+  $('view-meta').textContent = [`${fmtTime(r.captured_at, r.tz)}${city}`, r.kind,
+    r.lat != null && r.lng != null ? `GPS ${Number(r.lat).toFixed(5)}, ${Number(r.lng).toFixed(5)}` +
+      (r.accuracy_m != null ? ` (${Math.round(r.accuracy_m)} m)` : '') : 'no GPS'].join(', ');
+  if (ph) { viewUrl = URL.createObjectURL(ph.blob); $('view-img').src = viewUrl; }
+  else $('view-img').removeAttribute('src');
+  $('view-img').hidden = !ph;
+  $('view-nophoto').hidden = !!ph || !r.photo_path;
+  $('view-body').textContent = r.body || '';
+  $('view-dlg').dataset.id = id;
+  $('view-dlg').showModal();
 }
 
 // ---------- journal (SPEC.md 8): one thread per local day ----------
@@ -1398,8 +1535,12 @@ async function renderJournal() {
     if (it.role === 'user' && jInflight.has(it.id)) ul.append(el('li', 'typing', 'Claude is replying'));
   }
   if (!items.length) {
-    $('j-empty').textContent = 'No messages yet. Tap Write to tell Claude about the day. ' + (caps.length
-      ? `It will see your ${caps.length} capture${caps.length === 1 ? '' : 's'} from this day.`
+    const shared = (await idb.byIndex('partner', 'local_date', jDay)).length;
+    const parts = [];
+    if (caps.length) parts.push(`your ${caps.length} capture${caps.length === 1 ? '' : 's'}`);
+    if (shared) parts.push(`${shared} shared with you`);
+    $('j-empty').textContent = 'No messages yet. Tap Write to tell Claude about the day. ' + (parts.length
+      ? `It will see ${parts.join(' and ')} from this day.`
       : 'Nothing was captured on this day.');
   }
   $('j-empty').hidden = items.length > 0;
@@ -1682,6 +1823,60 @@ async function downloadPhotos() {
   }
 }
 
+// ---------- the other traveller's shared captures (SPEC.md 7B.3) ----------
+
+// tb_whoami (name, people, link states) into meta me, then tb_partner_captures, the full set
+// visible now, replaces the partner store. A row no longer in the set leaves the phone with
+// its photo, so unsharing and unlinking need nothing else. A photo whose file changed (a
+// Replace by its owner) or was removed is dropped and, if still there, downloaded again.
+async function pullPartners() {
+  const who = await sb.rpc('tb_whoami');
+  if (who.error) throw who.error;
+  me = who.data || null;
+  await meta.set('me', me);
+  const { data, error } = await sb.rpc('tb_partner_captures');
+  if (error) throw error;
+  const rows = Array.isArray(data) ? data : [];
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  await idb.tx(['partner', 'pphotos'], (t) => {
+    const ps = t.objectStore('partner');
+    ps.clear();
+    for (const r of rows) ps.put(r);
+    const cur = t.objectStore('pphotos').openCursor();
+    cur.onsuccess = () => {
+      const c = cur.result;
+      if (!c) return;
+      const r = byId.get(c.key);
+      if (!r || !r.photo_path || (r.photo_bytes != null && c.value.bytes !== r.photo_bytes)) c.delete();
+      c.continue();
+    };
+  });
+}
+
+// Shared photos not yet on this phone, downloaded as the user (the tb_photos_select policy
+// admits a shared photo of a live partner), so they show offline afterwards.
+async function downloadPartnerPhotos() {
+  const have = new Set(await idb.keys('pphotos'));
+  for (const r of (await idb.all('partner')).filter((x) => x.photo_path && !have.has(x.id))) {
+    const { data, error } = await sb.storage.from(BUCKET).download(r.photo_path);
+    if (error || !data) {
+      console.warn('shared photo download failed', r.photo_path, error);
+      if (isNetworkError(error)) return;
+      continue;
+    }
+    const blob = data.type === 'image/jpeg' ? data : new Blob([data], { type: 'image/jpeg' });
+    // Kept only while its capture is still shared here (an unshare can land meanwhile).
+    await idb.tx(['partner', 'pphotos'], (t) => {
+      const g = t.objectStore('partner').get(r.id);
+      g.onsuccess = () => {
+        if (g.result && g.result.photo_path === r.photo_path) {
+          t.objectStore('pphotos').put({ id: r.id, blob, w: r.photo_w, h: r.photo_h, bytes: blob.size });
+        }
+      };
+    });
+  }
+}
+
 async function pull() {
   // pull_cursor is {server_ts, id}. server_ts stays the exact string the server returned:
   // turning it into a Date would drop the microseconds and replay the same page.
@@ -1820,8 +2015,10 @@ async function sync() {
     await pushSuffixes();
     await sendJournal(s);
     await pull();
+    await pullPartners();
     await pullJournal();
     await downloadPhotos();
+    await downloadPartnerPhotos();
     if (photoError) {
       // Everything else synced; the photo stays queued and the 30 s retry tries it again.
       syncState.phase = isNetworkError(photoError) ? 'offline' : isAuthError(photoError) ? 'signin' : 'error';
@@ -1852,6 +2049,84 @@ async function renderAuth() {
   $('s-user').textContent = s ? (s.user && s.user.email) || 'yes' : 'no';
   $('signin').hidden = !!s;
   $('signout').hidden = !s;
+  $('pw-open').hidden = !s || !$('pw-form').hidden;
+  if (!s) { $('pw-form').hidden = true; }
+  await renderPartners(s);
+}
+
+// Partner panel (SPEC.md 7B.3): the other people from the last tb_whoami, the link state in
+// words, Add or Remove. Add and Remove need a connection; they are not queued.
+const LINK_TEXT = {
+  none: (n) => `Not linked with ${n}.`,
+  added_by_me: (n) => `You added ${n}. Waiting for ${n} to add you`,
+  added_me: (n) => `${n} added you. Add him to link`,
+  live: (n) => `Linked with ${n}`
+};
+async function renderPartners(s) {
+  await loadMe();
+  const box = $('partners');
+  box.replaceChildren();
+  const signedIn = s !== undefined ? !!s : !!(await session().catch(() => null));
+  if (!signedIn || !me || !(me.people || []).length) {
+    if (signedIn) box.append(el('p', 'hint', 'The other traveller shows here after the next sync.'));
+    return;
+  }
+  for (const p of me.people) {
+    const row = el('div', 'partner-row');
+    row.dataset.uid = p.uid;
+    row.append(el('span', 'partner-state', (LINK_TEXT[p.link] || LINK_TEXT.none)(p.name)));
+    const mine = p.link === 'added_by_me' || p.link === 'live';
+    const b = el('button', 'btn', mine ? 'Remove' : `Add ${p.name}`);
+    b.type = 'button';
+    b.dataset.partnerAction = mine ? 'remove' : 'add';
+    b.dataset.uid = p.uid;
+    b.dataset.name = p.name;
+    row.append(b);
+    box.append(row);
+  }
+  box.append(el('p', 'err', ''));
+}
+
+async function partnerAction(action, uid, name) {
+  const msg = $('partners').querySelector('.err');
+  if (msg) msg.textContent = '';
+  if (action === 'remove' && !confirm(`Remove ${name}? Your shared captures leave ${name}'s phone, and ${name}'s leave this one, at the next sync.`)) return;
+  if (!sb || !navigator.onLine || !(await reachable())) {
+    if (msg) msg.textContent = 'Needs a connection. Try again when you have signal.';
+    return;
+  }
+  const { error } = await sb.rpc(action === 'add' ? 'tb_partner_add' : 'tb_partner_remove', { p_uid: uid });
+  if (error) { if (msg) msg.textContent = error.message || String(error); return; }
+  const who = await sb.rpc('tb_whoami');
+  if (!who.error) { me = who.data; await meta.set('me', me); }
+  await renderPartners();
+  sync();
+}
+
+// Change password (SPEC.md 7B.3): typed twice, at least PASSWORD_MIN characters, set as the
+// signed-in user. Needs a connection; not queued. Shows success or the server's own error.
+async function changePassword() {
+  $('pw-err').textContent = '';
+  $('pw-ok').textContent = '';
+  const a = $('pw-new').value, b = $('pw-again').value;
+  if (a.length < PASSWORD_MIN) { $('pw-err').textContent = `At least ${PASSWORD_MIN} characters.`; return; }
+  if (a !== b) { $('pw-err').textContent = 'The two passwords differ.'; return; }
+  if (!sb) { $('pw-err').textContent = 'Sync library failed to load.'; return; }
+  if (!navigator.onLine || !(await reachable())) { $('pw-err').textContent = 'Needs a connection. Change it when you have signal.'; return; }
+  $('pw-save').disabled = true;
+  try {
+    const { error } = await sb.auth.updateUser({ password: a });
+    if (error) { $('pw-err').textContent = error.message || String(error); return; }
+    $('pw-new').value = '';
+    $('pw-again').value = '';
+    $('pw-form').hidden = true;
+    $('pw-ok').textContent = 'Password changed. Use the new one next time you sign in.';
+    await renderAuth();
+  } catch (e) {
+    $('pw-err').textContent = (e && e.message) || String(e);
+  } finally {
+    $('pw-save').disabled = false;
+  }
 }
 
 $('signin').addEventListener('submit', async (ev) => {
@@ -2055,8 +2330,26 @@ $('cap-photo-remove').addEventListener('click', () => { removePhoto(); });
 $('cap-photo-claude').addEventListener('change', () => { cap.toClaude = $('cap-photo-claude').checked; writeDraft(); });
 $('records').addEventListener('click', (ev) => {
   const row = ev.target.closest('.row');
-  if (row && !cap.open) openEdit(row.dataset.id).catch(fail('Could not open capture'));
+  if (!row || cap.open) return;
+  if (row.dataset.partner) openPartnerView(row.dataset.id).catch(fail('Could not open capture'));
+  else openEdit(row.dataset.id).catch(fail('Could not open capture'));
 });
+$('view-close').addEventListener('click', () => $('view-dlg').close());
+$('view-dlg').addEventListener('close', () => { if (viewUrl) { URL.revokeObjectURL(viewUrl); viewUrl = null; } });
+$('cap-share-on').addEventListener('change', () => { cap.share = $('cap-share-on').checked; writeDraft(); });
+$('partners').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-partner-action]');
+  if (b) partnerAction(b.dataset.partnerAction, b.dataset.uid, b.dataset.name).catch(fail('Link change failed'));
+});
+$('pw-open').addEventListener('click', () => {
+  $('pw-err').textContent = ''; $('pw-ok').textContent = '';
+  $('pw-form').hidden = false; $('pw-open').hidden = true; $('pw-new').focus();
+});
+$('pw-cancel').addEventListener('click', () => {
+  $('pw-new').value = ''; $('pw-again').value = ''; $('pw-err').textContent = '';
+  $('pw-form').hidden = true; renderAuth();
+});
+$('pw-form').addEventListener('submit', (ev) => { ev.preventDefault(); changePassword(); });
 $('day-prev').addEventListener('click', () => {
   const d = $('day-prev').dataset.day;
   if (d) { viewDay = d; followToday = false; render(); }
@@ -2074,7 +2367,7 @@ setInterval(() => {
     render().then(updateDraftNote);
   }
 }, 60000);
-$('status').addEventListener('click', () => { renderAuth(); $('settings').showModal(); });
+$('status').addEventListener('click', () => { $('pw-ok').textContent = ''; $('pw-err').textContent = ''; renderAuth(); $('settings').showModal(); });
 $('close').addEventListener('click', () => $('settings').close());
 $('sync-now').addEventListener('click', () => sync());
 window.addEventListener('online', () => { syncState.phase = 'checking'; renderStatus(); sync(); });
@@ -2089,7 +2382,8 @@ if (sb) sb.auth.onAuthStateChange(() => { renderAuth(); });
   $('s-version').textContent = 'v' + APP_VERSION;
   await idb.open();
   await checkProject();               // before the first sync and before schema_version is written
-  if ((await meta.get('schema_version')) !== 3) await meta.set('schema_version', 3);
+  if ((await meta.get('schema_version')) !== 4) await meta.set('schema_version', 4);
+  await loadMe();
   // A reload while the capture screen was up leaves its history entry on top: pop it.
   popCaptureState();
   if (popWait) await popWait;

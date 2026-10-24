@@ -105,9 +105,9 @@ async function save(page) {
   await settle(page);
   const version = await page.$eval('#s-version', (e) => e.textContent);
   const APP = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'trip.html'), 'utf8').match(/const APP_VERSION = (\d+);/)[1];
-  check(`P0 v${APP}, IndexedDB v3 with a photos store indexed on uploaded`, version === 'v' + APP && await page.evaluate(async () => {
+  check(`P0 v${APP}, IndexedDB v4 with a photos store indexed on uploaded`, version === 'v' + APP && await page.evaluate(async () => {
     const db = await idb.open();
-    return db.version === 3 && db.objectStoreNames.contains('photos') && db.transaction('photos').objectStore('photos').indexNames.contains('uploaded');
+    return db.version === 4 && db.objectStoreNames.contains('photos') && db.transaction('photos').objectStore('photos').indexNames.contains('uploaded');
   }), version);
 
   const big = await makeImage(page, 4000, 3000, 'image/jpeg');

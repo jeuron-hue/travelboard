@@ -272,11 +272,13 @@ function addJournal(m) {
   };
 }
 
-async function attachMock(ctx, m) {
+// phone (optional, M1.2): { offline } for this browser context alone, so one phone can be in
+// airplane mode while the other syncs. m.offline still takes every phone off the network.
+async function attachMock(ctx, m, phone) {
   const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET,POST,OPTIONS' };
   await ctx.route(SUPA + '/**', async (route) => {
     const req = route.request();
-    if (m.offline) return route.abort('internetdisconnected');
+    if (m.offline || (phone && phone.offline)) return route.abort('internetdisconnected');
     if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
     const u = new URL(req.url());
     if (u.pathname === '/auth/v1/health') return route.fulfill({ status: 200, headers: cors, body: '{}' });
