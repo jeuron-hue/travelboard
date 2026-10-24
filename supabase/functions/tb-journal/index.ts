@@ -8,9 +8,10 @@
 //
 // Steps: store the user turn (idempotent) -> if a reply exists, return it with no API
 // call -> else download the day's switched-on photos as the user (most recent 30, 7A.4,
-// own and shared together) -> build the system prompt (the caller's own: prompts/<key>.md,
-// key from travel.people.journal_prompt, 7B.4), the day's context block (own captures and
-// those a live partner shared, each labelled with whose it is, and photos, with a
+// own and shared together) -> build the system prompt (the caller's own: his custom text
+// when set in the app, 7C.5, else prompts/<key>.md, key from travel.people.journal_prompt,
+// 7B.4), the day's context block (own captures and those a live partner shared, each
+// labelled with whose it is and its place name or coordinates, and photos, with a
 // prompt-cache breakpoint after the last one) and the thread (last 40 turns, the caller's
 // own) -> Claude -> store the reply once, with token and cache counts -> return it.
 //
@@ -19,6 +20,11 @@
 // keeps the user turn and offers Retry.
 //
 // Change log (newest first)
+// - 24/10/26 M1.3 Look and place (SPEC.md 7C.2a, 7C.4, 7C.5, migration 0009). The system prompt
+//   is the caller's journal_prompt_custom when set (tb_journal_turn me), otherwise the bundled
+//   prompts/<key>.md as before; with custom text set, an unknown key no longer matters. Each
+//   capture is labelled with its place name when the user named it, coordinates otherwise; no
+//   kind label on captures or photo labels any more.
 // - 24/10/26 M1.2 Two travellers (SPEC.md 7B.4, migration 0008). The system prompt is the
 //   caller's: tb_journal_turn returns me.journal_prompt, the key into PROMPTS (prompts/*.md);
 //   an unknown key fails with no_prompt and no Claude call. The context lists the caller's
@@ -35,7 +41,7 @@
 
 import Anthropic from 'npm:@anthropic-ai/sdk@0.127.0';
 import { PROMPTS } from './prompt.ts';
-import { buildContext, buildMessages, buildSystem, photosToSend } from './context.mjs';
+import { buildContext, buildMessages, buildSystem, photosToSend, pickPrompt } from './context.mjs';
 
 const MODEL = 'claude-sonnet-5-5';
 const MAX_TOKENS = 1500;          // SPEC.md 8.3 step 6, 8.6
@@ -116,7 +122,8 @@ Deno.serve(async (req) => {
     const key = Deno.env.get('TB_ANTHROPIC_API_KEY');
     if (!key) return fail(502, 'no_key', 'TB_ANTHROPIC_API_KEY is not set in the Edge Function secrets.');
     const promptKey = turn.me && turn.me.journal_prompt;
-    const prompt = typeof promptKey === 'string' && Object.hasOwn(PROMPTS, promptKey) ? PROMPTS[promptKey] : null;
+    const bundled = typeof promptKey === 'string' && Object.hasOwn(PROMPTS, promptKey) ? PROMPTS[promptKey] : null;
+    const prompt = pickPrompt(turn.me && turn.me.journal_prompt_custom, bundled);
     if (!prompt) return fail(502, 'no_prompt', `No journal prompt "${promptKey}" in this deploy of tb-journal.`);
 
     // Step 4 (7A.4): the day's photos, downloaded as the caller, so Storage applies the

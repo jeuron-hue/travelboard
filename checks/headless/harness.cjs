@@ -11,6 +11,11 @@
 //   shared captures, tb_partner_captures, tb_whoami with link states, journal rows per owner,
 //   a partner's shared photo readable through the Storage mock; GoTrue password sign-in
 //   and password change (PUT /auth/v1/user), with a switch that demands reauthentication
+// - M1.3 (migration 0009): place_name on captures (trimmed, blank as null, over 120 refused,
+//   absent keeps the stored value), journal_prompt_custom per person with tb_prompt_get and
+//   tb_prompt_set (own row only), carried to the simulated tb-journal through me
+// - OpenStreetMap Nominatim reverse geocoding mock (7C.4): counts requests, switchable to fail
+//   or return nothing
 // - browser context setup: timezone, fake session (Gary's or Eric's), controllable geolocation stub
 // Needs the dev dependency in package.json (npm install here) or NODE_PATH pointing at
 // an existing playwright install. Chromium: npx playwright install chromium.
@@ -56,7 +61,17 @@ function makeMock() {
   };
   m.pushLog = [];               // every row as pushed: { id, photo_path, at }
   // M1.2: people, adds, links. Gary and Eric exist from the start, not linked.
-  m.people = new Map([[UID, { name: 'Gary', prompt: 'journal' }], [ERIC_UID, { name: 'Eric', prompt: 'journal-eric' }]]);
+  m.people = new Map([[UID, { name: 'Gary', prompt: 'journal', custom: null }], [ERIC_UID, { name: 'Eric', prompt: 'journal-eric', custom: null }]]);
+  // Migration 0009: the caller's own prompt row only.
+  m.promptGet = (uid = UID) => { const p = m.people.get(uid); return { journal_prompt: p ? p.prompt : null, journal_prompt_custom: p ? p.custom : null }; };
+  m.promptSet = (text, uid = UID) => {
+    const p = m.people.get(uid);
+    if (!p) { const e = new Error('caller is not a person in travelboard'); e.code = '42501'; throw e; }
+    const t = text == null ? null : String(text).trim() || null;
+    if (t && [...t].length > 4000) throw new Error('journal prompt longer than 4000 characters');
+    p.custom = t;
+    return m.promptGet(uid);
+  };
   m.adds = new Map();           // 'adder|added' -> { removed_at }
   const added = (a, b) => { const x = m.adds.get(a + '|' + b); return !!x && !x.removed_at; };
   m.linked = (a, b) => added(a, b) && added(b, a);
@@ -96,11 +111,15 @@ function makeMock() {
       if (typeof p.body === 'string' && [...p.body].length > 20000) throw new Error('body too long');
       if (!p.tz) throw new Error('tz required');
       if (!['note', 'journal'].includes(p.kind || 'note')) throw new Error('bad kind');
+      const place = typeof p.place_name === 'string' ? p.place_name.trim() || null : null;
+      if (place && [...place].length > 120) throw new Error('place_name longer than 120 characters');
       const ex = m.rows.get(p.id);
       if (!ex || Date.parse(ex.updated_at) < Date.parse(p.updated_at)) {
         const claude = p.photo_to_claude == null ? (ex ? ex.photo_to_claude !== false : true) : !!p.photo_to_claude;
         const shared = p.shared == null ? (ex ? ex.shared === true : false) : !!p.shared;
-        const row = Object.assign({}, p, { owner: uid, photo_to_claude: claude, shared, server_ts: ts });
+        // 0009: a row without place_name (an app from before M1.3) keeps the stored value.
+        const place_name = 'place_name' in p ? place : (ex ? ex.place_name || null : null);
+        const row = Object.assign({}, p, { owner: uid, photo_to_claude: claude, shared, place_name, server_ts: ts });
         m.rows.set(p.id, row);
         return { id: p.id, applied: true, server_ts: ts };
       }
@@ -205,7 +224,7 @@ function addJournal(m) {
       .map((c) => Object.assign(pub(c), { photo_path: c.photo_to_claude === false ? null : (c.photo_path || null),
         owner_name: (m.people.get(c.owner) || {}).name || null, own: c.owner === uid }));
     const me = m.people.get(uid);
-    return { user: pub(u), reply: null, me: me ? { display_name: me.name, journal_prompt: me.prompt } : null, thread, captures };
+    return { user: pub(u), reply: null, me: me ? { display_name: me.name, journal_prompt: me.prompt, journal_prompt_custom: me.custom || null } : null, thread, captures };
   };
   m.reply = (p, uid = UID) => {
     const parent = m.jrows.get(p.reply_to);
@@ -260,7 +279,7 @@ function addJournal(m) {
       const o = m.objects.get(cp.photo_path);
       images.set(id, o ? o.bytes.toString('base64') : null);
     }
-    const system = c.buildSystem('PROMPT ' + turn.me.journal_prompt);
+    const system = c.buildSystem(c.pickPrompt(turn.me.journal_prompt_custom, 'PROMPT ' + turn.me.journal_prompt));
     const contextBlocks = c.buildContext(turn.user.local_date, turn.captures, images, turn.me.display_name);
     const messages = c.buildMessages(turn.thread, contextBlocks);
     const context = contextBlocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
@@ -360,6 +379,8 @@ async function attachMock(ctx, m, phone) {
       }
       if (u.pathname === '/rest/v1/rpc/tb_partner_add') return json(200, m.partnerAdd(body.p_uid, caller));
       if (u.pathname === '/rest/v1/rpc/tb_partner_remove') return json(200, m.partnerRemove(body.p_uid, caller));
+      if (u.pathname === '/rest/v1/rpc/tb_prompt_get') return json(200, m.promptGet(caller));
+      if (u.pathname === '/rest/v1/rpc/tb_prompt_set') return json(200, m.promptSet(body.p_text, caller));
     } catch (e) { return json(e.code === '42501' ? 403 : 400, { code: e.code || '22023', message: e.message }); }
     return json(404, { message: 'not mocked: ' + u.pathname });
   });

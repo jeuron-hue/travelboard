@@ -30,12 +30,20 @@ export function fmtLocalTime(iso, tz) {
 export const MAX_PHOTOS = 30;      // SPEC.md 7A.4: the most recent 30 switched-on photos of the day go in as images
 export const CACHE_TTL = '1h';     // an evening's turns can be more than 5 min apart (SPEC.md 7A.4)
 
-// System prompt: the caller's journal contract, prompts/<key>.md (journal for Gary,
-// journal-eric for Eric, 7B.4). The day's context goes in a
-// block before the thread (buildContext), so the system prompt is the same every day.
+// System prompt: the caller's own text when he has set one in the app (journal_prompt_custom,
+// SPEC.md 7C.5), otherwise his bundled prompts/<key>.md (journal for Gary, journal-eric for
+// Eric, 7B.4). The day's context goes in a block before the thread (buildContext), so an edit
+// to the prompt can never remove the captures, and the system prompt is the same every day.
+export function pickPrompt(custom, bundled) {
+  return typeof custom === 'string' && custom.trim() ? custom : bundled;
+}
 export function buildSystem(prompt) {
   return String(prompt).trim();
 }
+
+// A place name the user chose goes into an XML-ish attribute: escape what would break it.
+const attr = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const placeName = (c) => (typeof c.place_name === 'string' && c.place_name.trim() ? c.place_name.trim() : '');
 
 // A photo Claude may see: it has a path and its switch is on. tb_journal_turn already
 // withholds the path of a switched-off photo (migration 0007); the switch is checked here
@@ -49,8 +57,8 @@ export function photosToSend(captures) {
   return (captures || []).filter(forClaude).map((c) => c.id).slice(-MAX_PHOTOS);
 }
 
-// The day's context as content blocks, placed before the thread (SPEC.md 7A.4, 7B.4): the day,
-// every capture with its local time, kind, place and text, then each photo sent as an image,
+// The day's context as content blocks, placed before the thread (SPEC.md 7A.4, 7B.4, 7C.4): the
+// day, every capture with its local time, place and text, then each photo sent as an image,
 // labelled with its capture. A photo beyond the 30 is listed as "not shown"; one that failed
 // to download as "could not be loaded". The last block carries the cache breakpoint, so the
 // later turns of the evening read the images from cache.
@@ -60,6 +68,8 @@ export function photosToSend(captures) {
 // name: the caller's display name (tb_journal_turn me.display_name). From M1.2 the captures can
 // include those a live partner shared (own false, owner_name the partner's name); then every
 // capture says whose it is (by="..."), so Claude never takes a partner's note as the caller's.
+// From M1.3 a capture carries no kind label (7C.2a), and its place is its place_name when the
+// user named it (place="..."), otherwise its coordinates (location="..."), otherwise nothing.
 export function buildContext(localDate, captures, images, name) {
   const imgs = images || new Map();
   const me = String(name || 'Gary');
@@ -67,9 +77,10 @@ export function buildContext(localDate, captures, images, name) {
   const whose = (c) => (c.own === false ? String(c.owner_name || 'their partner') : me);
   const others = [...new Set(caps.filter((c) => c.own === false).map(whose))];
   const list = caps.map((c, i) => {
-    const where = c.lat != null && c.lng != null
-      ? `${Number(c.lat).toFixed(5)}, ${Number(c.lng).toFixed(5)}` +
-        (c.accuracy_m != null ? ` (within ${Math.round(c.accuracy_m)} m)` : '')
+    const named = placeName(c);
+    const where = named ? ` place="${attr(named)}"` : c.lat != null && c.lng != null
+      ? ` location="${Number(c.lat).toFixed(5)}, ${Number(c.lng).toFixed(5)}` +
+        (c.accuracy_m != null ? ` (within ${Math.round(c.accuracy_m)} m)` : '') + '"'
       : '';
     let photo = '';
     if (forClaude(c)) {
@@ -77,7 +88,7 @@ export function buildContext(localDate, captures, images, name) {
       photo = !imgs.has(c.id) ? ` photo="${at}, not shown"` : imgs.get(c.id) === null ? ` photo="${at}, could not be loaded"` : ' photo="shown below"';
     }
     const by = others.length ? ` by="${whose(c)}"` : '';
-    return `<capture n="${i + 1}" time="${fmtLocalTime(c.captured_at, c.tz)}"${by} kind="${c.kind}"${where ? ` location="${where}"` : ''}${photo}>\n` +
+    return `<capture n="${i + 1}" time="${fmtLocalTime(c.captured_at, c.tz)}"${by}${where}${photo}>\n` +
       `${String(c.body || '').trim() || '(no text)'}\n</capture>`;
   });
   const shared = others.join(' and ');
@@ -95,7 +106,8 @@ export function buildContext(localDate, captures, images, name) {
     if (!data) return;
     const text = String(c.body || '').trim();
     const by = others.length ? ` (by ${whose(c)})` : '';
-    blocks.push({ type: 'text', text: `Photo from capture ${i + 1}${by}, ${fmtLocalTime(c.captured_at, c.tz)}, ${c.kind}: ${text || '(no text)'}` });
+    const at = placeName(c) ? `, at ${placeName(c)}` : '';
+    blocks.push({ type: 'text', text: `Photo from capture ${i + 1}${by}, ${fmtLocalTime(c.captured_at, c.tz)}${at}: ${text || '(no text)'}` });
     blocks.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } });
   });
   blocks[blocks.length - 1].cache_control = { type: 'ephemeral', ttl: CACHE_TTL };

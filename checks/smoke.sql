@@ -5,7 +5,9 @@
 -- "Claude sees this" switch (migration 0007, SPEC.md 7A.6 item 11). T1 to T14 cover M1.2 (migration
 -- 0008, SPEC.md 7B.5 items 1, 6, 7, 9 and the RPC side of 2, 4, 5, 8, 10) with three synthetic
 -- users A, B and C inserted into auth.users and travel.people inside the transaction, so the
--- real link between Gary and Eric is never touched or relied on.
+-- real link between Gary and Eric is never touched or relied on. U1 to U14 cover M1.3 (migration
+-- 0009, SPEC.md 7C.4, 7C.5, 7C.7 item 7): place_name through every route, and each traveller's
+-- journal prompt readable and settable by its owner only, with the same users A, B and C.
 -- Everything runs in one transaction that is rolled back: no rows are left behind.
 -- Acts as Gary's auth user (the single user, gary@travelboard.local) by setting
 -- role and request.jwt.claims the way PostgREST does.
@@ -599,8 +601,8 @@ begin
     into v_n, v_pages
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'public' and p.proname like 'tb\_%';
-  r := r || jsonb_build_object('test', 'T3 all 15 tb_ functions: definer, search_path, grants',
-         'pass', v_n = 15 and v_pages = 15, 'detail', jsonb_build_object('ok', v_n, 'total', v_pages));
+  r := r || jsonb_build_object('test', 'T3 all 17 tb_ functions: definer, search_path, grants (17 from 0009)',
+         'pass', v_n = 17 and v_pages = 17, 'detail', jsonb_build_object('ok', v_n, 'total', v_pages));
 
   -- T4. the two travellers, and the new column's default
   select count(*) into v_n from travel.people p join auth.users u on u.id = p.uid
@@ -873,6 +875,224 @@ begin
   exception when others then
     r := r || jsonb_build_object('test', 'T14 tb_partner_captures needs auth.uid()', 'pass', sqlerrm = 'not authenticated', 'detail', sqlerrm);
   end;
+  reset role;
+
+  -- ---------- M1.3, migration 0009 (SPEC.md 7C.4, 7C.5, 7C.7 item 7) ----------
+
+  -- U1. anon cannot execute the new functions
+  foreach f in array array['select public.tb_prompt_get()', 'select public.tb_prompt_set(''x'')'] loop
+    begin
+      set local role anon;
+      perform set_config('request.jwt.claims', '', true);
+      execute f;
+      reset role;
+      r := r || jsonb_build_object('test', 'U1 anon denied: ' || f, 'pass', false, 'detail', 'call succeeded');
+    exception when others then
+      get stacked diagnostics v_state = returned_sqlstate;
+      reset role;
+      r := r || jsonb_build_object('test', 'U1 anon denied: ' || f, 'pass', v_state = '42501', 'detail', v_state || ' ' || sqlerrm);
+    end;
+  end loop;
+
+  -- U2. the two new columns, nullable text, with their length checks; no existing row named or customised
+  select count(*) into v_n from information_schema.columns
+   where table_schema = 'travel' and data_type = 'text' and is_nullable = 'YES' and column_default is null
+     and ((table_name = 'captures' and column_name = 'place_name') or (table_name = 'people' and column_name = 'journal_prompt_custom'));
+  r := r || jsonb_build_object('test', 'U2 captures.place_name and people.journal_prompt_custom: nullable text, no default', 'pass', v_n = 2, 'detail', v_n);
+  select count(*) into v_n from pg_constraint
+   where conname in ('captures_place_name_check', 'people_journal_prompt_custom_check')
+     and (pg_get_constraintdef(oid) like '%char_length(place_name) >= 1%char_length(place_name) <= 120%'
+       or pg_get_constraintdef(oid) like '%char_length(journal_prompt_custom) >= 1%char_length(journal_prompt_custom) <= 4000%');
+  r := r || jsonb_build_object('test', 'U2 checks: place_name 1 to 120, journal_prompt_custom 1 to 4000', 'pass', v_n = 2, 'detail', v_n);
+  select count(*) into v_n from travel.people p join auth.users u on u.id = p.uid
+   where u.email in ('gary@travelboard.local', 'eric@travelboard.local') and p.journal_prompt_custom is not null;
+  r := r || jsonb_build_object('test', 'U2 Gary and Eric start on the default prompt (no custom text)', 'pass', v_n = 0, 'detail', v_n);
+
+  -- U3 (item 7). Each reads only his own prompt; neither can set the other's
+  set local role authenticated;
+  perform set_config('request.jwt.claims', v_ca, true);
+  v := public.tb_prompt_get();
+  r := r || jsonb_build_object('test', 'U3 A reads his own key and no custom text',
+         'pass', v = jsonb_build_object('journal_prompt', 'journal', 'journal_prompt_custom', null), 'detail', v);
+  v := public.tb_prompt_set('  A custom prompt  ');
+  r := r || jsonb_build_object('test', 'U3 A sets his own prompt (trimmed), returned at once',
+         'pass', v->>'journal_prompt_custom' = 'A custom prompt' and v->>'journal_prompt' = 'journal', 'detail', v);
+  perform set_config('request.jwt.claims', v_cb, true);
+  v := public.tb_prompt_get();
+  r := r || jsonb_build_object('test', 'U3 B reads only his own: his key, not A''s text',
+         'pass', v = jsonb_build_object('journal_prompt', 'journal-eric', 'journal_prompt_custom', null), 'detail', v);
+  v := public.tb_prompt_set('B custom prompt');
+  r := r || jsonb_build_object('test', 'U3 B sets his own', 'pass', v->>'journal_prompt_custom' = 'B custom prompt', 'detail', v);
+  reset role;
+  select count(*) into v_n from travel.people
+   where (uid = v_a and journal_prompt_custom = 'A custom prompt') or (uid = v_b and journal_prompt_custom = 'B custom prompt')
+      or (uid = v_c and journal_prompt_custom is null);
+  r := r || jsonb_build_object('test', 'U3 B''s set left A''s text alone; C untouched', 'pass', v_n = 3, 'detail', v_n);
+  select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and ((p.proname = 'tb_prompt_get' and p.pronargs = 0)
+      or (p.proname = 'tb_prompt_set' and p.pronargs = 1 and p.proargtypes[0] = 'text'::regtype));
+  r := r || jsonb_build_object('test', 'U3 neither function takes a uid: tb_prompt_get(), tb_prompt_set(text) only', 'pass', v_n = 2, 'detail', v_n);
+
+  -- U4. tb_journal_turn gives tb-journal the caller's own custom prompt
+  set local role authenticated;
+  perform set_config('request.jwt.claims', v_cb, true);
+  v := public.tb_journal_turn(jsonb_build_object('message_id', '00000000-0000-4000-8000-0000000000c1',
+         'local_date', '2000-01-05', 'content', 'B turn with a custom prompt', 'created_at', '2000-01-05 12:00:00+00'));
+  r := r || jsonb_build_object('test', 'U4 B''s turn: me carries his key and his custom text',
+         'pass', v->'me'->>'journal_prompt' = 'journal-eric' and v->'me'->>'journal_prompt_custom' = 'B custom prompt', 'detail', v->'me');
+
+  -- U5. reset: null, then blank, back to the default; over 4000 refused; exactly 4000 kept
+  perform set_config('request.jwt.claims', v_ca, true);
+  v := public.tb_prompt_set(null);
+  r := r || jsonb_build_object('test', 'U5 null resets to the default', 'pass', v->'journal_prompt_custom' = 'null'::jsonb, 'detail', v);
+  perform public.tb_prompt_set('again');
+  v := public.tb_prompt_set('   ');
+  r := r || jsonb_build_object('test', 'U5 blank resets to the default', 'pass', v->'journal_prompt_custom' = 'null'::jsonb, 'detail', v);
+  begin
+    perform public.tb_prompt_set(repeat('x', 4001));
+    r := r || jsonb_build_object('test', 'U5 4001 characters refused', 'pass', false, 'detail', 'accepted');
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate;
+    r := r || jsonb_build_object('test', 'U5 4001 characters refused', 'pass', v_state = '22023', 'detail', v_state || ' ' || sqlerrm);
+  end;
+  v := public.tb_prompt_set(repeat('y', 4000));
+  r := r || jsonb_build_object('test', 'U5 exactly 4000 characters kept', 'pass', char_length(v->>'journal_prompt_custom') = 4000, 'detail', char_length(v->>'journal_prompt_custom'));
+
+  -- U6. no people row, or no caller: refused
+  perform set_config('request.jwt.claims', v_oclaims, true);
+  begin
+    perform public.tb_prompt_set('stranger');
+    r := r || jsonb_build_object('test', 'U6 a uid with no people row cannot set a prompt', 'pass', false, 'detail', 'accepted');
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate;
+    r := r || jsonb_build_object('test', 'U6 a uid with no people row cannot set a prompt', 'pass', v_state = '42501', 'detail', v_state || ' ' || sqlerrm);
+  end;
+  v := public.tb_prompt_get();
+  r := r || jsonb_build_object('test', 'U6 a uid with no people row reads nulls',
+         'pass', v = jsonb_build_object('journal_prompt', null, 'journal_prompt_custom', null), 'detail', v);
+  perform set_config('request.jwt.claims', '{"role":"authenticated"}', true);
+  foreach f in array array['select public.tb_prompt_get()', 'select public.tb_prompt_set(''x'')'] loop
+    begin
+      execute f;
+      r := r || jsonb_build_object('test', 'U6 needs auth.uid(): ' || f, 'pass', false, 'detail', 'accepted');
+    exception when others then
+      r := r || jsonb_build_object('test', 'U6 needs auth.uid(): ' || f, 'pass', sqlerrm = 'not authenticated', 'detail', sqlerrm);
+    end;
+  end loop;
+
+  -- U7 (7C.4). place_name in through tb_capture_upsert, trimmed, out through tb_captures_since
+  perform set_config('request.jwt.claims', v_ca, true);
+  v := public.tb_capture_upsert(jsonb_build_object('id', '00000000-0000-4000-8000-0000000000c5', 'body', 'A named, shared',
+    'kind', 'note', 'captured_at', '2000-01-05 06:00:00+00', 'tz', 'Asia/Singapore', 'local_date', '2000-01-05',
+    'lat', 1.3525, 'lng', 103.9447, 'updated_at', '2000-01-05 06:00:00+00', 'shared', true, 'place_name', '  Tampines Mall  '));
+  r := r || jsonb_build_object('test', 'U7 upsert with place_name applied', 'pass', (v->>'applied')::boolean, 'detail', v);
+  select count(*) into v_n from jsonb_array_elements(public.tb_captures_since(null, null)->'rows') e
+   where e->>'id' = '00000000-0000-4000-8000-0000000000c5' and e->>'place_name' = 'Tampines Mall';
+  r := r || jsonb_build_object('test', 'U7 stored trimmed, and tb_captures_since returns it', 'pass', v_n = 1, 'detail', v_n);
+
+  -- U8. a row without the field (an app from before M1.3) keeps the stored name
+  perform public.tb_capture_upsert(jsonb_build_object('id', '00000000-0000-4000-8000-0000000000c5', 'body', 'A named, edited by an older app',
+    'kind', 'note', 'captured_at', '2000-01-05 06:00:00+00', 'tz', 'Asia/Singapore', 'local_date', '2000-01-05',
+    'lat', 1.3525, 'lng', 103.9447, 'updated_at', '2000-01-05 06:01:00+00', 'shared', true));
+  reset role;
+  select count(*) into v_n from travel.captures where id = '00000000-0000-4000-8000-0000000000c5'
+     and place_name = 'Tampines Mall' and body like '%older app';
+  r := r || jsonb_build_object('test', 'U8 a row without place_name keeps the stored value', 'pass', v_n = 1, 'detail', v_n);
+
+  -- U9. explicit null clears; blank clears; 121 characters refused; 120 kept
+  set local role authenticated;
+  perform set_config('request.jwt.claims', v_ca, true);
+  perform public.tb_capture_upsert(jsonb_build_object('id', '00000000-0000-4000-8000-0000000000c6', 'body', 'A to be cleared',
+    'kind', 'note', 'captured_at', '2000-01-05 07:00:00+00', 'tz', 'Asia/Singapore', 'local_date', '2000-01-05',
+    'updated_at', '2000-01-05 07:00:00+00', 'place_name', 'Somewhere'));
+  perform public.tb_capture_upsert(jsonb_build_object('id', '00000000-0000-4000-8000-0000000000c6', 'body', 'A to be cleared',
+    'kind', 'note', 'captured_at', '2000-01-05 07:00:00+00', 'tz', 'Asia/Singapore', 'local_date', '2000-01-05',
+    'updated_at', '2000-01-05 07:01:00+00', 'place_name', null));
+  reset role;
+  select count(*) into v_n from travel.captures where id = '00000000-0000-4000-8000-0000000000c6' and place_name is null;
+  r := r || jsonb_build_object('test', 'U9 place_name null clears the name', 'pass', v_n = 1, 'detail', v_n);
+  set local role authenticated;
+  perform set_config('request.jwt.claims', v_ca, true);
+  perform public.tb_capture_upsert(jsonb_build_object('id', '00000000-0000-4000-8000-0000000000c6', 'body', 'A to be cleared',
+    'kind', 'note', 'captured_at', '2000-01-05 07:00:00+00', 'tz', 'Asia/Singapore', 'local_date', '2000-01-05',
+    'updated_at', '2000-01-05 07:02:00+00', 'place_name', '   '));
+  reset role;
+  select count(*) into v_n from travel.captures where id = '00000000-0000-4000-8000-0000000000c6' and place_name is null;
+  r := r || jsonb_build_object('test', 'U9 a blank place_name is stored as null', 'pass', v_n = 1, 'detail', v_n);
+  set local role authenticated;
+  perform set_config('request.jwt.claims', v_ca, true);
+  begin
+    perform public.tb_capture_upsert(jsonb_build_object('id', '00000000-0000-4000-8000-0000000000c6', 'body', 'A to be cleared',
+      'kind', 'note', 'captured_at', '2000-01-05 07:00:00+00', 'tz', 'Asia/Singapore', 'local_date', '2000-01-05',
+      'updated_at', '2000-01-05 07:03:00+00', 'place_name', repeat('p', 121)));
+    r := r || jsonb_build_object('test', 'U9 121 characters refused', 'pass', false, 'detail', 'accepted');
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate;
+    r := r || jsonb_build_object('test', 'U9 121 characters refused', 'pass', v_state = '22023', 'detail', v_state || ' ' || sqlerrm);
+  end;
+  v := public.tb_capture_upsert(jsonb_build_object('id', '00000000-0000-4000-8000-0000000000c6', 'body', 'A to be cleared',
+    'kind', 'note', 'captured_at', '2000-01-05 07:00:00+00', 'tz', 'Asia/Singapore', 'local_date', '2000-01-05',
+    'updated_at', '2000-01-05 07:04:00+00', 'place_name', repeat('q', 120)));
+  r := r || jsonb_build_object('test', 'U9 exactly 120 characters kept', 'pass', (v->>'applied')::boolean, 'detail', v);
+
+  -- U10. the batch route carries place_name
+  v := public.tb_captures_upsert(jsonb_build_array(jsonb_build_object('id', '00000000-0000-4000-8000-0000000000c7',
+    'body', 'A batch, unshared', 'kind', 'note', 'captured_at', '2000-01-05 08:00:00+00', 'tz', 'Asia/Singapore',
+    'local_date', '2000-01-05', 'updated_at', '2000-01-05 08:00:00+00', 'place_name', 'Bedok Reservoir')));
+  reset role;
+  select count(*) into v_n from travel.captures where id = '00000000-0000-4000-8000-0000000000c7' and place_name = 'Bedok Reservoir';
+  r := r || jsonb_build_object('test', 'U10 tb_captures_upsert carries place_name', 'pass', v_n = 1, 'detail', v);
+
+  -- U11 (item 2 RPC side). Linked again: B sees A's shared capture with its name; the unshared one never
+  set local role authenticated;
+  perform set_config('request.jwt.claims', v_ca, true);
+  perform public.tb_partner_add(v_b);
+  perform set_config('request.jwt.claims', v_cb, true);
+  perform public.tb_partner_add(v_a);
+  select count(*) into v_n from jsonb_array_elements(public.tb_partner_captures()) e
+   where e->>'id' = '00000000-0000-4000-8000-0000000000c5' and e->>'place_name' = 'Tampines Mall' and e->>'owner_name' = 'Smoke A';
+  r := r || jsonb_build_object('test', 'U11 tb_partner_captures carries the shared capture''s place_name', 'pass', v_n = 1, 'detail', v_n);
+  select count(*) into v_n from jsonb_array_elements(public.tb_partner_captures()) e
+   where e->>'id' = '00000000-0000-4000-8000-0000000000c7';
+  r := r || jsonb_build_object('test', 'U11 the unshared named capture stays off B''s list', 'pass', v_n = 0, 'detail', v_n);
+
+  -- U12. only the owner names his capture
+  begin
+    perform public.tb_capture_upsert(jsonb_build_object('id', '00000000-0000-4000-8000-0000000000c5', 'body', 'A named, edited by an older app',
+      'kind', 'note', 'captured_at', '2000-01-05 06:00:00+00', 'tz', 'Asia/Singapore', 'local_date', '2000-01-05',
+      'updated_at', '2000-01-05 09:00:00+00', 'shared', true, 'place_name', 'Renamed by B'));
+    r := r || jsonb_build_object('test', 'U12 B cannot rename A''s capture', 'pass', false, 'detail', 'accepted');
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate;
+    r := r || jsonb_build_object('test', 'U12 B cannot rename A''s capture', 'pass', v_state = '42501', 'detail', v_state || ' ' || sqlerrm);
+  end;
+  reset role;
+  select count(*) into v_n from travel.captures where id = '00000000-0000-4000-8000-0000000000c5' and place_name = 'Tampines Mall';
+  r := r || jsonb_build_object('test', 'U12 A''s name unchanged', 'pass', v_n = 1, 'detail', v_n);
+
+  -- U13 (item 6 SQL side). tb_journal_turn: each capture carries place_name, own and shared
+  set local role authenticated;
+  perform set_config('request.jwt.claims', v_cb, true);
+  v := public.tb_journal_turn(jsonb_build_object('message_id', '00000000-0000-4000-8000-0000000000c2',
+         'local_date', '2000-01-05', 'content', 'B asks about A''s place', 'created_at', '2000-01-05 13:00:00+00'));
+  select count(*) into v_n from jsonb_array_elements(v->'captures') e
+   where e->>'id' = '00000000-0000-4000-8000-0000000000c5' and e->>'place_name' = 'Tampines Mall' and e->>'own' = 'false';
+  r := r || jsonb_build_object('test', 'U13 B''s turn lists A''s shared capture with its place_name', 'pass', v_n = 1, 'detail', v->'captures');
+  r := r || jsonb_build_object('test', 'U13 B''s turn: only the shared capture of A''s day (not the unshared or the cleared one)',
+         'pass', jsonb_array_length(v->'captures') = 1, 'detail', jsonb_array_length(v->'captures'));
+  perform set_config('request.jwt.claims', v_ca, true);
+  v := public.tb_journal_turn(jsonb_build_object('message_id', '00000000-0000-4000-8000-0000000000c3',
+         'local_date', '2000-01-05', 'content', 'A turn', 'created_at', '2000-01-05 14:00:00+00'));
+  select count(*) into v_n from jsonb_array_elements(v->'captures') e where e ? 'place_name';
+  r := r || jsonb_build_object('test', 'U13 A''s turn: all 3 own captures carry their place_name (the 120-character one too)',
+         'pass', v_n = 3 and jsonb_array_length(v->'captures') = 3
+           and (select count(*) from jsonb_array_elements(v->'captures') e where e->'place_name' = 'null'::jsonb) = 0
+           and (select count(*) from jsonb_array_elements(v->'captures') e where e->>'place_name' = repeat('q', 120)) = 1, 'detail', v_n);
+
+  -- U14. a capture with no name still gives tb-journal its coordinates
+  select count(*) into v_n from jsonb_array_elements(v->'captures') e
+   where e->>'id' = '00000000-0000-4000-8000-0000000000c5' and (e->>'lat')::float = 1.3525 and (e->>'lng')::float = 103.9447;
+  r := r || jsonb_build_object('test', 'U14 coordinates still go with the name', 'pass', v_n = 1, 'detail', v_n);
   reset role;
 
   reset role;

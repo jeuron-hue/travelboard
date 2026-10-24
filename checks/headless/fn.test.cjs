@@ -9,6 +9,9 @@
 // From M1.2 (SPEC.md 7B.4, 7B.5 item 10), G1 to G7: Eric's calls (his own JWT): his prompt
 // (prompts/journal-eric.md), Gary's captures only when linked and shared, labelled by name,
 // an unshared one absent from the whole request, the photos combined to 30, unknown prompt.
+// From M1.3 (SPEC.md 7C.2a, 7C.4, 7C.5, 7C.7 items 6 and 7), H1 to H6: no kind label anywhere;
+// each capture labelled with its place name when set, coordinates otherwise; the caller's own
+// custom prompt when set, the bundled file otherwise, and the captures always in the context.
 'use strict';
 const http = require('http');
 const path = require('path');
@@ -222,9 +225,11 @@ const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
     check('F13 30 images, JPEG base64 of the stored bytes, oldest first', imgs.length === 30
       && imgs.every((b) => b.source.type === 'base64' && b.source.media_type === 'image/jpeg')
       && imgs[0].source.data === Buffer.from('JPEG-1').toString('base64') && imgs[29].source.data === Buffer.from('JPEG-33').toString('base64'), imgs.length);
-    const labelOk = blocks.every((b, i) => b.type !== 'image' || (blocks[i - 1].type === 'text' && /^Photo from capture \d+, \d{4} hrs Bangkok time, (note|journal): /.test(blocks[i - 1].text)));
-    check('F13 each image follows a label with its capture\'s time, kind and text', labelOk
-      && blocks.some((b) => b.type === 'text' && b.text.includes('Stop 33')) && blocks.some((b) => b.type === 'text' && /, note: \(no text\)$/.test(b.text)));
+    // M1.3 (7C.2a): the label no longer carries the kind, though a quarter of these rows are journal-kind.
+    const labelOk = blocks.every((b, i) => b.type !== 'image' || (blocks[i - 1].type === 'text' && /^Photo from capture \d+, \d{4} hrs Bangkok time: /.test(blocks[i - 1].text)));
+    check('F13 each image follows a label with its capture\'s time and text, no kind', labelOk
+      && blocks.some((b) => b.type === 'text' && b.text.includes('Stop 33')) && blocks.some((b) => b.type === 'text' && / time: \(no text\)$/.test(b.text))
+      && !blocks.some((b) => b.type === 'text' && /(note|journal): /.test(b.text)));
     check('F13 the oldest switched-on photo listed as not shown, nothing listed as could not be loaded',
       (ctx13.match(/, not shown"/g) || []).length === 1 && ctx13.includes('photo="photo at 0800 hrs Bangkok, not shown"') && !/could not be loaded/.test(ctx13), ctx13.slice(0, 300));
     const offTag = (i) => (ctx13.match(new RegExp(`<capture n="${i + 1}"[^>]*>`)) || [''])[0];
@@ -294,8 +299,8 @@ const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
     const bG = cG ? cG.messages[0].content : [];
     const ctxG = bG[0] && bG[0].text || '';
     check('G2 linked: Gary\'s 2 shared captures and Eric\'s own, each with by=; intro names both', r.status === 200
-      && /<capture n="1" time="1000 hrs Bangkok time" by="Gary" kind="note"/.test(ctxG) && ctxG.includes('Chatuchak stall 12')
-      && /by="Gary" kind="journal"[^>]*>\nGary shared, photo not for Claude/.test(ctxG) && /by="Eric" kind="note"/.test(ctxG)
+      && /<capture n="1" time="1000 hrs Bangkok time" by="Gary"/.test(ctxG) && ctxG.includes('Chatuchak stall 12')
+      && /by="Gary">\nGary shared, photo not for Claude/.test(ctxG) && /by="Eric">/.test(ctxG)
       && ctxG.includes("Eric's own, and those Gary shared with Eric"), ctxG.slice(0, 600));
     check('G2 a capture Gary did not share is absent from the whole request to Claude (item 10)', !allG.includes('GARY PRIVATE NOTE')
       && !allG.includes(Buffer.from('GARY-702').toString('base64')) && !storageGets.slice(gG).some((g) => g.path.endsWith(uid(702) + '.jpg')));
@@ -303,7 +308,7 @@ const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
     check('G2 Gary\'s shared switched-on photo fetched as Eric and sent, labelled by Gary; the switched-off one not fetched, sent or mentioned',
       imgsG.length === 1 && imgsG[0].source.data === Buffer.from('GARY-701').toString('base64')
       && storageGets.slice(gG).length === 1 && storageGets.slice(gG)[0].auth === ERIC_JWT
-      && bG.some((b) => b.type === 'text' && /^Photo from capture 1 \(by Gary\), 1000 hrs Bangkok time, note: Gary shared/.test(b.text))
+      && bG.some((b) => b.type === 'text' && /^Photo from capture 1 \(by Gary\), 1000 hrs Bangkok time: Gary shared/.test(b.text))
       && !allG.includes(Buffer.from('GARY-703').toString('base64')) && !/photo=/.test((ctxG.match(/<capture n="2"[^>]*>/) || [''])[0]), JSON.stringify(storageGets.slice(gG)));
     check('G2 the thread is Eric\'s: his first turn, its reply, his second turn', cG.messages.length === 3
       && cG.messages[0].content[cG.messages[0].content.length - 1].text === 'Long day on the river.'
@@ -326,7 +331,7 @@ const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
     r = await call(turn(uid(804), 'And Eric?', '2026-11-13T14:30:00Z', '2026-11-13'));
     cG = anth.calls[nG] && anth.calls[nG].body;
     check('G4 Gary\'s call: Eric\'s shared capture listed by="Eric"', r.status === 200
-      && /by="Eric" kind="note">\nEric: boat to Wat Arun/.test(cG.messages[0].content[0].text));
+      && /by="Eric">\nEric: boat to Wat Arun/.test(cG.messages[0].content[0].text));
 
     // G5 unlinked: Gary's shared captures leave Eric's context again
     m.partnerRemove(G, EU);
@@ -365,6 +370,75 @@ const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
     check('G7 unknown journal_prompt: 502 no_prompt, no Claude call, nothing stored as a reply', r.status === 502 && r.body.error === 'no_prompt'
       && anth.calls.length === nG && ![...m.jrows.values()].some((x) => x.reply_to === uid(807)), JSON.stringify(r.body));
     m.people.get(EU).prompt = 'journal-eric';
+
+    // ---------- M1.3 (SPEC.md 7C.2a, 7C.4, 7C.5) ----------
+    // Gary's day 2026-11-15: named with GPS and a photo, GPS but unnamed, named with a quote and
+    // no GPS, nothing at all (journal-kind, from before M1.3).
+    m.partnerRemove(G, EU);
+    m.upsertBatch([
+      { id: uid(1001), body: 'Tampines lunch', kind: 'note', tz: 'Asia/Singapore', local_date: '2026-11-15', captured_at: '2026-11-15T04:00:00Z',
+        updated_at: '2026-11-15T04:00:00Z', lat: 1.35247, lng: 103.94452, accuracy_m: 8, place_name: 'Tampines Mall', photo_path: `${G}/${uid(1001)}.jpg` },
+      { id: uid(1002), body: 'Bench by the reservoir', kind: 'note', tz: 'Asia/Singapore', local_date: '2026-11-15', captured_at: '2026-11-15T05:00:00Z',
+        updated_at: '2026-11-15T05:00:00Z', lat: 1.34012, lng: 103.92271, accuracy_m: 15 },
+      { id: uid(1003), body: 'Kopi at the stall', kind: 'note', tz: 'Asia/Singapore', local_date: '2026-11-15', captured_at: '2026-11-15T06:00:00Z',
+        updated_at: '2026-11-15T06:00:00Z', place_name: 'Ah Seng "Original" <Kopi> & Toast' },
+      { id: uid(1004), body: 'Old journal-kind note', kind: 'journal', tz: 'Asia/Singapore', local_date: '2026-11-15', captured_at: '2026-11-15T07:00:00Z',
+        updated_at: '2026-11-15T07:00:00Z' }
+    ], G);
+    m.objects.set(`${G}/${uid(1001)}.jpg`, { bytes: Buffer.from('TAMPINES'), contentType: 'image/jpeg' });
+    nG = anth.calls.length;
+    r = await call(turn(uid(1101), 'Where did I have lunch?', '2026-11-15T12:00:00Z', '2026-11-15'));
+    let cH = anth.calls[nG] && anth.calls[nG].body;
+    const bH = cH ? cH.messages[0].content : [];
+    const ctxH = bH[0] && bH[0].text || '';
+    const tag = (n) => (ctxH.match(new RegExp(`<capture n="${n}"[^>]*>`)) || [''])[0];
+    check('H1 a named capture is labelled with its place name only (item 6)', r.status === 200
+      && tag(1) === '<capture n="1" time="1200 hrs Singapore time" place="Tampines Mall" photo="shown below">', tag(1));
+    check('H1 an unnamed capture with GPS keeps its coordinates', tag(2) === '<capture n="2" time="1300 hrs Singapore time" location="1.34012, 103.92271 (within 15 m)">', tag(2));
+    check('H1 a name with quotes and angle brackets is escaped inside the attribute',
+      tag(3) === '<capture n="3" time="1400 hrs Singapore time" place="Ah Seng &quot;Original&quot; &lt;Kopi&gt; &amp; Toast">', tag(3));
+    check('H1 no name and no GPS: neither attribute', tag(4) === '<capture n="4" time="1500 hrs Singapore time">', tag(4));
+    check('H2 the photo label names the place', bH.some((b) => b.type === 'text' && b.text === 'Photo from capture 1, 1200 hrs Singapore time, at Tampines Mall: Tampines lunch'));
+    const everyCall = JSON.stringify(anth.calls.slice(nG).map((c) => c.body));
+    check('H3 no kind label anywhere in the request (7C.2a), journal-kind row listed like any other',
+      !/kind=/.test(everyCall) && !/(, note|, journal)(:|")/.test(everyCall) && ctxH.includes('Old journal-kind note'));
+    check('H3 every call since M1.3 carries no kind attribute', !anth.calls.some((c) => /kind=\\"/.test(JSON.stringify(c.body.messages))));
+
+    // H4 (item 7): Gary's custom prompt replaces the bundled file; the captures stay in the context
+    m.people.get(G).custom = 'Gary custom prompt: reply in one short paragraph.';
+    nG = anth.calls.length;
+    r = await call(turn(uid(1102), 'And after lunch?', '2026-11-15T12:10:00Z', '2026-11-15'));
+    cH = anth.calls[nG] && anth.calls[nG].body;
+    check('H4 custom prompt set: the system prompt is exactly the custom text', r.status === 200 && cH
+      && cH.system === 'Gary custom prompt: reply in one short paragraph.', cH && String(cH.system).slice(0, 80));
+    check('H4 the custom prompt cannot drop the captures: same context block before the thread',
+      cH && cH.messages[0].content[0].text === ctxH && cH.messages[0].content.some((b) => b.type === 'image'));
+    // Eric's call is untouched by Gary's custom prompt
+    nG = anth.calls.length;
+    r = await call(turn(uid(1103), 'Eric, same day.', '2026-11-15T12:20:00Z', '2026-11-15'), E);
+    cH = anth.calls[nG] && anth.calls[nG].body;
+    check('H4 Gary\'s custom text never reaches Eric\'s call', r.status === 200 && cH
+      && String(cH.system) === fs.readFileSync(path.join(ROOT, 'prompts/journal-eric.md'), 'utf8').trim() && !JSON.stringify(cH).includes('Gary custom prompt'));
+
+    // H5: reset (null), and blank, go back to the bundled file
+    for (const v of [null, '   ']) {
+      m.people.get(G).custom = v;
+      nG = anth.calls.length;
+      r = await call(turn(uid(1104 + (v === null ? 0 : 1)), 'After reset ' + JSON.stringify(v), '2026-11-15T12:3' + (v === null ? 0 : 5) + ':00Z', '2026-11-15'));
+      cH = anth.calls[nG] && anth.calls[nG].body;
+      check('H5 custom ' + JSON.stringify(v) + ': back to prompts/journal.md', r.status === 200 && cH
+        && String(cH.system) === fs.readFileSync(path.join(ROOT, 'prompts/journal.md'), 'utf8').trim());
+    }
+
+    // H6: with custom text set, a key missing from this deploy no longer fails the call
+    m.people.get(EU).prompt = 'journal-nobody';
+    m.people.get(EU).custom = 'Eric custom prompt.';
+    nG = anth.calls.length;
+    r = await call(turn(uid(1106), 'Unknown key, custom text.', '2026-11-15T13:00:00Z', '2026-11-15'), E);
+    cH = anth.calls[nG] && anth.calls[nG].body;
+    check('H6 unknown key but custom text: 200 with the custom text', r.status === 200 && cH && cH.system === 'Eric custom prompt.', JSON.stringify(r.body));
+    m.people.get(EU).prompt = 'journal-eric';
+    m.people.get(EU).custom = null;
 
     // F11 database rejects the JWT
     r = await call(turn(uid(6), 'x', '2026-11-09T15:00:00Z'), { Authorization: 'Bearer eyJ.other' });
