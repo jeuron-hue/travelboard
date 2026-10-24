@@ -7,7 +7,36 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ## M1.2 Two travellers (SPEC.md 7B)
 
-**Status 24/10/26: built and passing every automated check; device steps below to run on both phones. Cut-off 31/10/26.** Migration 0008 applied, `tb-journal` v4 deployed, client v10. Item 13 (Change password) added on Gary's decision 24/10/26.
+**Status 24/10/26: built and passing every automated check; not yet run on the phones.** Migration 0008 applied, `tb-journal` v5 deployed, client v10 live. Item 13 (Change password) added on Gary's decision 24/10/26. Build session retired 24/10/26; M1.2 stays as built.
+
+**Gary's decisions 24/10/26:** the two-phone test waits until after the UI redesign, so Eric's first look is the final UI. M1.2 cut-off moves from 31/10/26 to 05/11/26; the freeze from 01/11/26 to 06/11/26. The redesign, place names and editable journal prompts are M1.3 (SPEC 7C, D17, from Gary's planning chat, commit `5efd5d3`), built in two new sessions; SPEC and CLAUDE.md carry the new dates. The build session did not edit either for this.
+
+### Open items for the next session
+
+Untested
+1. Every 7B.5 item on the phones (1 to 11 and 13). Item 12 passes. Eric has not installed the app or signed in yet (dashboard: "Last signed in" empty).
+2. The device steps below are written for v10's screens and labels. Rewrite them for the M1.3 design. The redesign will also change selectors used by `m12.test.cjs` (`#cap-share`, `#partners`, `#pw-*`, `#view-dlg`) and by `m1`, `m2`, `m11`.
+3. Item 10 on a real call: Eric's reply referring to one of Gary's shared captures by its content. So far shown only in `fn.test.cjs` (G2) and `m12` (M10) against fakes.
+4. Item 7 REST part: no check from outside with a partner's JWT. The refusals are proven at the policy level (smoke T8, T12, T13); the admitted read is the Storage download on Eric's phone (device steps 6 and 8).
+
+Waiting on Gary
+5. Auth settings, not yet reported (Sign In / Providers, Email): "Secure password change", "Require current password when updating", minimum password length, password requirements, sign-ups off. If either of the first two is on, Change password shows the server's error. Gary asked to be told before anything works round it; the client calls `updateUser` only, with no `reauthenticate`.
+
+Known behaviour, by design or minor
+6. The Share with switch uses the last link state the phone saw (`meta me`). Offline after an unlink, a new capture can still be saved shared. Nobody sees it unless the link is live again, and then it shows like any shared capture.
+7. Unsharing or unlinking clears the other phone only at that phone's next sync. Until then, an offline phone keeps showing the rows.
+8. A partner photo is downloaded again only when `photo_bytes` changes. A Replace with a file of exactly the same size would keep the old image on the other phone.
+9. Journal Share (the text sent to another app) and the Days list count only the phone owner's own captures. Shared captures are not in the Share text (SPEC is silent).
+10. `meta me` is not cleared on sign-out. It refreshes at the next sync.
+11. Remove uses the browser's native confirm dialog.
+12. Security advisors: `public.rls_auto_enable()` can be run by `anon`. It is Supabase's own function, not travelboard's, and was left alone under rule 1. The `tb_*` warnings are the intended design (rule 3).
+
+For the next session
+13. Catalogue baseline after 0008: objects outside travelboard's scope 518, hash `b4ee4e5e7071` (scoped form of `checks/catalogue.sql`: travel, `public.tb_*`, `tb_photos_*` policies and the `tb-photos` bucket listed; everything else as one count and hash).
+14. Live state 24/10/26: 2 auth users, 2 `travel.people` rows (Gary `journal`, Eric `journal-eric`), 0 `partner_adds`, 0 shared captures.
+15. `smoke.sql` inserts synthetic users into `auth.users` and `travel.people` inside its rolled-back transaction (T-tests). It never relies on the real link between Gary and Eric.
+16. Running the checks here: `npm install` in `checks/headless` (Playwright 1.56.1, `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`), `TB_CHROMIUM=/opt/pw-browsers/chromium`, Deno 2.9.4 as `DENO=`. The sandbox cannot reach supabase.co or github.io directly: SQL goes through the connector, and the live `sw.js` was fetched through Apify.
+17. `tb-journal` is deployed from three files: `index.ts`, `context.mjs` and `prompt.ts`. Run `bundle-prompt.cjs` after any prompt edit; `static.cjs` fails while `prompt.ts` is stale. Editable journal prompts (M1.3, SPEC 7C) change where the prompt comes from; check 7C for whether the bundled files stay as defaults.
 
 ### Automated results, 24/10/26
 
