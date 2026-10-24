@@ -447,6 +447,36 @@ async function chipsSettled(page) {
     check('N17 a Save\'s fix becomes the last fix', await G.evaluate((p) => idb.get('meta', 'last_fix').then((m) => !!m && Math.abs(m.value.lat - p.lat) < 1e-9), move(spot, 10, 10)));
     await offline(false);
     await syncIdle(G);
+
+    // ---------- address when OpenStreetMap has no name (Gary's decision 24/10/26, v13) ----------
+    const hdb = move(BASE_POS, 0, -9000);
+    mock.osm.name = '';
+    mock.osm.address = (lat) => (Math.abs(lat - hdb.lat) < 0.002
+      ? { house_number: '238', road: 'Tampines Street 21', neighbourhood: 'Tampines East', city: 'Singapore', postcode: '520238', country: 'Singapore', country_code: 'sg' }
+      : { neighbourhood: 'Somewhere', city: 'Singapore', country: 'Singapore', country_code: 'sg' });
+    const osm6 = mock.osm.calls.length;
+    await G.evaluate((p) => { __geo.mode = 'grant'; __geo.fix = p; }, hdb);
+    await openNew(G);
+    await G.waitForFunction(() => cap.fix && cap.fix.standIn === false, null, { timeout: 3000 }).catch(() => {});
+    await chipsSettled(G);
+    cs = await chips(G);
+    check('N18 no name but an address: the map chip offers house number and street, with the credit', cs.length === 1 && cs[0].src === 'osm'
+      && cs[0].name === '238 Tampines Street 21' && await shown(G, '#cap-osm') && (await G.inputValue('#cap-place')) === '', JSON.stringify(cs));
+    await G.click('#cap-close');
+    await waitCap(G, false);
+    await G.evaluate(() => idb.del('drafts', 'new'));
+    const labels = await G.evaluate(() => [
+      osmLabel({ name: 'Tampines Mall', address: { house_number: '4', road: 'Tampines Central 5' } }),
+      osmLabel({ name: '', address: { road: 'Sukhumvit Soi 23' } }),
+      osmLabel({ name: ' ', address: { house_number: '12', pedestrian: 'Haji Lane' } }),
+      osmLabel({ name: '', address: { house_number: '9', neighbourhood: 'Tampines East' } }),
+      osmLabel({ name: '', address: null }), osmLabel(null)]);
+    check('N18 a name wins over the address; a street alone, or a pedestrian street, works; a house number with no street gives nothing',
+      JSON.stringify(labels) === JSON.stringify(['Tampines Mall', 'Sukhumvit Soi 23', '12 Haji Lane', null, null, null]), JSON.stringify(labels));
+    await G.evaluate(async (p) => { await idb.put('geocache', { key: geoKey(p.lat, p.lng).slice(2), name: null, at: '2026-10-24T05:00:00Z' }); }, hdb);
+    check('N18 v12 cache keys (no "a:") are not read, so an old empty answer cannot hide the address', await G.evaluate((p) => geoKey(p.lat, p.lng).startsWith('a:'), hdb)
+      && mock.osm.calls.length === osm6 + 1);
+    mock.osm.address = null;
   } finally {
     await browser.close();
     srv.close();

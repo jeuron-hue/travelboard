@@ -148,7 +148,8 @@ function makeMock() {
   m.partnerFail = false;        // true: tb_partner_captures answers 500
   // OpenStreetMap Nominatim (M1.3): every reverse request, the name it answers with (a function
   // of lat, lng, or a string; '' means nothing there), and a failure switch.
-  m.osm = { calls: [], name: '', fail: null };   // fail: null | 'network' | 'http'
+  // address (v13): a Nominatim address object, or a function of lat, lng returning one.
+  m.osm = { calls: [], name: '', address: null, fail: null };   // fail: null | 'network' | 'http'
   return m;
 }
 
@@ -306,8 +307,9 @@ async function attachMock(ctx, m, phone) {
     if (m.osm.fail === 'http') return route.fulfill({ status: 503, headers: cors, body: 'busy' });
     const lat = Number(u.searchParams.get('lat')), lng = Number(u.searchParams.get('lon'));
     const name = typeof m.osm.name === 'function' ? m.osm.name(lat, lng) : m.osm.name;
+    const address = (typeof m.osm.address === 'function' ? m.osm.address(lat, lng) : m.osm.address) || { city: 'Singapore', country: 'Singapore', country_code: 'sg' };
     return route.fulfill({ status: 200, headers: Object.assign({ 'content-type': 'application/json' }, cors),
-      body: JSON.stringify({ place_id: 1, lat: String(lat), lon: String(lng), category: 'shop', type: 'mall', name: name || '', display_name: (name ? name + ', ' : '') + 'Singapore' }) });
+      body: JSON.stringify({ place_id: 1, lat: String(lat), lon: String(lng), category: 'shop', type: 'mall', name: name || '', display_name: (name ? name + ', ' : '') + 'Singapore', address }) });
   });
   await ctx.route(SUPA + '/**', async (route) => {
     const req = route.request();

@@ -39,6 +39,10 @@
     never filled in automatically.
 
   Change log (newest first)
+  - 24/10/26 v13. Map chip falls back to the address (house number and street) where
+    OpenStreetMap has no name for the spot (SPEC.md 7C.4, Gary's decision after the v11 Pixel
+    run at his HDB block). geocache keys gain an "a:" prefix, so v11 and v12's cached empty
+    answers are asked again once.
   - 24/10/26 v12. Chips with no fresh fix at open (Pixel run of v11): indoors in airplane mode
     a first satellite fix takes longer than 5 s, so a new capture got no position and no chips.
     The open-time request now waits up to 30 s and accepts a fix up to 5 min old; the last fix
@@ -695,7 +699,7 @@
 'use strict';
 
 // Bump together with CACHE_VERSION in sw.js on every release.
-const APP_VERSION = 12;
+const APP_VERSION = 13;
 
 const PROJECT_REF = 'nnnnonspfljdkrxstslw';           // Supabase project travelboard (SPEC.md D3, 6.8)
 const SUPABASE_URL = 'https://' + PROJECT_REF + '.supabase.co';
@@ -790,7 +794,7 @@ const deviceTz = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 // v4 (M1.2): partner, the other person's shared captures as read-only mirrors (keyPath id,
 // index local_date; replaced as a whole on every sync, never dirty, never pushed), and
 // pphotos, their photos by capture id: { id, blob, w, h, bytes }. v5 (M1.3): geocache, the
-// OpenStreetMap name for a position rounded to about 50 m: { key, name (null: nothing there),
+// OpenStreetMap name (or, from v13, address) for a position rounded to about 50 m: { key, name (null: nothing there),
 // at }, so each place is looked up once (SPEC.md 7C.4).
 
 const idb = (() => {
@@ -1055,7 +1059,22 @@ async function ownNamesNear(lat, lng) {
 // rounded to about 50 m (an empty answer too), so a place is looked up once. Requests go one at
 // a time, at least a second apart. A failure is not cached and gives no chip. Network only: the
 // service worker never caches cross-origin requests.
-const geoKey = (lat, lng) => `${Math.round(lat / GEO_CELL_DEG)}:${Math.round(lng / (GEO_CELL_DEG / Math.max(0.2, Math.cos(lat * Math.PI / 180))))}`;
+// The key carries "a:" from v13, when addresses joined names, so an empty answer cached by v11
+// or v12 is asked again once.
+const geoKey = (lat, lng) => `a:${Math.round(lat / GEO_CELL_DEG)}:${Math.round(lng / (GEO_CELL_DEG / Math.max(0.2, Math.cos(lat * Math.PI / 180))))}`;
+// The chip's text from a Nominatim answer: the place's name, else its address as house number
+// and street ("238 Tampines Street 21", Gary's decision 24/10/26), else nothing.
+function osmLabel(j) {
+  if (!j || typeof j !== 'object') return null;
+  const clean = (x) => (typeof x === 'string' ? x.trim() : '');
+  let label = clean(j.name);
+  if (!label && j.address && typeof j.address === 'object') {
+    const a = j.address;
+    const street = clean(a.road) || clean(a.pedestrian) || clean(a.footway) || clean(a.path);
+    if (street) label = (clean(a.house_number) ? clean(a.house_number) + ' ' : '') + street;
+  }
+  return label ? label.slice(0, PLACE_MAX) : null;
+}
 let osmLast = 0, osmChain = Promise.resolve();
 async function osmName(lat, lng) {
   const key = geoKey(lat, lng);
@@ -1075,7 +1094,7 @@ async function osmName(lat, lng) {
       const res = await fetch(url, { cache: 'no-store', signal: ctl.signal, headers: { Accept: 'application/json' } });
       if (!res.ok) throw new Error('Nominatim HTTP ' + res.status);
       const j = await res.json();
-      const name = j && typeof j.name === 'string' && j.name.trim() ? j.name.trim().slice(0, PLACE_MAX) : null;
+      const name = osmLabel(j);
       await idb.put('geocache', { key, name, at: new Date().toISOString() });
       return name;
     } finally {

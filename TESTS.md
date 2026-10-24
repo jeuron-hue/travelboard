@@ -7,7 +7,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ## M1.3 Look and place (SPEC.md 7C)
 
-**Status 24/10/26: session A built; v11 run on the Pixel to step 6, which found the chips needed a fix the phone could not get indoors in airplane mode; fixed in v12. Steps 6 to 11 to run on v12. Session B not started.** Migration 0009 applied, `tb-journal` v6 deployed.
+**Status 24/10/26: session A built; v11 run on the Pixel to step 6, which found the chips needed a fix the phone could not get indoors in airplane mode; fixed in v12. v13 adds the address chip (Gary's decision). Steps 6 to 11 to run on v13. Session B not started.** Migration 0009 applied, `tb-journal` v6 deployed.
 
 ### Automated results, 24/10/26 (session A)
 
@@ -22,7 +22,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 | `m2.test.cjs` | PASS, 80 of 80 | The journal-kind capture is now an old row from the server. K1 rewritten: no quoted capture, the empty hint counts both captures; K3: Claude still sees it, unlabelled; K3, K4, K11 thread order without the quote. K2: no toggle, place or switches in the composer. K0, K12 IndexedDB v5. |
 | `m11.test.cjs` | PASS, 59 of 59, three runs | P0 IndexedDB v5. New P18: ten overlapping renders leave exactly one row per capture. Found while porting P17: two renders at once (a sync and a tap) interleaved their rows, doubling them or leaving the list empty for a moment; v10 had the same pattern. The day list is now built off-screen and only the newest render writes it. |
 | `m12.test.cjs` | PASS, 54 of 54 | Hooks kept (`#cap-share`, `#partners`, `#pw-*`, `#view-dlg`); only M0 (v11, IndexedDB v5) and M12 (export version) changed. |
-| `m13.test.cjs` (new) | PASS, 54 of 54, four runs; 61 of 61 on v12, three runs | Below. v12 adds N17. |
+| `m13.test.cjs` (new) | PASS, 54 of 54, four runs; 61 of 61 on v12, three runs; 64 of 64 on v13, two runs | Below. v12 adds N17, v13 N18. |
 | Visual | Checked | Headless screenshots at 390 x 844 of the day view, capture sheet with chips, edit sheet and journal, light and dark, against `design/m1.3/` (not committed). |
 | Deploy v11 | PASS | `main` at `01ff212`; Pages build succeeded. Live `sw.js` reads `const CACHE_VERSION = 11;` with the five new font files in its precache (Last-Modified 24/10/26 1322 hrs SGT), fetched through Apify. |
 
@@ -40,6 +40,7 @@ Headless M1.3 groups (`m13.test.cjs`, Gary's and Eric's phones on one mock, Nomi
 | N10, N11 | Three new places at once: three requests at least a second apart; an empty answer cached; an HTTP or network failure gives no chip and is not cached |
 | N12, N13 | Four own names: three chips, no lookup; a capture saved offline gets its map chip when opened later with signal |
 | N14 to N16 | Eric's phone never looks up Gary's rows; journal composer has no place field; export and Share text carry the name; heading reads city and count; rows: time, dot, no kind label |
+| N18 (v13) | No name but an address: the chip offers "238 Tampines Street 21" with the credit, nothing filled; a name wins; a street alone or a pedestrian street works; a house number with no street gives nothing; v12 cache keys are not read |
 | N17 (v12) | No fix at open: the last fix under 5 min old gives own chips at once, offline; the open-time request waits 30 s and takes a fix up to 5 min old; a fresh fix replaces the stand-in; a 10 min old last fix is not used; online, the stand-in never asks OpenStreetMap; a Save's fix becomes the last fix |
 
 ### Device results, v11 (Pixel, Gary), 24/10/26
@@ -56,18 +57,20 @@ From Gary's screenshots and the server rows.
 
 v12 (24/10/26): the open-time request waits up to 30 s and accepts a fix up to 5 min old; the last fix the app saw, if under 5 min old, gives own-name chips at once (no OpenStreetMap lookup until a fresh fix). A Save's own fix keeps the 5 s limit.
 
-### Device steps (Pixel, Chrome), v12: session A
+v13 (24/10/26, Gary's decision): where OpenStreetMap has no name, the map chip offers the address, house number and street. SPEC 7C.4 updated. Old cached empty answers are asked again once.
+
+### Device steps (Pixel, Chrome), v13: session A
 
 v11 is live (`const CACHE_VERSION = 11;` confirmed 24/10/26 1323 hrs). Gary only; the two-phone steps come with session B. Location is already allowed for travelboard on the Pixel. Note the time of each step.
 
-1. **Update.** Open travelboard; tap "Update ready, tap to reload" when it shows. Pill, Version reads v12. Close. Captures, photos and journal days are all still there.
+1. **Update.** Open travelboard; tap "Update ready, tap to reload" when it shows. Pill, Version reads v13. Close. Captures, photos and journal days are all still there.
 2. **The look (item 1, day view).** Paper-coloured page; "travelboard" in italic at the top left; the pill is a small tilted stamp (green "SYNCED"). Day title in the serif with "Singapore, N captures" under it; arrows on the right. Rows: the time in terracotta with "HRS" under it, a thin line with a dot, the place in bold (or coordinates in grey, or "no GPS"), the text, a tilted photo print. No "note" or "journal" labels anywhere, old journal captures included. Captures and Journal tabs sit above the Capture button. Compare with the approved mockup; report anything that differs.
 3. **Dark (item 1).** Pill, Theme. Night-blue page, light text, orange-terracotta times and button; everything readable. Theme again back to light. Report anything hard to read in either.
 4. **Capture sheet (item 1, 6a).** Capture. "New capture" title with an X; a sheet with the time in terracotta and today's date; PLACE with the coordinates as a grey hint; ruled lines; Photo and Save at the bottom. No Note/Journal toggle. Tap in the text, check the Gboard mic works, type `M1.3 test one`.
 5. **Name offline (item 2).** Airplane mode on (pill reads offline). Type `Home test` in Place. Save. The row shows `Home test` in bold; pill "offline, 1 queued". Airplane mode off; within about 30 s the pill reads synced.
 6. **Your own name as a chip, offline (item 3).** Same spot, airplane mode on (Wi-Fi off too). Capture: under Place, a blue chip `Home test` with a few metres; the field stays empty. Within 5 min of a Save it shows at once; otherwise it can take up to 30 s while the phone finds the satellites. Tap the chip: the field fills. Type `M1.3 test two`, Save. Airplane mode off.
 7. **Clear back to coordinates.** Tap `M1.3 test two`; tap the X at the end of the Place field; the field empties and shows the coordinates as a hint; Save. The row shows the coordinates in grey.
-8. **Map chip (items 4, 5).** At a named place with signal (a mall, shop, station or park, for example Tampines Mall; not a housing block, which OpenStreetMap knows only by its address): Capture. Within a few seconds a dashed terracotta chip shows the place's name, with "Map suggestion © OpenStreetMap contributors" under it; nothing is filled in. Tap it: the field fills. Type `M1.3 mall`, Save. (Item 5, one lookup per spot, is proven headless.)
+8. **Map chip (items 4, 5).** First at home with signal: Capture; within a few seconds a dashed chip reads `238 Tampines Street 21` (the address, as the block has no name) with the OpenStreetMap credit. Close. Then at a named place with signal (a mall, shop, station or park, for example Tampines Mall): Capture. Within a few seconds a dashed terracotta chip shows the place's name, with "Map suggestion © OpenStreetMap contributors" under it; nothing is filled in. Tap it: the field fills. Type `M1.3 mall`, Save. (Item 5, one lookup per spot, is proven headless.)
 9. **Draft keeps the place.** Capture, type `draft place` in Place and `draft text` in the text, swipe travelboard away, reopen: both come back. Close (X).
 10. **Edit sheet.** Tap any older capture: "Edit capture", its own time and date, its place, the date line and Delete at the foot of the sheet, the switches together above it. Close.
 11. **Journal (items 6, 6a part).** Journal tab: the thread shows only your turns and Claude's replies; no quoted captures, even on a day with old journal captures. (The journal screen keeps its present layout until session B.) Write `Where did I have lunch today?` and Send. The reply should name the mall from step 8 by its name.
@@ -86,7 +89,7 @@ To build (SPEC 7C.6 B)
 7. `renderJournal` has the same overlapping-render pattern fixed in `renderCaptures` (rows appended while awaiting). Build it off-screen the same way.
 
 Decisions put to Gary at the end of session A (answers to be recorded here)
-8a. Map chip where OpenStreetMap has an address but no name (Gary's HDB block: `238, Tampines Street 21`): offer the address as the chip, or nothing as now (7C.4 says the nearest named place)? If yes, the cached empty answers need a new cache key.
+8a. Map chip where OpenStreetMap has an address but no name: Gary said yes 24/10/26. Built in v13 (house number and street); SPEC 7C.4 and change log updated.
 8. SPEC 7C.4 says replace `tb_captures_upsert`; it is a pass-through and needed no change (change log 24/10/26). Agree to reword 7C.4?
 9. `--crit` light `#b42318` is close in hue to the accent `#B4472A` (7C.8 kept it). The error stamp still reads "sync error". Keep, or deepen `--crit`?
 

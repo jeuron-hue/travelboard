@@ -228,6 +228,8 @@ if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(
   check(/const NOMINATIM_URL = 'https:\/\/nominatim\.openstreetmap\.org\/reverse';/.test(trip) && /format=jsonv2&lat=/.test(trip) && /&zoom=18&accept-language=en/.test(trip)
     && /const NOMINATIM_GAP_MS = 1000;/.test(trip) && /idb\.put\('geocache'/.test(trip), 'M1.3: Nominatim reverse jsonv2, zoom 18, English, one a second, cached in geocache');
   check(/OpenStreetMap contributors/.test(trip), 'M1.3: OpenStreetMap credit shown with the map chip');
+  check(/function osmLabel\(j\)/.test(trip) && /const name = osmLabel\(j\);/.test(trip) && /=> `a:\$\{Math\.round/.test(trip),
+    'M1.3 v13: map chip falls back to the address; geocache keys carry "a:" (Gary 24/10/26)');
   check(/if \(url\.origin !== self\.location\.origin\) return;/.test(sw), 'M1.3: the service worker never caches Nominatim (cross-origin is network only)');
   if (exists(`${FN}/context.mjs`)) {
     const ctx = read(`${FN}/context.mjs`);
