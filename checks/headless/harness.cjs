@@ -440,7 +440,20 @@ async function newContext(browser, { tz, session, swBlock = true, uid = UID }) {
   return ctx;
 }
 
+// Waits until fn(arg), evaluated in the page, gives a truthy value; throws after timeout ms, like
+// page.waitForFunction. Use it for any condition that needs a Promise (IndexedDB): Playwright 1.56's
+// waitForFunction does not await a returned Promise, which is truthy, so such a wait returned at
+// once (found 24/10/26, M1.3 session B).
+async function until(page, fn, arg, { timeout = 5000, every = 50 } = {}) {
+  const end = Date.now() + timeout;
+  for (;;) {
+    if (await page.evaluate(fn, arg)) return true;
+    if (Date.now() > end) throw new Error('until: timed out after ' + timeout + ' ms');
+    await new Promise((r) => setTimeout(r, every));
+  }
+}
+
 // TB_CHROMIUM=/path/to/chrome runs against an installed Chromium instead of Playwright's own.
 const launch = () => chromium.launch(process.env.TB_CHROMIUM ? { executablePath: process.env.TB_CHROMIUM } : {});
 
-module.exports = { chromium, launch, startServer, makeMock, attachMock, newContext, sessionJson, loadContext, SUPA, UID, ERIC_UID, ROOT };
+module.exports = { until, chromium, launch, startServer, makeMock, attachMock, newContext, sessionJson, loadContext, SUPA, UID, ERIC_UID, ROOT };

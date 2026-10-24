@@ -18,6 +18,10 @@
 // - M1.3: Newsreader and Plex 500 vendored, 7C.8 tokens in both themes, IndexedDB v5 with
 //   geocache, no kind toggle, place_name pushed, chip and Nominatim limits, tb-journal sends no
 //   kind and takes the custom prompt, migration 0009 shape
+// - M1.3 session B: no browser dialogs (alert, confirm, prompt) in trip.html; the journal's
+//   inline field with Send and per-day drafts, no journal mode on the capture screen; the prompt
+//   editor on tb_prompt_get and tb_prompt_set with the 4,000 count and the default from
+//   prompts/<key>.md; Theme Light, Dark and Auto; the option B icon source drawn in paths only
 'use strict';
 
 const fs = require('fs');
@@ -240,6 +244,25 @@ if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(
   check(/^begin;$/m.test(m9) && /^commit;$/m.test(m9) && !/drop (policy|table|function|schema|column)/i.test(m9) && !/grant [^;]* to (anon|public)/i.test(m9)
     && (m9.match(/security definer/g) || []).length === 4 && (m9.match(/^alter table (\S+)/gm) || []).every((x) => /alter table travel\./.test(x))
     && !/storage\.|auth\.users/.test(m9.replace(/^--.*$/gm, '')), 'M1.3: 0009 in one transaction, travel and tb_ only, drops nothing, grants nothing to anon, 4 definer functions');
+}
+
+// ---------- M1.3 session B (SPEC.md 7C.2, 7C.2a, 7C.5, 7C.8) ----------
+{
+  const trip = read('trip.html');
+  const code = trip.replace(/<!--[\s\S]*?-->/g, '').replace(/^\s*\/\/.*$/gm, '');
+  check(!/(^|[^A-Za-z0-9_.])(alert|confirm|prompt)\s*\(/m.test(code) && !/window\.(alert|confirm|prompt)\b/.test(code),
+    'M1.3 B: no browser dialogs (alert, confirm, prompt) anywhere in trip.html');
+  check(/<dialog id="confirm-dlg"/.test(trip) && /function askConfirm\(/.test(trip) && /const notice = /.test(trip),
+    'M1.3 B: the app\'s own confirm and notice sheet');
+  check(/<textarea id="j-input"/.test(trip) && /<button id="j-send"/.test(trip) && /'journal:' \+ day/.test(trip)
+    && !/openJournalComposer|mode === 'journal'|cap\.jdate/.test(trip), 'M1.3 B: inline journal field with Send and a draft per day; no journal mode on the capture screen');
+  check(/const PROMPT_MAX = 4000;/.test(trip) && /sb\.rpc\('tb_prompt_get'\)/.test(trip) && /sb\.rpc\('tb_prompt_set', \{ p_text: pText \}\)/.test(trip)
+    && /fetch\(`prompts\/\$\{key\}\.md`/.test(trip) && /id="prompt-reset"/.test(trip), 'M1.3 B: prompt editor on tb_prompt_get and tb_prompt_set, 4,000 count, default from prompts/<key>.md, Reset to default');
+  check(['light', 'dark', 'auto'].every((t) => trip.includes(`data-theme-choice="${t}"`)) && /prefers-color-scheme: light/.test(trip),
+    'M1.3 B: Theme Light, Dark and Auto (Auto follows the phone)');
+  const icon = exists('design/m1.3/icon-b.svg') ? read('design/m1.3/icon-b.svg') : '';
+  check(!!icon && !/<text\b|font-family/.test(icon) && /#1F2A36/.test(icon) && /#B4472A/.test(icon) && /rotate\(-6 50 52\)/.test(icon),
+    'M1.3 B: icon source (option B) in paths only, no font; icons regenerated from it by design/m1.3/make-icons.cjs');
 }
 
 // ---------- keep-alive workflow (SPEC.md 6.8 step 5) ----------

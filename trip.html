@@ -30,15 +30,35 @@
     switch, default on; shared captures of the other person are kept read-only on this phone
     (with their photos, so they show offline), shown in the day view with a name label and
     opened in a read-only view. Journals stay private.
-  - M1.3 Look and place (SPEC.md 7C): field-notebook identity (Newsreader for headings,
-    IBM Plex Sans for the rest, the approved 7C.8 tokens in light and dark); header with the
-    sync stamp; day view as a timeline (time, place, text, photo print); capture and edit as a
-    paper sheet with no kind toggle (every capture is a note, 7C.2a); place names: typed, or
-    one tap on a chip from your own names within 75 m (offline) or the nearest OpenStreetMap
-    name (online, Nominatim, cached in IndexedDB by position, at most one request a second),
-    never filled in automatically.
+  - M1.3 Look and place (SPEC.md 7C): field-notebook identity (Newsreader headings, Plex
+    body, 7C.8 tokens in light and dark); day view as a timeline; capture and edit as a paper
+    sheet, no kind toggle; place names typed or from chips (own names within 75 m offline, the
+    OpenStreetMap name online, cached), never filled in automatically; journal as a notebook
+    page with an inline field at the foot; Settings sheet; prompt editor; no browser dialogs.
 
   Change log (newest first)
+  - 24/10/26 0.14.0. M1.3 session B (SPEC.md 7C.2, 7C.2a Panels, 7C.5, 7C.8). Journal: the Write
+    button and its full-screen composer are gone; the Journal tab's foot holds the tabs, then a
+    text field and Send. The field grows with the text up to 40% of the screen, keeps the draft
+    of the day on screen (drafts journal:<date>, open while typing, so a force-close comes back
+    to it), is never switched to another day while in use, and one tap on Send stores the turn
+    as pending for the sync engine as before. The thread is a notebook page: a margin rule, a
+    caps label (name and time), own turns in Plex with the accent rule, Claude's replies in
+    Newsreader 17.5 px with the blue rule, no bubbles; sending, queued and not sent with Retry
+    as before. The day title is the serif heading with its title suffix under it (tap either to
+    edit); Days and Share as links; the day list in the serif on hairlines. renderJournal builds
+    off-screen and only the newest render writes, as renderCaptures since v11. Share text names
+    the phone's own person (Eric's turns were labelled Gary). Settings to the approved panel: a
+    bottom sheet with a grabber and an X; the status block with its own stamp and Sync now, then
+    Sync, Last sync, Last error, Storage, Version; Travelling with (one row per person, state in
+    words, Add or Remove); Journal (My journal prompt, Export); Account (email and Sign out,
+    Password and Change, or the sign-in form when signed out); Theme as Light, Dark and Auto.
+    Auto stores nothing and now follows the phone live. Prompt editor: tb_prompt_get, the custom
+    text or the default from prompts/<key>.md, a count against 4,000, Save (text equal to the
+    default stores none), Cancel, Reset to default; needs a connection, not queued. Remove and
+    Reset ask in the app's own confirm sheet; every alert became the same sheet with OK; no
+    browser dialog is left. Photo, partner view and day title sheets in the same style. New app
+    icon, option B (notebook page and pin), regenerated from design/m1.3/icon-b.svg.
   - 24/10/26 0.13.0. Version numbers become 0.<minor>.<patch> (Gary's decision): APP_VERSION and
     the service worker's CACHE_VERSION are '0.13.0', the panel shows 0.13.0, the cache is
     tb-shell-v0.13.0, and the export's app_version is the string. Same behaviour as v13.
@@ -138,7 +158,8 @@
 <link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <script>
-  // Apply the theme before first paint. Choice persisted in localStorage.
+  // Apply the theme before first paint. Light or Dark persisted in localStorage; none is Auto,
+  // which follows the phone (and, from 0.14.0, follows it live: showTheme in the script below).
   (function () {
     var t = null;
     try { t = localStorage.getItem('tb-theme'); } catch (e) {}
@@ -241,11 +262,12 @@
     border: 1.5px solid currentColor; border-radius: 4px; transform: rotate(-2deg);
     font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap;
   }
-  .status[data-state="synced"]  { color: var(--good); }
-  .status[data-state="queued"]  { color: var(--warn); }
-  .status[data-state="signin"]  { color: var(--blue); }
-  .status[data-state="offline"] { color: var(--muted); }
-  .status[data-state="error"]   { color: var(--crit); }
+  .status[data-state="synced"],  .statustop[data-state="synced"]  { color: var(--good); }
+  .status[data-state="queued"],  .statustop[data-state="queued"]  { color: var(--warn); }
+  .status[data-state="signin"],  .statustop[data-state="signin"]  { color: var(--blue); }
+  .status[data-state="offline"], .statustop[data-state="offline"] { color: var(--muted); }
+  .status[data-state="error"],   .statustop[data-state="error"]   { color: var(--crit); }
+  .statustop .link { color: var(--ink); }
   .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
   .dot.synced { width: 10px; height: 6px; border-radius: 0; background: none; transform: rotate(-45deg) translate(1px, -1px);
     border-left: 1.8px solid currentColor; border-bottom: 1.8px solid currentColor; }
@@ -270,7 +292,8 @@
   .arrow:disabled { color: var(--muted); opacity: 0.5; cursor: default; }
   .arrow svg, .xbtn svg { pointer-events: none; }
 
-  main { flex: 1; overflow-y: auto; padding: 0 0 170px; }
+  /* --foot-h: the footer's height, kept current by a ResizeObserver (the journal field grows). */
+  main { flex: 1; overflow-y: auto; padding: 0 0 calc(var(--foot-h, 140px) + 30px); }
   .list { padding: 4px 16px 0 12px; }
   .hint { color: var(--muted); font-size: 15px; margin: 12px 0 12px 8px; }
 
@@ -416,19 +439,16 @@
   }
   .capbar .save:disabled { opacity: 0.4; cursor: default; }
 
-  #view-dlg .sheet { max-height: 85vh; overflow-y: auto; }
-  #view-dlg img { display: block; max-width: 100%; max-height: 50vh; margin: 8px 0; border: 5px solid var(--print); box-shadow: 0 1px 3px var(--shadow); }
-  #view-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
-  .meta-line { color: var(--muted); font-size: 15px; margin: 4px 0; }
-  .partner-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
-  .partner-row span { flex: 1; }
-  form.pw { display: grid; gap: 8px; margin: 12px 0; }
-  form.pw input { min-height: 48px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--ground); }
-  .ok { color: var(--good); font-size: 15px; min-height: 1.2em; margin: 0; }
+  #view-dlg img { display: block; max-width: 100%; max-height: 50vh; margin: 4px 0 8px; border: 5px solid var(--print); box-shadow: 0 1px 3px var(--shadow); transform: rotate(-1.5deg); }
+  #view-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 8px; font-size: 16px; line-height: 1.5; }
+  .meta-line { color: var(--muted); font-size: 15px; margin: 0; }
+  #view-meta { font-variant-numeric: tabular-nums; }
+  .ok { color: var(--good); font-size: 14px; margin: 0; }
+  .ok:empty, .err:empty { display: none; }
 
   #toast {
     position: fixed; left: 16px; right: 16px; z-index: 4;
-    bottom: calc(env(safe-area-inset-bottom) + 156px);
+    bottom: calc(var(--foot-h, 140px) + 16px);
     display: flex; align-items: center; gap: 12px;
     min-height: 52px; padding: 4px 4px 4px 16px; border-radius: 10px;
     background: var(--ink); color: var(--ground);
@@ -465,71 +485,139 @@
 
   #update-bar {
     position: fixed; left: 16px; right: 16px; z-index: 3;
-    bottom: calc(env(safe-area-inset-bottom) + 150px);
+    bottom: calc(var(--foot-h, 140px) + 10px);
     min-height: 52px; border-radius: 10px; border: 1.5px solid var(--accent);
     background: var(--accent-bg); color: var(--ink); font-weight: 600; cursor: pointer;
   }
   #update-bar[hidden] { display: none; }
 
+  /* Sheets (SPEC.md 7C.2a Panels, 7C.8): bottom sheets with a grabber, radius 14 px, paper
+     surface, serif titles, 54 px buttons at the foot. Every dialog in the app is one of these;
+     the browser's own alert, confirm and prompt are never used. */
   dialog {
     width: 100%; max-width: 560px; margin: auto auto 0; padding: 0;
+    max-height: calc(100% - 40px);
     border: 0; border-radius: 14px 14px 0 0;
     background: var(--surface); color: var(--ink);
   }
   dialog::backdrop { background: var(--scrim); }
-  .sheet { padding: 16px 20px calc(env(safe-area-inset-bottom) + 16px); }
-  .sheet h2 { font-family: var(--serif); font-weight: 600; font-size: 24px; margin: 0 0 8px; }
-  .rows { margin: 0 0 12px; }
-  .rows div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
-  .rows dt { color: var(--muted); }
-  .rows dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
-  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
-  .actions.pick { display: grid; gap: 12px; }
-  .actions.pick .btn { min-height: 54px; font-size: 17px; }
-  .btn {
-    min-height: 48px; padding: 0 16px; border-radius: 10px; cursor: pointer;
-    border: 1.5px solid var(--line); background: var(--ground);
+  .sheet {
+    display: flex; flex-direction: column; gap: 14px;
+    padding: 8px 20px calc(env(safe-area-inset-bottom) + 22px);
   }
-  form.signin { display: grid; gap: 8px; margin: 12px 0; }
-  form.signin input {
-    min-height: 48px; padding: 0 12px; border-radius: 10px;
-    border: 1px solid var(--line); background: var(--ground);
+  .grabber { align-self: center; width: 40px; height: 4px; border-radius: 2px; background: var(--line); flex: none; }
+  .sheethead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .sheethead .xbtn { margin-right: -10px; }
+  .sheet h2 { font-family: var(--serif); font-weight: 600; font-size: 28px; line-height: 1.15; margin: 0; overflow-wrap: anywhere; }
+  .sheetbar { display: flex; gap: 10px; }
+  .sheetbar .btn2, .sheetbar .save, .btn {
+    min-height: 54px; border-radius: 10px; cursor: pointer; font-size: 17px; font-weight: 500;
   }
-  .err { color: var(--crit); font-size: 15px; min-height: 1.2em; margin: 0; }
+  .sheetbar .btn2, .btn { flex: 1; padding: 0 16px; border: 1.5px solid var(--line); background: transparent; }
+  .sheetbar .save {
+    flex: 2.2; border: 0; background: var(--accent); color: var(--on-accent); font-size: 18px; font-weight: 600;
+  }
+  .sheetbar .save:disabled, .sheetbar .btn2:disabled { opacity: 0.4; cursor: default; }
+  .actions.pick { display: grid; gap: 10px; }
+  .field {
+    width: 100%; min-height: 54px; padding: 0 14px; border-radius: 10px;
+    border: 1.5px solid var(--line); background: var(--ground); font-size: 17px; outline: none;
+  }
+  .field:focus { border-color: var(--muted); }
+  .err { color: var(--crit); font-size: 14px; margin: 0; }
+  .danger { color: var(--accent); }
 
-  /* Journal (restyled in M1.3 session B; tokens only for now) */
-  .daybar {
-    position: sticky; top: 0; z-index: 1;
-    display: grid; align-items: center; gap: 8px;
-    padding: 8px 16px; background: var(--ground); border-bottom: 1px solid var(--line);
+  /* Settings (Panel.dc.html): status block, then groups of ruled rows, then Theme */
+  .statusbox {
+    display: flex; flex-direction: column; gap: 8px; padding: 12px 14px 8px;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--ground);
   }
-  .daybar button {
-    min-height: 48px; border-radius: 10px; border: 1.5px solid var(--line);
-    background: var(--surface); cursor: pointer; font-size: 17px;
+  .statustop { display: flex; align-items: center; justify-content: space-between; }
+  .statustop .stamp { max-width: 70%; overflow: hidden; text-overflow: ellipsis; }
+  .kv { margin: 0; display: grid; grid-template-columns: 96px minmax(0, 1fr); row-gap: 5px; column-gap: 12px; font-size: 14px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  .group { display: flex; flex-direction: column; }
+  .group h3 { margin: 0 0 2px; }
+  .prow {
+    min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    border-bottom: 1px solid var(--line);
   }
-  .jbar { grid-template-columns: auto 1fr auto; }
-  .jbar #j-share, .jbar #j-days { padding: 0 14px; }
-  .jbar #j-title { font-family: var(--serif); font-weight: 600; font-size: 19px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 10px; }
-  .jbar #j-title.today { color: var(--accent); }
-  .thread { list-style: none; margin: 0; padding: 12px 16px 0; display: flex; flex-direction: column; gap: 10px; }
-  .msg { max-width: 88%; padding: 10px 12px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 16px; }
-  .msg.user { align-self: flex-end; background: var(--accent-bg); color: var(--ink); border-bottom-right-radius: 4px; }
-  .msg.assistant { align-self: flex-start; background: var(--surface); border: 1px solid var(--line); border-bottom-left-radius: 4px; font-family: var(--serif); font-size: 17.5px; line-height: 1.5; }
-  .msg .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; line-height: 1.4; color: var(--muted); white-space: normal; }
-  .msg .retry { min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--crit); background: var(--surface); color: var(--crit); font-weight: 600; cursor: pointer; }
-  .typing { align-self: flex-start; color: var(--muted); font-size: 15px; padding: 0 4px; }
-  ul.days { list-style: none; margin: 0; padding: 12px 16px 0; }
-  ul.days li { margin-bottom: 8px; }
-  .dayrow { display: block; padding: 10px 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); }
-  .dayrow .line1 { display: flex; align-items: center; gap: 8px; min-height: 26px; }
-  .dayrow .when { display: inline; font-family: var(--serif); font-weight: 600; font-size: 18px; }
+  .ptext { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 6px 0; }
+  .ptext .lbl { font-size: 16px; overflow-wrap: anywhere; }
+  .ptext .detail { font-size: 13px; color: var(--muted); }
+  .ptext .detail.live { color: var(--blue); }
+  .prow .link { flex: none; }
+  .group > .err, .group > .ok, .group > .hint { margin: 8px 0 0; }
+  form.pw, form.signin { display: grid; gap: 10px; padding: 12px 0 4px; }
+  form.signin .primary { margin-top: 2px; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button {
+    flex: 1; min-height: 44px; border: 0; background: transparent; color: var(--muted); font-size: 15px; cursor: pointer;
+  }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-checked="true"] { background: var(--ink); color: var(--surface); font-weight: 600; }
+  .themebox { display: flex; flex-direction: column; gap: 6px; }
+
+  /* Prompt editor (SPEC.md 7C.5) */
+  #prompt-text {
+    width: 100%; height: 42vh; min-height: 200px; resize: none; padding: 12px 14px; border-radius: 10px;
+    border: 1.5px solid var(--line); background: var(--ground); font-size: 16px; line-height: 1.5; outline: none;
+  }
+  #prompt-text:focus { border-color: var(--muted); }
+  .countline { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: -6px; }
+  #prompt-count { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  #prompt-count.over { color: var(--crit); font-weight: 600; }
+  #prompt-reset { align-self: flex-start; color: var(--accent); }
+  #prompt-reset:disabled { color: var(--muted); opacity: 0.6; cursor: default; }
+
+  /* Journal (SPEC.md 7C.2, Journal.dc.html): the day's thread as a notebook page. Own turns in
+     Plex with the accent rule, Claude's replies in Newsreader with the blue rule; no bubbles. */
+  .dayhead .jlinks { display: flex; flex: none; }
+  .dayhead .jlinks .link { padding: 0 10px; }
+  #j-title {
+    padding: 0; border: 0; background: transparent; cursor: pointer; text-align: left;
+    font-family: var(--serif); font-weight: 600; font-size: 34px; line-height: 1.1; letter-spacing: -0.01em;
+  }
+  #j-sub {
+    padding: 0; border: 0; background: transparent; cursor: pointer; text-align: left;
+    font-size: 15px; color: var(--muted); overflow-wrap: anywhere;
+  }
+  #j-sub[data-empty="1"] { text-decoration: underline; text-underline-offset: 3px; }
+  .thread { list-style: none; margin: 0; padding: 16px 20px 0; display: flex; flex-direction: column; gap: 18px; }
+  .msg { display: flex; gap: 12px; }
+  .msg::before { content: ''; width: 3px; flex: none; border-radius: 2px; background: var(--accent); }
+  .msg.assistant::before, .typing::before { background: var(--blue); }
+  .msg .mbody { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .msg .who { font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+  .msg.assistant .who { color: var(--blue); }
+  .msg .text { margin: 0; font-size: 16px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg.assistant .text { font-family: var(--serif); font-size: 17.5px; }
+  .msg .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; line-height: 1.4; color: var(--muted); }
+  .msg .retry { min-height: 44px; padding: 0 14px; border-radius: 10px; border: 1.5px solid var(--crit); background: transparent; color: var(--crit); font-weight: 600; cursor: pointer; }
+  .typing { display: flex; gap: 12px; color: var(--muted); font-family: var(--serif); font-style: italic; font-size: 17px; }
+  .typing::before { content: ''; width: 3px; flex: none; border-radius: 2px; opacity: 0.5; }
+  ul.days { list-style: none; margin: 0; padding: 4px 20px 0; }
+  .dayrow { display: block; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .dayrow .line1 { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+  .dayrow .when { display: inline; font-family: var(--serif); font-weight: 600; font-size: 20px; }
   .dayrow .when.today { color: var(--accent); }
-  .dayrow .line2 { color: var(--muted); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dayrow .line2 { color: var(--muted); font-size: 14px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .spacer { flex: 1; }
-  #suffix-dlg input {
-    width: 100%; min-height: 48px; padding: 0 12px; border-radius: 10px;
-    border: 1px solid var(--line); background: var(--ground); margin: 4px 0 8px;
+  /* The inline field at the foot (7C.2): grows with the text, Send beside it. */
+  .jinput { display: flex; align-items: flex-end; gap: 8px; }
+  #j-input {
+    flex: 1; min-width: 0; min-height: 54px; height: 54px; resize: none; padding: 13px 14px; overflow-y: auto;
+    border: 1.5px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink);
+    font-size: 17px; line-height: 1.4; outline: none;
   }
+  #j-input::placeholder { color: var(--muted); opacity: 1; }
+  #j-send {
+    width: 54px; height: 54px; flex: none; display: flex; align-items: center; justify-content: center;
+    border: 0; border-radius: 10px; background: var(--accent); color: var(--on-accent); cursor: pointer;
+  }
+  #j-send:disabled { opacity: 0.4; cursor: default; }
+  #j-send svg { pointer-events: none; }
 </style>
 </head>
 <body>
@@ -551,11 +639,16 @@
   </div>
 </section>
 
-<nav class="daybar jbar" id="jbar" aria-label="Journal day" hidden>
-  <button id="j-days" type="button">Days</button>
-  <button id="j-title" type="button" aria-label="Day title, tap to add a title">-</button>
-  <button id="j-share" type="button" aria-label="Share this day as text">Share</button>
-</nav>
+<section class="dayhead" id="jbar" aria-label="Journal day" hidden>
+  <div class="titles">
+    <h1><button id="j-title" type="button" aria-label="Day title, tap to add a title">-</button></h1>
+    <button id="j-sub" type="button" aria-label="Day title, tap to add a title"></button>
+  </div>
+  <div class="jlinks">
+    <button class="link" id="j-days" type="button">Days</button>
+    <button class="link" id="j-share" type="button" aria-label="Share this day as text">Share</button>
+  </div>
+</section>
 
 <main>
   <div class="list" id="captures-view">
@@ -578,6 +671,11 @@
     <button id="tab-captures" type="button" aria-pressed="true">Captures</button>
     <button id="tab-journal" type="button" aria-pressed="false">Journal</button>
   </nav>
+  <div class="jinput" id="j-compose" hidden>
+    <label class="sr" for="j-input">Write to your journal</label>
+    <textarea id="j-input" rows="1" maxlength="20000" autocomplete="off" spellcheck="true" enterkeyhint="enter" placeholder="Tell Claude about today"></textarea>
+    <button id="j-send" type="button" aria-label="Send" disabled><svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><path d="M4 11h13M12 5.5 17.5 11 12 16.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+  </div>
   <button class="primary" id="capture" type="button"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg><span id="primary-label">Capture</span><small id="draft-note" hidden>draft kept</small></button>
 </footer>
 
@@ -627,72 +725,156 @@
 
 <dialog id="photo-dlg" aria-label="Add a photo">
   <div class="sheet">
+    <div class="grabber" aria-hidden="true"></div>
     <h2>Photo</h2>
     <div class="actions pick">
       <button class="btn" id="photo-camera" type="button">Camera</button>
       <button class="btn" id="photo-gallery" type="button">Gallery</button>
-      <button class="btn" id="photo-cancel" type="button">Cancel</button>
     </div>
+    <div class="sheetbar"><button class="link" id="photo-cancel" type="button">Cancel</button></div>
   </div>
 </dialog>
 
 <dialog id="view-dlg" aria-label="Shared capture">
   <div class="sheet">
-    <h2 id="view-head">-</h2>
+    <div class="grabber" aria-hidden="true"></div>
+    <div class="sheethead"><h2 id="view-head">-</h2></div>
     <p class="meta-line" id="view-meta"></p>
     <img id="view-img" alt="Photo on this shared capture" hidden>
     <p class="meta-line" id="view-nophoto" hidden>Photo not on this phone yet; it downloads on the next sync.</p>
     <div id="view-body"></div>
-    <div class="actions"><button class="btn" id="view-close" type="button">Close</button></div>
+    <div class="sheetbar"><button class="btn2" id="view-close" type="button">Close</button></div>
   </div>
 </dialog>
 
-<dialog id="suffix-dlg">
+<dialog id="suffix-dlg" aria-label="Day title">
   <form class="sheet" id="suffix-form" method="dialog">
+    <div class="grabber" aria-hidden="true"></div>
     <h2 id="suffix-head">Day title</h2>
-    <input id="suffix-input" type="text" maxlength="200" autocomplete="off" placeholder="For example: Bangkok day 1">
-    <div class="actions">
-      <button class="btn" id="suffix-save" type="submit" value="save">Save</button>
-      <button class="btn" id="suffix-cancel" type="submit" value="cancel" formnovalidate>Cancel</button>
+    <label class="sr" for="suffix-input">Title for the day</label>
+    <input class="field" id="suffix-input" type="text" maxlength="200" autocomplete="off" placeholder="For example: Bangkok day 1">
+    <div class="sheetbar">
+      <button class="btn2" id="suffix-cancel" type="submit" value="cancel" formnovalidate>Cancel</button>
+      <button class="save" id="suffix-save" type="submit" value="save">Save</button>
     </div>
   </form>
 </dialog>
 
-<dialog id="settings">
+<dialog id="settings" aria-label="Settings">
   <div class="sheet">
-    <h2>Settings</h2>
-    <dl class="rows">
-      <div><dt>Sync</dt><dd id="s-sync">-</dd></div>
-      <div><dt>Last sync</dt><dd id="s-last">never</dd></div>
-      <div><dt>Last error</dt><dd id="s-error">none</dd></div>
-      <div><dt>Storage</dt><dd id="s-persist">-</dd></div>
-      <div><dt>Signed in</dt><dd id="s-user">no</dd></div>
-      <div><dt>Version</dt><dd id="s-version">-</dd></div>
-    </dl>
-    <div id="partners"></div>
-    <form class="signin" id="signin" hidden>
-      <input id="email" type="email" autocomplete="username" placeholder="Email" required>
-      <input id="password" type="password" autocomplete="current-password" placeholder="Password" required>
-      <button class="primary" type="submit">Sign in to sync</button>
-      <p class="err" id="signin-err"></p>
-    </form>
-    <form class="pw" id="pw-form" novalidate hidden>
-      <input id="pw-new" type="password" autocomplete="new-password" placeholder="New password, at least 10 characters" minlength="10" required>
-      <input id="pw-again" type="password" autocomplete="new-password" placeholder="New password again" minlength="10" required>
-      <div class="actions">
-        <button class="btn" id="pw-save" type="submit">Save password</button>
-        <button class="btn" id="pw-cancel" type="button">Cancel</button>
+    <div class="grabber" aria-hidden="true"></div>
+    <div class="sheethead">
+      <h2>Settings</h2>
+      <button class="xbtn" id="close" type="button" aria-label="Close panel"><svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><path d="M5.5 5.5l11 11M16.5 5.5l-11 11" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg></button>
+    </div>
+
+    <section class="statusbox" aria-label="Sync status">
+      <div class="statustop" id="s-state">
+        <span class="stamp" id="s-stamp">-</span>
+        <button class="link" id="sync-now" type="button">Sync now</button>
       </div>
-    </form>
-    <p class="err" id="pw-err"></p>
-    <p class="ok" id="pw-ok"></p>
-    <div class="actions">
-      <button class="btn" id="sync-now" type="button">Sync now</button>
-      <button class="btn" id="export" type="button">Export</button>
-      <button class="btn" id="theme" type="button">Theme</button>
-      <button class="btn" id="pw-open" type="button" hidden>Change password</button>
-      <button class="btn" id="signout" type="button" hidden>Sign out</button>
-      <button class="btn" id="close" type="button" autofocus>Close</button>
+      <dl class="kv">
+        <dt>Sync</dt><dd id="s-sync">-</dd>
+        <dt>Last sync</dt><dd id="s-last">never</dd>
+        <dt>Last error</dt><dd id="s-error">none</dd>
+        <dt>Storage</dt><dd id="s-persist">-</dd>
+        <dt>Version</dt><dd id="s-version">-</dd>
+      </dl>
+    </section>
+
+    <section class="group" id="g-partners" hidden>
+      <h3 class="caps">Travelling with</h3>
+      <div id="partners"></div>
+    </section>
+
+    <section class="group">
+      <h3 class="caps">Journal</h3>
+      <div class="prow" id="prompt-row" hidden>
+        <div class="ptext"><span class="lbl">My journal prompt</span><span class="detail" id="prompt-detail">The text Claude starts your journal from</span></div>
+        <button class="link" id="prompt-open" type="button">Edit</button>
+      </div>
+      <div class="prow">
+        <div class="ptext"><span class="lbl">Export</span><span class="detail">Every capture on this phone, as JSON</span></div>
+        <button class="link" id="export" type="button">Export</button>
+      </div>
+      <p class="err" id="prompt-row-err" aria-live="polite"></p>
+      <p class="ok" id="prompt-row-ok" aria-live="polite"></p>
+    </section>
+
+    <section class="group">
+      <h3 class="caps">Account</h3>
+      <div class="prow" id="acct-row" hidden>
+        <div class="ptext"><span class="lbl" id="s-user">no</span><span class="detail">Signed in</span></div>
+        <button class="link" id="signout" type="button" hidden>Sign out</button>
+      </div>
+      <div class="prow" id="pw-row" hidden>
+        <div class="ptext"><span class="lbl">Password</span><span class="detail">Set your own password</span></div>
+        <button class="link" id="pw-open" type="button" hidden>Change</button>
+      </div>
+      <form class="pw" id="pw-form" novalidate hidden>
+        <label class="sr" for="pw-new">New password</label>
+        <input class="field" id="pw-new" type="password" autocomplete="new-password" placeholder="New password, at least 10 characters" minlength="10" required>
+        <label class="sr" for="pw-again">New password again</label>
+        <input class="field" id="pw-again" type="password" autocomplete="new-password" placeholder="New password again" minlength="10" required>
+        <div class="sheetbar">
+          <button class="btn2" id="pw-cancel" type="button">Cancel</button>
+          <button class="save" id="pw-save" type="submit">Save password</button>
+        </div>
+      </form>
+      <p class="err" id="pw-err" aria-live="polite"></p>
+      <p class="ok" id="pw-ok" aria-live="polite"></p>
+      <form class="signin" id="signin" hidden>
+        <label class="sr" for="email">Email</label>
+        <input class="field" id="email" type="email" autocomplete="username" placeholder="Email" required>
+        <label class="sr" for="password">Password</label>
+        <input class="field" id="password" type="password" autocomplete="current-password" placeholder="Password" required>
+        <button class="primary" type="submit">Sign in to sync</button>
+        <p class="err" id="signin-err" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <div class="themebox">
+      <span class="caps" id="theme-label">Theme</span>
+      <div class="seg" role="radiogroup" aria-labelledby="theme-label">
+        <button type="button" role="radio" id="theme-light" data-theme-choice="light" aria-checked="false">Light</button>
+        <button type="button" role="radio" id="theme-dark" data-theme-choice="dark" aria-checked="false">Dark</button>
+        <button type="button" role="radio" id="theme-auto" data-theme-choice="auto" aria-checked="false">Auto</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="prompt-dlg" aria-label="My journal prompt">
+  <div class="sheet">
+    <div class="grabber" aria-hidden="true"></div>
+    <div class="sheethead">
+      <h2>My journal prompt</h2>
+      <button class="xbtn" id="prompt-close" type="button" aria-label="Close, changes not kept"><svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><path d="M5.5 5.5l11 11M16.5 5.5l-11 11" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg></button>
+    </div>
+    <p class="meta-line" id="prompt-state"></p>
+    <label class="sr" for="prompt-text">Journal prompt</label>
+    <textarea id="prompt-text" autocomplete="off" spellcheck="true"></textarea>
+    <div class="countline">
+      <span id="prompt-count" aria-live="polite">0 of 4,000</span>
+      <button class="link" id="prompt-reset" type="button">Reset to default</button>
+    </div>
+    <p class="err" id="prompt-err" aria-live="polite"></p>
+    <p class="ok" id="prompt-ok" aria-live="polite"></p>
+    <div class="sheetbar">
+      <button class="btn2" id="prompt-cancel" type="button">Cancel</button>
+      <button class="save" id="prompt-save" type="button" disabled>Save</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="confirm-dlg" aria-labelledby="confirm-head">
+  <div class="sheet">
+    <div class="grabber" aria-hidden="true"></div>
+    <h2 id="confirm-head">-</h2>
+    <p class="meta-line" id="confirm-body"></p>
+    <div class="sheetbar">
+      <button class="btn2" id="confirm-cancel" type="button">Cancel</button>
+      <button class="save" id="confirm-ok" type="button">OK</button>
     </div>
   </div>
 </dialog>
@@ -702,7 +884,7 @@
 'use strict';
 
 // Bump together with CACHE_VERSION in sw.js on every release.
-const APP_VERSION = '0.13.0';     // 0.<minor>.<patch> from 0.13.0 (was 13), Gary 24/10/26
+const APP_VERSION = '0.14.0';     // 0.<minor>.<patch> from 0.13.0 (was 13), Gary 24/10/26
 
 const PROJECT_REF = 'nnnnonspfljdkrxstslw';           // Supabase project travelboard (SPEC.md D3, 6.8)
 const SUPABASE_URL = 'https://' + PROJECT_REF + '.supabase.co';
@@ -1111,7 +1293,7 @@ async function osmName(lat, lng) {
 // The capture screen's position for chips: the saved capture's coordinates in an edit, or the
 // fix taken at open for a new capture (only when location is already granted, see fixAtOpen).
 function capPos() {
-  if (!cap.open || cap.mode === 'journal') return null;
+  if (!cap.open) return null;
   if (cap.mode === 'edit') return cap.row && cap.row.lat != null && cap.row.lng != null ? { lat: cap.row.lat, lng: cap.row.lng } : null;
   return cap.fix;
 }
@@ -1206,12 +1388,12 @@ async function fixAtOpen(seq) {
 
 // ---------- capture screen ----------
 
-// mode 'new' (draft key "new"), 'edit' (draft key = capture id) or 'journal' (the same
-// screen as the journal composer, draft key "journal:<local_date>", Save reads Send).
+// mode 'new' (draft key "new") or 'edit' (draft key = capture id). The journal no longer uses
+// this screen: it writes in the inline field at the foot of the Journal tab (SPEC.md 7C.2).
 // fix: a new capture's position at open (chips only); seq counts openings; osm: this opening's
 // OpenStreetMap lookup.
-const cap = { open: false, mode: null, row: null, busy: false, jdate: null, photo: null, toClaude: true, share: false, fix: null, seq: 0, osm: null };
-const draftKey = () => (cap.mode === 'new' ? 'new' : cap.mode === 'journal' ? 'journal:' + cap.jdate : cap.row.id);
+const cap = { open: false, mode: null, row: null, busy: false, photo: null, toClaude: true, share: false, fix: null, seq: 0, osm: null };
+const draftKey = () => (cap.mode === 'new' ? 'new' : cap.row.id);
 const capBody = () => $('cap-body').value.trim().slice(0, BODY_MAX);
 const capPlace = () => $('cap-place').value.trim().slice(0, PLACE_MAX) || null;
 // The photo on the capture screen (SPEC.md 7A.2). state: 'none'; 'keep' (the saved capture's
@@ -1219,7 +1401,7 @@ const capPlace = () => $('cap-place').value.trim().slice(0, PLACE_MAX) || null;
 // edit that takes the saved photo off). A photo counts as content: Save works without text.
 const hasPhoto = () => !!cap.photo && (cap.photo.state === 'new' || cap.photo.state === 'keep');
 function updateSaveEnabled() {
-  $('cap-save').disabled = cap.busy || (capBody() === '' && !(cap.mode !== 'journal' && hasPhoto()));
+  $('cap-save').disabled = cap.busy || (capBody() === '' && !hasPhoto());
 }
 
 let photoUrl = null;
@@ -1268,7 +1450,7 @@ async function shrinkPhoto(file) {
 // The draft's photo: an object for a photo attached on this screen, null for an edit that
 // removes the saved photo, absent otherwise.
 function draftPhoto() {
-  if (!cap.photo || cap.mode === 'journal') return undefined;
+  if (!cap.photo) return undefined;
   if (cap.photo.state === 'new') return { blob: cap.photo.blob, w: cap.photo.w, h: cap.photo.h, bytes: cap.photo.bytes };
   if (cap.photo.state === 'removed') return null;
   return undefined;
@@ -1277,8 +1459,9 @@ function draftRecord(open) {
   const d = { id: draftKey(), body: $('cap-body').value, open, updated_at: new Date().toISOString() };
   const ph = draftPhoto();
   if (ph !== undefined) d.photo = ph;
-  if (cap.mode !== 'journal' && hasPhoto()) d.photo_to_claude = cap.toClaude;
-  if (cap.mode !== 'journal') { d.shared = cap.share; d.place_name = $('cap-place').value; }
+  if (hasPhoto()) d.photo_to_claude = cap.toClaude;
+  d.shared = cap.share;
+  d.place_name = $('cap-place').value;
   return d;
 }
 
@@ -1290,13 +1473,13 @@ function writeDraft() {
 }
 
 async function attachPhoto(file) {
-  if (!cap.open || cap.mode === 'journal') return;
+  if (!cap.open) return;
   try {
     const p = await shrinkPhoto(file);
     setPhoto(Object.assign({ state: 'new' }, p));
     await writeDraft();
   } catch (e) {
-    alert('Could not read this photo: ' + ((e && e.message) || e));
+    notice('Could not read this photo', (e && e.message) || String(e));
   }
 }
 function removePhoto() {
@@ -1345,12 +1528,10 @@ async function openCapture(mode, row, draft) {
   await loadMe();
   cap.share = draft && typeof draft.shared === 'boolean' ? draft.shared
     : row ? row.shared === true : linkedNow();
-  $('cap-share').hidden = mode === 'journal' || !linkedNow();
-  $('cap-switches').hidden = mode === 'journal';
+  $('cap-share').hidden = !linkedNow();
   $('cap-share-on').checked = cap.share;
   $('cap-share-label').textContent = 'Share with ' + partnerNames();
-  if (mode === 'journal') setPhoto(null);
-  else if (draft && draft.photo) setPhoto(Object.assign({ state: 'new' }, draft.photo));
+  if (draft && draft.photo) setPhoto(Object.assign({ state: 'new' }, draft.photo));
   else if (draft && draft.photo === null && mode === 'edit') setPhoto({ state: 'removed' });
   else if (mode === 'edit' && (cap.savedPhoto || row.photo_path)) {
     const sp = cap.savedPhoto;
@@ -1363,32 +1544,24 @@ async function openCapture(mode, row, draft) {
     $('cap-info').textContent = parts.join(', ');
   }
   $('cap-foot').hidden = mode !== 'edit';
-  $('cap-place-box').hidden = mode === 'journal';
-  $('cap-photo-btn').hidden = mode === 'journal';
-  $('cap-save').textContent = mode === 'journal' ? 'Send' : 'Save';
-  // Time line: the capture's own time in an edit, now for a new capture or a journal turn.
+  // Time line: the capture's own time in an edit, now for a new capture.
   const whenIso = mode === 'edit' ? row.captured_at : new Date().toISOString();
   const whenTz = mode === 'edit' ? row.tz : deviceTz();
   $('cap-hm').textContent = fmtTime(whenIso, whenTz);
-  $('cap-day').textContent = mode === 'journal' ? jTitleText(cap.jdate)
-    : fmtDayLabel(mode === 'edit' ? row.local_date : localDay(new Date(), whenTz)) + (whenTz !== deviceTz() ? ', ' + cityOf(whenTz) : '');
-  $('cap-title').textContent = mode === 'edit' ? 'Edit capture' : mode === 'journal' ? 'Journal' : 'New capture';
+  $('cap-day').textContent = fmtDayLabel(mode === 'edit' ? row.local_date : localDay(new Date(), whenTz)) + (whenTz !== deviceTz() ? ', ' + cityOf(whenTz) : '');
+  $('cap-title').textContent = mode === 'edit' ? 'Edit capture' : 'New capture';
   $('cap-close').setAttribute('aria-label', mode === 'edit' ? 'Close, changes not kept' : 'Close, draft kept');
-  ta.placeholder = mode === 'journal'
-    ? 'Tell Claude about the day. Tap the mic on the keyboard to talk.'
-    : 'Type, or tap the mic on the keyboard';
-  $('cap').setAttribute('aria-label',
-    mode === 'edit' ? 'Edit capture' : mode === 'journal' ? 'Journal, ' + jTitleText(cap.jdate) : 'New capture');
+  $('cap').setAttribute('aria-label', mode === 'edit' ? 'Edit capture' : 'New capture');
   $('cap').hidden = false;
   cap.open = true;
   history.pushState({ tbCap: true }, '');
   updatePlaceField();
   drawChips([], null);
-  if (mode !== 'journal') refreshPlaceChips().catch((e) => console.warn('place chips failed', e));
+  refreshPlaceChips().catch((e) => console.warn('place chips failed', e));
   if (mode === 'new') fixAtOpen(cap.seq);
   updateSaveEnabled();
   if (draft) writeDraft();            // re-mark an existing draft as open
-  if (mode === 'new' || mode === 'journal') {
+  if (mode === 'new') {
     // On a launch with no user gesture (home-screen shortcut) Android may not raise the
     // keyboard for this focus; checked on the device, not assumed.
     ta.focus();
@@ -1399,11 +1572,6 @@ async function openCapture(mode, row, draft) {
 async function openNew() {
   const draft = await idb.get('drafts', 'new');
   await openCapture('new', null, draft);
-}
-async function openJournalComposer(date) {
-  cap.jdate = date;
-  const draft = await idb.get('drafts', 'journal:' + date);
-  await openCapture('journal', null, draft);
 }
 async function openEdit(id) {
   const row = await idb.get('captures', id);
@@ -1423,8 +1591,8 @@ async function closeCapture(how) {
   $('cap').hidden = true;
   if (how !== 'back') popCaptureState();
   if (how === 'close' || how === 'back') {
-    // New capture or journal turn: keep the draft, closed. Edit: discard it.
-    if ((cap.mode === 'new' || cap.mode === 'journal') && (body.trim() || closed.photo)) {
+    // New capture: keep the draft, closed. Edit: discard it.
+    if (cap.mode === 'new' && (body.trim() || closed.photo)) {
       await idb.put('drafts', closed);
     } else {
       await idb.del('drafts', key);
@@ -1436,20 +1604,17 @@ async function closeCapture(how) {
   await updateDraftNote();
 }
 
-// The bottom button: Capture on the Captures tab, Write on the Journal tab (for the day on
-// screen). "draft kept" shows while that button's closed draft exists.
+// The Capture button (Captures tab only; the Journal tab has its inline field instead).
+// "draft kept" shows while a closed draft of a new capture exists.
 async function updateDraftNote() {
-  const journal = tab === 'journal';
-  const label = journal ? 'Write' : 'Capture';
-  const d = await idb.get('drafts', journal ? 'journal:' + jDay : 'new');
+  const d = await idb.get('drafts', 'new');
   const kept = !!(d && ((d.body && d.body.trim()) || d.photo));
-  $('primary-label').textContent = label;
+  $('primary-label').textContent = 'Capture';
   $('draft-note').hidden = !kept;
-  $('capture').setAttribute('aria-label', kept ? label + ', draft kept' : label);
+  $('capture').setAttribute('aria-label', kept ? 'Capture, draft kept' : 'Capture');
 }
 
 async function saveCapture() {
-  if (cap.mode === 'journal') return sendTurn();
   const body = capBody();
   if (!cap.open || cap.busy || (!body && !hasPhoto())) return;
   cap.busy = true;
@@ -1512,7 +1677,7 @@ async function saveCapture() {
   } catch (e) {
     cap.busy = false;
     updateSaveEnabled();
-    alert('Save failed: ' + ((e && e.message) || e));
+    notice('Save failed', (e && e.message) || String(e));
   }
 }
 
@@ -1539,7 +1704,7 @@ async function deleteCapture() {
     sync();
   } catch (e) {
     cap.busy = false;
-    alert('Delete failed: ' + ((e && e.message) || e));
+    notice('Delete failed', (e && e.message) || String(e));
   }
 }
 
@@ -1601,9 +1766,11 @@ async function handleEntry() {
   for (const d of open) {
     if (d.id === 'new') { await openNew(); return; }
     if (d.id.startsWith('journal:')) {
+      // Killed while typing in the journal field: back to that day with the text, field focused.
       setTab('journal');
-      jDay = d.id.slice(8); jView = 'thread'; jFollowToday = jDay === todayLocal();
-      await openJournalComposer(jDay);
+      jDay = d.id.slice(8); jView = 'thread'; jFollowToday = jDay === todayLocal(); jScrollToEnd = true;
+      await render();
+      focusJournalInput();
       return;
     }
     const row = await idb.get('captures', d.id);
@@ -1801,6 +1968,9 @@ function setTab(t) {
   $('captures-view').hidden = tab !== 'captures';
   $('jbar').hidden = tab !== 'journal';
   $('journal-view').hidden = tab !== 'journal';
+  // The foot: Capture on the Captures tab; the inline field and Send on a journal thread.
+  $('capture').hidden = tab === 'journal';
+  $('j-compose').hidden = tab !== 'journal' || jView !== 'thread';
 }
 
 // 'Sat 10/10/26 Bangkok day 1'
@@ -1829,30 +1999,29 @@ function el(tag, cls, text) {
   return e;
 }
 
+let jRenderSeq = 0;                // only the newest render writes the journal (renders can overlap)
 async function renderJournal() {
+  const seq = ++jRenderSeq;
   const today = todayLocal();
-  if (jFollowToday || !jDay) jDay = today;
+  // The day follows "today" (0400 rollover), but never moves under the field while it is in use.
+  if ((jFollowToday || !jDay) && !jTyping()) jDay = today;
   if (jDay === today) jFollowToday = true;
-  jSuffixes.clear();
-  for (const d of await idb.all('jdays')) if (d.suffix) jSuffixes.set(d.local_date, d.suffix);
-  $('j-daylist').hidden = jView !== 'days';
-  $('j-thread').hidden = jView !== 'thread';
+  // A field holding another day's draft takes no typing until this day's draft is in it.
+  if (jView === 'thread' && jInputDay !== jDay) $('j-input').readOnly = true;
+  const suffixes = new Map();
+  for (const d of await idb.all('jdays')) if (d.suffix) suffixes.set(d.local_date, d.suffix);
   const here = deviceTz();
 
   if (jView === 'days') {
-    // Every day with messages, captures or a title, plus today; newest first.
-    $('j-days').textContent = 'Today';
-    $('j-share').hidden = true;
-    $('j-title').textContent = 'Journal days';
-    $('j-title').classList.remove('today');
+    // Every day with messages, captures or a title, plus today; newest first. Built off-screen
+    // and written only by the newest render, like the day view (two renders used to interleave).
     const days = new Map();
     const add = (d) => { if (!days.has(d)) days.set(d, { m: 0, c: 0, q: 0 }); return days.get(d); };
     add(today);
     for (const m of await idb.all('journal')) { const x = add(m.local_date); x.m++; if (m.state === 'pending' || m.state === 'error') x.q++; }
     for (const c of await idb.all('captures')) if (!c.deleted_at) add(c.local_date).c++;
-    for (const d of jSuffixes.keys()) add(d);
-    const ul = $('j-daylist');
-    ul.replaceChildren();
+    for (const d of suffixes.keys()) add(d);
+    const items = [];
     for (const d of [...days.keys()].sort().reverse()) {
       const x = days.get(d);
       const li = el('li');
@@ -1860,61 +2029,94 @@ async function renderJournal() {
       btn.type = 'button';
       btn.dataset.day = d;
       const l1 = el('div', 'line1');
-      const when = el('span', 'when' + (d === today ? ' today' : ''), jTitleText(d));
+      const when = el('span', 'when' + (d === today ? ' today' : ''), fmtDayLabel(d) + (suffixes.get(d) ? ' ' + suffixes.get(d) : ''));
       l1.append(when, el('span', 'spacer'));
       if (x.q) l1.append(el('span', 'chip queued', `${x.q} not sent`));
       const parts = [x.m ? `${x.m} message${x.m === 1 ? '' : 's'}` : 'No messages yet',
         `${x.c} capture${x.c === 1 ? '' : 's'}`];
       btn.append(l1, el('div', 'line2', parts.join(', ')));
       li.append(btn);
-      ul.append(li);
+      items.push(li);
     }
+    if (seq !== jRenderSeq) return;
+    jSuffixes.clear();
+    for (const [k, v] of suffixes) jSuffixes.set(k, v);
+    $('j-daylist').hidden = false;
+    $('j-thread').hidden = true;
+    $('j-compose').hidden = true;
+    $('j-days').textContent = 'Today';
+    $('j-share').hidden = true;
+    $('j-title').textContent = 'Journal days';
+    $('j-title').classList.remove('today');
+    $('j-sub').textContent = '';
+    $('j-sub').hidden = true;
+    $('j-daylist').replaceChildren(...items);
     $('j-empty').hidden = true;
     return;
   }
 
-  $('j-days').textContent = 'Days';
-  $('j-share').hidden = false;
-  $('j-title').textContent = jTitleText(jDay);
-  $('j-title').classList.toggle('today', jDay === today);
-  const msgs = threadOrder(await idb.byIndex('journal', 'local_date', jDay));
-  const caps = (await idb.byIndex('captures', 'local_date', jDay)).filter((r) => !r.deleted_at);
-  // The thread holds only the person's turns and Claude's replies: journal-kind captures are no
-  // longer quoted inline (SPEC.md 7C.2a). Claude still sees every capture of the day.
-  const items = msgs;
-
-  const ul = $('j-thread');
-  ul.replaceChildren();
-  for (const it of items) {
-    const li = el('li', 'msg ' + (it.role === 'assistant' ? 'assistant' : 'user'));
+  const day = jDay;
+  const msgs = threadOrder(await idb.byIndex('journal', 'local_date', day));
+  const caps = (await idb.byIndex('captures', 'local_date', day)).filter((r) => !r.deleted_at);
+  const shared = (await idb.byIndex('partner', 'local_date', day)).length;
+  await loadMe();
+  const myName = (me && me.display_name) || 'You';
+  // The thread holds only the person's turns and Claude's replies: captures are never quoted
+  // inline (SPEC.md 7C.2a). Claude still sees every capture of the day. Each entry: a margin
+  // rule, a label (who and when), the text; a turn not yet sent adds its state below.
+  const items = [];
+  for (const it of msgs) {
+    const mine = it.role !== 'assistant';
+    const li = el('li', 'msg ' + (mine ? 'user' : 'assistant'));
     li.dataset.id = it.id;
-    li.append(el('div', 'text', it.content));
-    const meta = el('div', 'meta');
-    meta.append(el('span', null, fmtTime(it.created_at, here)));
-    if (it.role === 'user') {
+    const body = el('div', 'mbody');
+    body.append(el('span', 'who', `${mine ? myName : 'Claude'}, ${fmtTime(it.created_at, here)}`), el('p', 'text', it.content));
+    if (mine && (jInflight.has(it.id) || it.state === 'pending' || it.state === 'error')) {
+      const meta = el('div', 'meta');
       if (jInflight.has(it.id)) meta.append(el('span', 'chip queued', 'sending'));
       else if (it.state === 'pending') meta.append(el('span', 'chip queued', 'queued'));
-      else if (it.state === 'error') {
+      else {
         meta.append(el('span', 'chip failed', 'not sent'), el('span', 'errtext', it.error || 'failed'));
         const b = el('button', 'retry', 'Retry');
         b.type = 'button';
         b.dataset.retry = it.id;
         meta.append(b);
       }
+      body.append(meta);
     }
-    li.append(meta);
-    ul.append(li);
-    if (it.role === 'user' && jInflight.has(it.id)) ul.append(el('li', 'typing', 'Claude is replying'));
+    li.append(body);
+    items.push(li);
+    if (mine && jInflight.has(it.id)) items.push(el('li', 'typing', 'Claude is replying'));
   }
+  let hint = '';
   if (!items.length) {
-    const shared = (await idb.byIndex('partner', 'local_date', jDay)).length;
     const parts = [];
     if (caps.length) parts.push(`your ${caps.length} capture${caps.length === 1 ? '' : 's'}`);
     if (shared) parts.push(`${shared} shared with you`);
-    $('j-empty').textContent = 'No messages yet. Tap Write to tell Claude about the day. ' + (parts.length
+    hint = 'No messages yet. Tell Claude about the day in the field below. ' + (parts.length
       ? `It will see ${parts.join(' and ')} from this day.`
       : 'Nothing was captured on this day.');
   }
+  // The field holds the draft of the day on screen; it is loaded when the day changes, never
+  // over text being typed.
+  if (jInputDay !== day) await loadJournalDraft(day);
+  if (seq !== jRenderSeq) return;
+  jSuffixes.clear();
+  for (const [k, v] of suffixes) jSuffixes.set(k, v);
+  $('j-daylist').hidden = true;
+  $('j-thread').hidden = false;
+  $('j-compose').hidden = tab !== 'journal';
+  $('j-days').textContent = 'Days';
+  $('j-share').hidden = false;
+  $('j-title').textContent = fmtDayLabel(day);
+  $('j-title').classList.toggle('today', day === today);
+  const suffix = jSuffixes.get(day) || '';
+  $('j-sub').hidden = false;
+  $('j-sub').textContent = suffix || 'Add a title';
+  $('j-sub').dataset.empty = suffix ? '' : '1';
+  $('j-input').placeholder = day === today ? 'Tell Claude about today' : `Tell Claude about ${fmtDayLabel(day)}`;
+  $('j-thread').replaceChildren(...items);
+  $('j-empty').textContent = hint;
   $('j-empty').hidden = items.length > 0;
   if (jScrollToEnd) {
     jScrollToEnd = false;
@@ -1923,15 +2125,67 @@ async function renderJournal() {
   }
 }
 
-// Send: the turn is written locally as pending, then the sync engine sends it (now if
-// online, on reconnect if not). Never waits on the network.
-async function sendTurn() {
-  const content = capBody();
-  if (!cap.open || cap.busy || !content) return;
-  cap.busy = true;
-  updateSaveEnabled();
+// ---------- the inline journal field (SPEC.md 7C.2, 7C.7 item 6a) ----------
+
+// The field at the foot of a journal thread. Its text is the draft of one day (draft key
+// "journal:<local_date>"), written on every input with open: true, so a force-close brings it
+// back (handleEntry); leaving the field marks it closed. It grows with the text up to 40% of
+// the screen, then scrolls.
+let jInputDay = null;             // the day whose draft is in the field
+let jSending = false;
+const jTyping = () => document.activeElement === $('j-input') && $('j-input').value.trim() !== '';
+const jInputText = () => $('j-input').value.trim().slice(0, BODY_MAX);
+function updateSendEnabled() { $('j-send').disabled = jSending || !jInputText(); }
+function sizeJournalInput() {
+  const ta = $('j-input');
+  ta.style.height = 'auto';
+  const max = Math.round(window.innerHeight * 0.4);
+  const border = ta.offsetHeight - ta.clientHeight;      // 1.5 px each side, snapped to the screen's pixels
+  ta.style.height = Math.max(54, Math.min(ta.scrollHeight + border, max)) + 'px';
+}
+// The field is read-only from the start of the render that changes its day (renderJournal)
+// until the day's draft is in it, so nothing typed in between is lost.
+async function loadJournalDraft(day) {
   try {
-    const date = cap.jdate;
+    const d = await idb.get('drafts', 'journal:' + day);
+    $('j-input').value = d && typeof d.body === 'string' ? d.body : '';
+    jInputDay = day;
+  } finally {
+    $('j-input').readOnly = false;
+    sizeJournalInput();
+    updateSendEnabled();
+  }
+}
+function writeJournalDraft(open) {
+  const day = jInputDay;
+  if (!day) return Promise.resolve();
+  const body = $('j-input').value;
+  const w = body.trim()
+    ? idb.put('drafts', { id: 'journal:' + day, body, open, updated_at: new Date().toISOString() })
+    : idb.del('drafts', 'journal:' + day);
+  return w.catch((e) => console.warn('journal draft write failed', e));
+}
+function focusJournalInput() {
+  const ta = $('j-input');
+  if (ta.offsetParent === null) return;
+  // On a launch with no user gesture Android may not raise the keyboard; checked on the device.
+  ta.focus();
+  ta.setSelectionRange(ta.value.length, ta.value.length);
+}
+
+// Send: the turn is written locally as pending, then the sync engine sends it (now if
+// online, on reconnect if not). Never waits on the network. The field empties at once and
+// gets the text back if the local write fails.
+async function sendTurn() {
+  const content = jInputText();
+  const date = jInputDay;
+  if (jSending || !content || !date) return;
+  jSending = true;
+  const typed = $('j-input').value;
+  $('j-input').value = '';
+  sizeJournalInput();
+  updateSendEnabled();
+  try {
     const row = {
       id: crypto.randomUUID(), local_date: date, role: 'user', content, reply_to: null,
       model: null, input_tokens: null, output_tokens: null,
@@ -1945,13 +2199,16 @@ async function sendTurn() {
     jFollowToday = date === todayLocal();
     jView = 'thread';
     jScrollToEnd = true;
-    await closeCapture('saved');
+    jSending = false;
+    updateSendEnabled();
+    sync();                         // started before the render, so the pill never reads idle in between
     await render();
-    sync();
   } catch (e) {
-    cap.busy = false;
-    updateSaveEnabled();
-    alert('Send failed: ' + ((e && e.message) || e));
+    jSending = false;
+    if (!$('j-input').value) $('j-input').value = typed;
+    sizeJournalInput();
+    updateSendEnabled();
+    notice('Send failed', (e && e.message) || String(e));
   }
 }
 
@@ -1977,8 +2234,10 @@ async function dayText(date) {
     lines.push(`- ${head}: ${indent(c.body) || '(no text)'}`);
   }
   lines.push('', msgs.length ? 'Conversation with Claude' : 'Conversation with Claude: none');
+  await loadMe();
+  const myName = (me && me.display_name) || 'Gary';     // Eric's turns are his, not Gary's (M1.2)
   for (const m of msgs) {
-    const who = m.role === 'assistant' ? 'Claude' : 'Gary';
+    const who = m.role === 'assistant' ? 'Claude' : myName;
     const note = m.role === 'user' && m.state !== 'sent' ? ' (not sent yet)' : '';
     lines.push('', `${who}, ${fmtTime(m.created_at, here)}${note}:`, String(m.content || '').trim());
   }
@@ -2008,7 +2267,7 @@ async function shareDay() {
     ta.select();
     const ok = document.execCommand('copy');
     ta.remove();
-    if (!ok) { alert('Could not copy the day.'); return; }
+    if (!ok) { notice('Could not copy the day', 'Neither sharing nor the clipboard is available here.'); return; }
   }
   showToast(`${fmtDayLabel(jDay)} copied`, null);
 }
@@ -2056,6 +2315,8 @@ async function renderStatus() {
   $('status').dataset.state = cls;
   $('status').setAttribute('aria-label', `Sync status: ${text}. Open settings`);
   $('s-sync').textContent = text;
+  $('s-stamp').textContent = text;                 // the panel's own stamp (Panel.dc.html)
+  $('s-state').dataset.state = cls;
   setRetry(queued > 0 || offline);
 
   const last = await meta.get('last_sync_ok');
@@ -2422,15 +2683,21 @@ async function renderAuth() {
   let s = null;
   try { s = await session(); } catch (e) {}
   $('s-user').textContent = s ? (s.user && s.user.email) || 'yes' : 'no';
+  // Signed out, the Account group is the sign-in form; signed in, the account and password rows.
   $('signin').hidden = !!s;
+  $('acct-row').hidden = !s;
   $('signout').hidden = !s;
+  $('pw-row').hidden = !s;
   $('pw-open').hidden = !s || !$('pw-form').hidden;
   if (!s) { $('pw-form').hidden = true; }
+  $('prompt-row').hidden = !s;
+  await renderPromptDetail();
   await renderPartners(s);
 }
 
-// Partner panel (SPEC.md 7B.3): the other people from the last tb_whoami, the link state in
-// words, Add or Remove. Add and Remove need a connection; they are not queued.
+// Partner panel (SPEC.md 7B.3), "Travelling with": the other people from the last tb_whoami,
+// one ruled row each with the link state in words and Add or Remove. Add and Remove need a
+// connection; they are not queued. Remove asks first, in the app's own confirm sheet.
 const LINK_TEXT = {
   none: (n) => `Not linked with ${n}.`,
   added_by_me: (n) => `You added ${n}. Waiting for ${n} to add you`,
@@ -2440,32 +2707,36 @@ const LINK_TEXT = {
 async function renderPartners(s) {
   await loadMe();
   const box = $('partners');
-  box.replaceChildren();
   const signedIn = s !== undefined ? !!s : !!(await session().catch(() => null));
-  if (!signedIn || !me || !(me.people || []).length) {
-    if (signedIn) box.append(el('p', 'hint', 'The other traveller shows here after the next sync.'));
-    return;
+  const items = [];
+  if (signedIn && me && (me.people || []).length) {
+    for (const p of me.people) {
+      const row = el('div', 'prow partner-row');
+      row.dataset.uid = p.uid;
+      const t = el('div', 'ptext');
+      t.append(el('span', 'lbl', p.name), el('span', 'detail partner-state' + (p.link === 'live' ? ' live' : ''), (LINK_TEXT[p.link] || LINK_TEXT.none)(p.name)));
+      const mine = p.link === 'added_by_me' || p.link === 'live';
+      const b = el('button', mine ? 'link danger' : 'link', mine ? 'Remove' : `Add ${p.name}`);
+      b.type = 'button';
+      b.dataset.partnerAction = mine ? 'remove' : 'add';
+      b.dataset.uid = p.uid;
+      b.dataset.name = p.name;
+      row.append(t, b);
+      items.push(row);
+    }
+    items.push(el('p', 'err', ''));
+  } else if (signedIn) {
+    items.push(el('p', 'hint', 'The other traveller shows here after the next sync.'));
   }
-  for (const p of me.people) {
-    const row = el('div', 'partner-row');
-    row.dataset.uid = p.uid;
-    row.append(el('span', 'partner-state', (LINK_TEXT[p.link] || LINK_TEXT.none)(p.name)));
-    const mine = p.link === 'added_by_me' || p.link === 'live';
-    const b = el('button', 'btn', mine ? 'Remove' : `Add ${p.name}`);
-    b.type = 'button';
-    b.dataset.partnerAction = mine ? 'remove' : 'add';
-    b.dataset.uid = p.uid;
-    b.dataset.name = p.name;
-    row.append(b);
-    box.append(row);
-  }
-  box.append(el('p', 'err', ''));
+  box.replaceChildren(...items);
+  $('g-partners').hidden = !signedIn;
 }
 
 async function partnerAction(action, uid, name) {
   const msg = $('partners').querySelector('.err');
   if (msg) msg.textContent = '';
-  if (action === 'remove' && !confirm(`Remove ${name}? Your shared captures leave ${name}'s phone, and ${name}'s leave this one, at the next sync.`)) return;
+  if (action === 'remove' && !(await askConfirm(`Remove ${name}?`,
+    `Your shared captures leave ${name}'s phone, and ${name}'s leave this one, at the next sync.`, 'Remove'))) return;
   if (!sb || !navigator.onLine || !(await reachable())) {
     if (msg) msg.textContent = 'Needs a connection. Try again when you have signal.';
     return;
@@ -2503,6 +2774,139 @@ async function changePassword() {
     $('pw-save').disabled = false;
   }
 }
+
+// ---------- My journal prompt (SPEC.md 7C.5) ----------
+
+// The editor opens the caller's own text from tb_prompt_get: the custom text, or the default
+// fetched from prompts/<key>.md on the site. Save, Cancel, Reset to default; a count against
+// 4,000 characters (code points, as the server's char_length counts them). Needs a connection;
+// nothing is queued. Saving text that equals the default stores no custom text, so the file
+// stays in force. Takes effect from the next journal turn. meta prompt_state { custom } keeps
+// the panel's line ("Your own text" or "The default text") for offline.
+const PROMPT_MAX = 4000;
+const promptEd = { key: null, custom: null, def: null, busy: false };
+const promptLen = (t) => [...t].length;
+async function renderPromptDetail() {
+  const st = await meta.get('prompt_state');
+  $('prompt-detail').textContent = !st ? 'The text Claude starts your journal from'
+    : st.custom ? 'Your own text' : 'The default text';
+}
+async function fetchDefaultPrompt(key) {
+  if (!/^[a-z0-9-]+$/.test(String(key || ''))) return null;
+  try {
+    const res = await fetch(`prompts/${key}.md`, { cache: 'no-store' });
+    return res.ok ? await res.text() : null;
+  } catch (e) { return null; }
+}
+function updatePromptCount() {
+  const t = $('prompt-text').value.trim();
+  const n = promptLen(t);
+  $('prompt-count').textContent = `${n.toLocaleString('en-GB')} of ${PROMPT_MAX.toLocaleString('en-GB')}`;
+  $('prompt-count').classList.toggle('over', n > PROMPT_MAX);
+  $('prompt-save').disabled = promptEd.busy || !t || n > PROMPT_MAX;
+  $('prompt-reset').disabled = promptEd.busy || !promptEd.custom;
+}
+function showPromptState() {
+  $('prompt-state').textContent = promptEd.custom
+    ? 'Your own text. Claude reads it at the start of every journal turn; the day\'s captures and photos are added separately.'
+    : 'The default text. Edit it to make it your own; the day\'s captures and photos are added separately.';
+}
+async function openPromptEditor() {
+  $('prompt-row-err').textContent = '';
+  $('prompt-row-ok').textContent = '';
+  if (!sb || !navigator.onLine || !(await reachable())) {
+    $('prompt-row-err').textContent = 'Needs a connection. Edit it when you have signal.';
+    return;
+  }
+  const { data, error } = await sb.rpc('tb_prompt_get');
+  if (error || !data) { $('prompt-row-err').textContent = (error && error.message) || 'Could not read your prompt.'; return; }
+  promptEd.key = data.journal_prompt;
+  promptEd.custom = data.journal_prompt_custom || null;
+  promptEd.def = await fetchDefaultPrompt(promptEd.key);
+  const text = promptEd.custom != null ? promptEd.custom : promptEd.def;
+  if (text == null) { $('prompt-row-err').textContent = 'Could not load the default prompt. Try again when you have signal.'; return; }
+  await meta.set('prompt_state', { custom: !!promptEd.custom, at: new Date().toISOString() });
+  await renderPromptDetail();
+  promptEd.busy = false;
+  $('prompt-text').value = text;
+  $('prompt-err').textContent = '';
+  $('prompt-ok').textContent = '';
+  showPromptState();
+  updatePromptCount();
+  $('prompt-dlg').showModal();
+  $('prompt-text').scrollTop = 0;
+}
+// p_text null resets to the default (tb_prompt_set). Resolves true when the server took it.
+async function setPrompt(pText) {
+  $('prompt-err').textContent = '';
+  $('prompt-ok').textContent = '';
+  if (!sb || !navigator.onLine || !(await reachable())) {
+    $('prompt-err').textContent = 'Needs a connection. Nothing was saved.';
+    return false;
+  }
+  promptEd.busy = true;
+  updatePromptCount();
+  try {
+    const { data, error } = await sb.rpc('tb_prompt_set', { p_text: pText });
+    if (error) { $('prompt-err').textContent = error.message || String(error); return false; }
+    promptEd.custom = (data && data.journal_prompt_custom) || null;
+    await meta.set('prompt_state', { custom: !!promptEd.custom, at: new Date().toISOString() });
+    await renderPromptDetail();
+    return true;
+  } catch (e) {
+    $('prompt-err').textContent = (e && e.message) || String(e);
+    return false;
+  } finally {
+    promptEd.busy = false;
+    updatePromptCount();
+  }
+}
+async function savePrompt() {
+  const t = $('prompt-text').value.trim();
+  if (promptEd.busy || !t || promptLen(t) > PROMPT_MAX) return;
+  const same = promptEd.def != null && t === promptEd.def.trim();
+  if (!(await setPrompt(same ? null : t))) return;
+  $('prompt-dlg').close();
+  $('prompt-row-ok').textContent = 'Saved. Claude uses it from your next journal turn.';
+}
+async function resetPrompt() {
+  if (promptEd.busy || !promptEd.custom) return;
+  if (!(await askConfirm('Reset to default?', 'Your own text is replaced by the default prompt. Claude uses the default from your next journal turn.', 'Reset'))) return;
+  if (promptEd.def == null) promptEd.def = await fetchDefaultPrompt(promptEd.key);
+  if (promptEd.def == null) { $('prompt-err').textContent = 'Could not load the default prompt. Nothing was changed.'; return; }
+  if (!(await setPrompt(null))) return;
+  $('prompt-text').value = promptEd.def;
+  showPromptState();
+  updatePromptCount();
+  $('prompt-ok').textContent = 'Back to the default text. Claude uses it from your next journal turn.';
+}
+
+// ---------- in-app confirm and notices (no browser dialogs anywhere) ----------
+
+// askConfirm resolves true for the confirm button, false for Cancel, Android back or Esc.
+// notice is the same sheet with OK only, in place of alert().
+let confirmResolve = null;
+function askConfirm(head, body, okText, opts) {
+  const o = opts || {};
+  if (confirmResolve) answerConfirm(false);
+  return new Promise((resolve) => {
+    confirmResolve = resolve;
+    $('confirm-head').textContent = head;
+    $('confirm-body').textContent = body || '';
+    $('confirm-body').hidden = !body;
+    $('confirm-ok').textContent = okText || 'OK';
+    $('confirm-cancel').hidden = o.cancel === false;
+    $('confirm-dlg').showModal();
+    $(o.cancel === false ? 'confirm-ok' : 'confirm-cancel').focus();
+  });
+}
+function answerConfirm(v) {
+  const r = confirmResolve;
+  confirmResolve = null;
+  if ($('confirm-dlg').open) $('confirm-dlg').close();
+  if (r) r(v);
+}
+const notice = (head, body) => askConfirm(head, body, 'OK', { cancel: false });
 
 $('signin').addEventListener('submit', async (ev) => {
   ev.preventDefault();
@@ -2589,13 +2993,35 @@ async function initPersistence() {
 
 // ---------- theme ----------
 
-function applyTheme(t) {
-  document.documentElement.setAttribute('data-theme', t);
-  try { localStorage.setItem('tb-theme', t); } catch (e) {}
-  document.querySelector('meta[name="theme-color"]').content = t === 'light' ? '#F4EEE2' : '#141C26';
+// Light, Dark or Auto (SPEC.md 7C.8). Auto stores nothing and follows the phone, live: a change
+// of the phone's setting while the app is open applies at once.
+const themeMq = window.matchMedia ? matchMedia('(prefers-color-scheme: light)') : null;
+function themeChoice() {
+  let t = null;
+  try { t = localStorage.getItem('tb-theme'); } catch (e) {}
+  return t === 'light' || t === 'dark' ? t : 'auto';
 }
-$('theme').addEventListener('click', () => {
-  applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
+function showTheme() {
+  const c = themeChoice();
+  const t = c === 'auto' ? (themeMq && themeMq.matches ? 'light' : 'dark') : c;
+  document.documentElement.setAttribute('data-theme', t);
+  document.querySelector('meta[name="theme-color"]').content = t === 'light' ? '#F4EEE2' : '#141C26';
+  for (const b of document.querySelectorAll('[data-theme-choice]')) b.setAttribute('aria-checked', String(b.dataset.themeChoice === c));
+}
+function applyTheme(choice) {
+  try {
+    if (choice === 'light' || choice === 'dark') localStorage.setItem('tb-theme', choice);
+    else localStorage.removeItem('tb-theme');
+  } catch (e) {}
+  showTheme();
+}
+if (themeMq) {
+  const follow = () => { if (themeChoice() === 'auto') showTheme(); };
+  if (themeMq.addEventListener) themeMq.addEventListener('change', follow); else if (themeMq.addListener) themeMq.addListener(follow);
+}
+document.querySelector('.seg').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-theme-choice]');
+  if (b) applyTheme(b.dataset.themeChoice);
 });
 
 // ---------- service worker: install in background, reload only on tap ----------
@@ -2627,16 +3053,21 @@ if ('serviceWorker' in navigator) {
 
 // ---------- wiring ----------
 
-const fail = (what) => (e) => { console.error(what, e); alert(what + ': ' + ((e && e.message) || e)); };
+const fail = (what) => (e) => { console.error(what, e); notice(what, (e && e.message) || String(e)); };
 $('capture').addEventListener('click', () => {
-  if (cap.open) return;
-  if (tab === 'journal') {
-    if (jView === 'days') { jDay = todayLocal(); jFollowToday = true; jView = 'thread'; jScrollToEnd = true; render(); }
-    openJournalComposer(jDay).catch(fail('Could not open the journal'));
-  } else {
-    openNew().catch(fail('Could not open capture'));
-  }
+  if (cap.open || tab !== 'captures') return;
+  openNew().catch(fail('Could not open capture'));
 });
+// The journal field: every input keeps the day's draft (open), leaving it closes the draft.
+$('j-input').addEventListener('input', () => { sizeJournalInput(); updateSendEnabled(); writeJournalDraft(true); });
+$('j-input').addEventListener('blur', () => { writeJournalDraft(false); });
+$('j-send').addEventListener('click', () => { sendTurn(); });
+// The footer's height feeds the space under the list, the toast and the update bar.
+if (window.ResizeObserver) {
+  new ResizeObserver(() => {
+    document.documentElement.style.setProperty('--foot-h', document.querySelector('footer').offsetHeight + 'px');
+  }).observe(document.querySelector('footer'));
+}
 async function showTab(t) {
   if (cap.open) return;
   setTab(t);
@@ -2659,7 +3090,7 @@ $('j-thread').addEventListener('click', (ev) => {
   if (b) retryTurn(b.dataset.retry);
 });
 $('j-share').addEventListener('click', () => { shareDay().catch(fail('Share failed')); });
-$('j-title').addEventListener('click', () => {
+function openSuffix() {
   if (jView !== 'thread') return;
   const dlg = $('suffix-dlg');
   $('suffix-head').textContent = 'Title for ' + fmtDayLabel(jDay);
@@ -2667,7 +3098,9 @@ $('j-title').addEventListener('click', () => {
   dlg.dataset.day = jDay;
   dlg.returnValue = '';
   dlg.showModal();
-});
+}
+$('j-title').addEventListener('click', openSuffix);
+$('j-sub').addEventListener('click', openSuffix);
 $('suffix-dlg').addEventListener('close', async () => {
   const dlg = $('suffix-dlg');
   if (dlg.returnValue !== 'save') return;
@@ -2749,12 +3182,29 @@ $('export').addEventListener('click', () => { exportCaptures().catch(fail('Expor
 // "Today" rolls over at 0400 while the app sits open.
 setInterval(() => {
   if (document.visibilityState !== 'visible') return;
-  if (tab === 'captures' ? followToday && viewDay !== todayLocal() : jFollowToday && jDay !== todayLocal()) {
+  if (tab === 'captures' ? followToday && viewDay !== todayLocal() : jFollowToday && jDay !== todayLocal() && !jTyping()) {
     render().then(updateDraftNote);
   }
 }, 60000);
-$('status').addEventListener('click', () => { $('pw-ok').textContent = ''; $('pw-err').textContent = ''; renderAuth(); $('settings').showModal(); });
+$('status').addEventListener('click', () => {
+  for (const id of ['pw-ok', 'pw-err', 'prompt-row-err', 'prompt-row-ok']) $(id).textContent = '';
+  renderAuth();
+  $('settings').showModal();
+});
 $('close').addEventListener('click', () => $('settings').close());
+// A tap on the dimmed backdrop closes a sheet, as the X does (not the confirm or the editor).
+for (const id of ['settings', 'view-dlg', 'photo-dlg']) {
+  $(id).addEventListener('click', (ev) => { if (ev.target === $(id)) $(id).close(); });
+}
+$('prompt-open').addEventListener('click', () => { openPromptEditor().catch(fail('Could not open the prompt')); });
+$('prompt-text').addEventListener('input', updatePromptCount);
+$('prompt-save').addEventListener('click', () => { savePrompt().catch(fail('Save failed')); });
+$('prompt-reset').addEventListener('click', () => { resetPrompt().catch(fail('Reset failed')); });
+$('prompt-cancel').addEventListener('click', () => $('prompt-dlg').close());
+$('prompt-close').addEventListener('click', () => $('prompt-dlg').close());
+$('confirm-ok').addEventListener('click', () => answerConfirm(true));
+$('confirm-cancel').addEventListener('click', () => answerConfirm(false));
+$('confirm-dlg').addEventListener('close', () => answerConfirm(false));
 $('sync-now').addEventListener('click', () => sync());
 window.addEventListener('online', () => { syncState.phase = 'checking'; renderStatus(); sync(); });
 window.addEventListener('offline', () => { syncState.phase = 'offline'; renderStatus(); });
@@ -2766,6 +3216,7 @@ if (sb) sb.auth.onAuthStateChange(() => { renderAuth(); });
 
 (async function boot() {
   $('s-version').textContent = APP_VERSION;
+  showTheme();
   await idb.open();
   await checkProject();               // before the first sync and before schema_version is written
   if ((await meta.get('schema_version')) !== 5) await meta.set('schema_version', 5);

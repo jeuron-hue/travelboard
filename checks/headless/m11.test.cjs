@@ -4,10 +4,11 @@
 // capture screen, shrink to 1280 px JPEG, offline save and thumbnail, upload to
 // tb-photos/<uid>/<id>.jpg before the push, photo-only capture, draft with a photo after a
 // reload, failed upload that does not hold back text and GPS, edit replace and remove,
-// download on a second phone, pill counts, export fields, journal composer without Photo.
+// download on a second phone, pill counts, export fields, the journal field without Photo
+// (P16 and P20 moved from the composer to the inline field, M1.3 session B, 24/10/26).
 // Exit code 0 only when every check passes.
 'use strict';
-const { launch, startServer, makeMock, attachMock, newContext, UID } = require('./harness.cjs');
+const { until, launch, startServer, makeMock, attachMock, newContext, UID } = require('./harness.cjs');
 
 const PORT = 8733;
 const BASE = `http://127.0.0.1:${PORT}/`;
@@ -354,13 +355,11 @@ async function save(page) {
   check('P15 export carries photo_path, photo_w, photo_h, photo_bytes; photos not embedded', e2 && e2.photo_path === `${UID}/${c2.id}.jpg`
     && e2.photo_w === 960 && e2.photo_h === 1280 && e2.photo_bytes > 0 && !JSON.stringify(exp).includes('data:image'));
 
-  // --- journal composer has no Photo button
+  // --- the journal has no Photo button (M1.3 session B: the inline field replaced the composer)
   await page.click('#tab-journal');
-  await page.click('#capture');
-  await waitCap(page, true);
-  check('P16 journal composer: no Photo button, no preview', !(await shown(page, '#cap-photo-btn')) && !(await shown(page, '#cap-photo')));
-  await page.click('#cap-close');
-  await waitCap(page, false);
+  await page.focus('#j-input');
+  check('P16 journal field: no Photo button, no preview, no capture screen', !(await shown(page, '#cap-photo-btn')) && !(await shown(page, '#cap-photo'))
+    && (await page.$eval('#cap', (e) => e.hidden)) && (await shown(page, '#j-input')));
   await page.click('#tab-captures');
 
   // ================= "Claude sees this" switch (SPEC.md 7A.2, 7A.6 item 11) =================
@@ -406,10 +405,9 @@ async function save(page) {
   check('P19 and off again', mock.rows.get(off.id).photo_to_claude === false);
   // the journal: the switched-off photo is not sent (fake tb-journal on the function's own context.mjs)
   await page.click('#tab-journal');
-  await page.click('#capture');
-  await waitCap(page, true);
-  await page.fill('#cap-body', 'What is in my photos?');
-  await save(page);
+  await page.fill('#j-input', 'What is in my photos?');
+  await page.click('#j-send');
+  await until(page, async () => (await idb.all('journal')).some((r) => r.content === 'What is in my photos?'), null, { timeout: 5000 });
   await settle(page);
   await syncIdle(page);
   const sent = mock.claude[mock.claude.length - 1];

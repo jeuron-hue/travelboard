@@ -8,9 +8,18 @@
 // in the thread, and a new capture cannot be made journal-kind; the K1, K3, K4 and K11 checks
 // that saw the quote were rewritten on 24/10/26 to check its absence, with the journal-kind
 // capture now an old row from the server. Claude still sees it, unlabelled.
+// M1.3 session B (SPEC.md 7C.2, 7C.3, 7C.7 item 6a), 24/10/26: the Write button and its
+// full-screen composer are gone; a turn is typed in the inline field at the foot of the
+// Journal tab (#j-input) and sent with Send (#j-send). The composer checks of K1, K2 and K9
+// were rewritten to the field as deliberate changes: the field instead of Write, a draft per
+// day written on input and kept through a force-close, the draft closed when the field is left,
+// the field following the day on screen, the field growing with the text. The thread's
+// structure changed (margin rule, label, text); the class names msg user and msg assistant,
+// the .text and .meta parts and data-retry are kept. The day title's suffix moved under the
+// title (#j-sub), so K9 reads it there.
 // Exit code 0 only when every check passes.
 'use strict';
-const { chromium, launch, startServer, makeMock, attachMock, newContext, sessionJson, SUPA } = require('./harness.cjs');
+const { until, chromium, launch, startServer, makeMock, attachMock, newContext, sessionJson, SUPA } = require('./harness.cjs');
 
 const PORT = 8732;
 const BASE = `http://127.0.0.1:${PORT}/`;
@@ -36,14 +45,13 @@ async function syncIdle(page) {
     }
   });
 }
+// A turn through the inline field: type, Send, wait until it is stored and the field is empty.
 async function write(page, msg, at) {
   if (at) await page.clock.setFixedTime(at);
-  await page.click('#capture');
-  await waitCap(page, true);
-  await page.fill('#cap-body', msg);
-  await page.click('#cap-save');
-  await waitCap(page, false);
-  await page.waitForFunction(() => !popWait);
+  await page.fill('#j-input', msg);
+  await page.click('#j-send');
+  await until(page, async (m) => document.getElementById('j-input').value === ''
+    && (await idb.all('journal')).some((r) => r.content === m), msg, { timeout: 5000 });
 }
 async function capture(page, msg, at) {
   if (at) await page.clock.setFixedTime(at);
@@ -95,52 +103,55 @@ const settle = (page) => page.waitForFunction(() => !syncing, null, { timeout: 1
   check('K1 Journal tab: day bar hidden, journal bar shown, title today "Mon 09/11/26"',
     !(await shown(page, '#daybar')) && (await shown(page, '#jbar')) && (await text(page, '#j-title')) === 'Mon 09/11/26'
     && await page.$eval('#j-title', (e) => e.classList.contains('today')));
-  check('K1 bottom button reads Write', (await text(page, '#primary-label')) === 'Write');
+  check('K1 the foot holds the inline field and Send, no Write or Capture button (7C.2)', (await shown(page, '#j-input')) && (await shown(page, '#j-send'))
+    && !(await shown(page, '#capture')) && (await page.getAttribute('#j-input', 'placeholder')) === 'Tell Claude about today');
   let th = await thread(page);
   check('K1 the thread quotes no capture, the journal-kind one included (7C.2a)', th.length === 0
     && !(await page.$eval('#j-thread', (e) => e.textContent)).includes('Feet done in.') && !(await page.$('#j-thread .quote')), JSON.stringify(th));
   check('K1 empty-thread hint shown, counting both of the day\'s captures', (await shown(page, '#j-empty'))
     && (await text(page, '#j-empty')).includes('your 2 captures'), await text(page, '#j-empty'));
 
-  // --- composer and drafts
-  await page.click('#capture');
-  await waitCap(page, true);
-  check('K2 composer: focused, Send, no kind toggle, no Delete', await page.evaluate(() => document.activeElement.id === 'cap-body')
-    && (await text(page, '#cap-save')) === 'Send' && (await page.$('#kind-group, #kind-note, #kind-journal')) === null && !(await shown(page, '#cap-foot'))
-    && !(await shown(page, '#cap-place-box')) && !(await shown(page, '#cap-switches')) && !(await shown(page, '#cap-photo-btn')));
-  check('K2 composer label names the day', (await page.$eval('#cap', (e) => e.getAttribute('aria-label'))) === 'Journal, Mon 09/11/26');
-  check('K2 Send disabled when empty', await page.$eval('#cap-save', (b) => b.disabled));
-  await page.fill('#cap-body', 'Long day in the old town.');
+  // --- the inline field and its draft (7C.2, 6a)
+  await page.focus('#j-input');
+  check('K2 the field opens no screen and pushes no history entry; Send disabled when empty', (await page.$eval('#cap', (e) => e.hidden))
+    && await page.evaluate(() => !(history.state && history.state.tbCap)) && await page.$eval('#j-send', (b) => b.disabled)
+    && (await page.$('#kind-group, #kind-note, #kind-journal')) === null && !(await shown(page, '#cap-place-box')) && !(await shown(page, '#cap-photo-btn')));
+  const h0 = await page.$eval('#j-input', (e) => e.offsetHeight);
+  await page.fill('#j-input', 'Long day in the old town.');
   await page.waitForTimeout(100);
   let d = await page.evaluate(() => idb.get('drafts', 'journal:2026-11-09'));
-  check('K2 draft journal:2026-11-09 written on input, open true', d && d.body === 'Long day in the old town.' && d.open === true, JSON.stringify(d));
+  check('K2 draft journal:2026-11-09 written on input, open true; Send enabled', d && d.body === 'Long day in the old town.' && d.open === true
+    && !(await page.$eval('#j-send', (b) => b.disabled)), JSON.stringify(d));
   await page.reload();
-  await waitCap(page, true);
-  check('K2 killed mid-typing: reopens the composer on the Journal tab with the text',
-    (await page.inputValue('#cap-body')) === 'Long day in the old town.' && await page.evaluate(() => tab === 'journal' && cap.mode === 'journal'));
-  await page.click('#cap-close');
-  await waitCap(page, false);
-  d = await page.evaluate(() => idb.get('drafts', 'journal:2026-11-09'));
-  check('K2 Close keeps the draft closed, Write reads "draft kept"', d && d.open === false && await shown(page, '#draft-note'));
+  await page.waitForFunction(() => document.getElementById('j-input').value !== '', null, { timeout: 5000 }).catch(() => {});
+  check('K2 killed mid-typing: reopens on the Journal tab, that day, the text in the field, focused',
+    (await page.inputValue('#j-input')) === 'Long day in the old town.' && await page.evaluate(() => tab === 'journal' && jDay === '2026-11-09'
+      && document.activeElement.id === 'j-input') && (await page.$eval('#cap', (e) => e.hidden)));
   await page.click('#tab-captures');
-  await page.waitForFunction(() => document.getElementById('primary-label').textContent === 'Capture', null, { timeout: 2000 }).catch(() => {});
-  check('K2 Captures tab: Capture button, no draft kept note', (await text(page, '#primary-label')) === 'Capture' && !(await shown(page, '#draft-note')));
+  await page.waitForTimeout(100);
+  d = await page.evaluate(() => idb.get('drafts', 'journal:2026-11-09'));
+  check('K2 leaving the field keeps the draft, closed', d && d.open === false && d.body === 'Long day in the old town.', JSON.stringify(d));
+  check('K2 Captures tab: Capture button, no draft kept note, no journal field', (await text(page, '#primary-label')) === 'Capture'
+    && !(await shown(page, '#draft-note')) && !(await shown(page, '#j-input')));
   await page.click('#tab-journal');
-  await page.click('#capture');
-  await waitCap(page, true);
-  check('K2 Write restores the draft', (await page.inputValue('#cap-body')) === 'Long day in the old town.');
-  await page.evaluate(() => history.back());
-  await waitCap(page, false);
-  check('K2 Android back closes the composer, stays in the app', await page.evaluate(() => location.pathname.endsWith('/trip.html') && tab === 'journal'));
+  await page.waitForTimeout(100);
+  check('K2 back on the Journal tab the field holds the draft', (await page.inputValue('#j-input')) === 'Long day in the old town.');
+  await page.fill('#j-input', 'One\ntwo\nthree\nfour\nfive');
+  const h1 = await page.$eval('#j-input', (e) => e.offsetHeight);
+  await page.fill('#j-input', Array.from({ length: 40 }, (_, i) => 'line ' + i).join('\n'));
+  const h2 = await page.$eval('#j-input', (e) => e.offsetHeight);
+  const vh = await page.evaluate(() => window.innerHeight);
+  check('K2 the field grows with the text, up to 40% of the screen, then scrolls', h0 === 54 && h1 > h0 + 60 && h2 <= Math.round(vh * 0.4) + 1
+    && h2 > h1 && await page.$eval('#j-input', (e) => e.scrollHeight > e.clientHeight), `${h0} ${h1} ${h2} ${vh}`);
+  await page.fill('#j-input', 'Long day in the old town.');
+  await page.fill('#j-input', '');
+  await page.waitForTimeout(100);
+  check('K2 emptying the field drops the draft; the field shrinks back', !(await page.evaluate(() => idb.get('drafts', 'journal:2026-11-09')))
+    && (await page.$eval('#j-input', (e) => e.offsetHeight)) === 54);
 
   // --- send and reply (acceptance 1 shape)
   const fn0 = mock.fnCalls.length;
-  await page.clock.setFixedTime(bkk('2105'));
-  await page.click('#capture');
-  await waitCap(page, true);
-  await page.fill('#cap-body', 'Long day in the old town. The omelette was worth it.');
-  await page.click('#cap-save');
-  await waitCap(page, false);
+  await write(page, 'Long day in the old town. The omelette was worth it.', bkk('2105'));
   await settle(page);
   await page.waitForTimeout(100);
   let rows = await jrows(page);
@@ -151,13 +162,25 @@ const settle = (page) => page.waitForFunction(() => !syncing, null, { timeout: 1
     && mock.fnCalls[fn0].created_at === bkk('2105').toISOString(), JSON.stringify(mock.fnCalls[fn0]));
   check('K3 turn sent, reply stored locally once, linked by reply_to', u1 && u1.state === 'sent' && a1 && a1.reply_to === u1.id
     && rows.length === 2 && a1.model === 'claude-sonnet-5-5');
-  check('K3 the draft is cleared on Send', !(await page.evaluate(() => idb.get('drafts', 'journal:2026-11-09'))) && !(await shown(page, '#draft-note')));
+  check('K3 Send empties the field and clears the draft, one tap', !(await page.evaluate(() => idb.get('drafts', 'journal:2026-11-09')))
+    && (await page.inputValue('#j-input')) === '' && await page.$eval('#j-send', (b) => b.disabled));
   const sys1 = mock.claude[mock.claude.length - 1].context;   // the day's context block (7A.4)
   check('K3 Claude saw both of the day\'s captures (pushed before the turn was sent), the journal-kind one unlabelled', sys1.includes('Jay Fai crab omelette')
     && sys1.includes('Feet done in.') && sys1.includes('1830 hrs Bangkok time') && !sys1.includes('Arrived BKK') && !/kind=/.test(sys1));
   th = await thread(page);
   check('K3 thread: the turn (2105), then the reply; no quoted capture', th.length === 2
     && th[0].cls === 'msg user' && th[1].cls === 'msg assistant' && th[1].text.startsWith('Reply'), JSON.stringify(th));
+  const look = await page.evaluate(() => {
+    const [u, a] = document.querySelectorAll('#j-thread > li');
+    const cs = (e, pseudo) => getComputedStyle(e, pseudo || null);
+    return { uWho: u.querySelector('.who').textContent, aWho: a.querySelector('.who').textContent,
+      uFont: cs(u.querySelector('.text')).fontFamily, aFont: cs(a.querySelector('.text')).fontFamily, aSize: cs(a.querySelector('.text')).fontSize,
+      uRule: cs(u, '::before').backgroundColor, aRule: cs(a, '::before').backgroundColor, accent: cs(document.getElementById('j-send')).backgroundColor,
+      bubbles: [u, a].some((e) => cs(e).backgroundColor !== 'rgba(0, 0, 0, 0)' || cs(e).borderRadius !== '0px') };
+  });
+  check('K3 the page (7C.2): own turn in Plex with the accent rule, labelled "Gary, 2105 hrs"; reply in Newsreader 17.5 px with the blue rule; no bubbles',
+    look.uWho === 'Gary, 2105 hrs' && /^Claude, \d{4} hrs$/.test(look.aWho) && /Plex/.test(look.uFont) && /Newsreader/.test(look.aFont) && look.aSize === '17.5px'
+    && look.uRule === look.accent && look.aRule !== look.uRule && !look.bubbles, JSON.stringify(look));
   check('K3 pill synced', (await pill(page)) === 'synced', await pill(page));
 
   // --- second turn: order
@@ -242,7 +265,7 @@ const settle = (page) => page.waitForFunction(() => !syncing, null, { timeout: 1
   mock.fnMode = 'busy';
   await page.evaluate(() => window.dispatchEvent(new Event('online')));
   // settle can return between a sync and its queued re-run, so wait for the outcome itself.
-  await page.waitForFunction(async () => (await idb.all('journal')).some((r) => r.content === 'Queued one.' && r.state === 'error'), null, { timeout: 10000 }).catch(() => {});
+  await until(page, async () => (await idb.all('journal')).some((r) => r.content === 'Queued one.' && r.state === 'error'), null, { timeout: 10000 }).catch(() => {});
   await settle(page);
   rows = await jrows(page);
   const q1 = rows.find((r) => r.content === 'Queued one.'), q2 = rows.find((r) => r.content === 'Queued two.');
@@ -267,7 +290,8 @@ const settle = (page) => page.waitForFunction(() => !syncing, null, { timeout: 1
   const daylist = await page.$$eval('#j-daylist .dayrow', (els) => els.map((e) => ({ day: e.dataset.day, t: e.innerText.replace(/\s+/g, ' ').trim() })));
   check('K9 day list newest first: today, then 08/11 (captures only)', daylist.length === 2 && daylist[0].day === '2026-11-09'
     && daylist[1].day === '2026-11-08' && /14 messages, 2 captures/.test(daylist[0].t) && /No messages yet, 1 capture/.test(daylist[1].t), JSON.stringify(daylist));
-  check('K9 day list bar: Today button, "Journal days"', (await text(page, '#j-days')) === 'Today' && (await text(page, '#j-title')) === 'Journal days');
+  check('K9 day list bar: Today button, "Journal days"; no field on the list', (await text(page, '#j-days')) === 'Today' && (await text(page, '#j-title')) === 'Journal days'
+    && !(await shown(page, '#j-input')));
   await page.click('#j-daylist .dayrow[data-day="2026-11-08"]');
   await page.waitForTimeout(100);
   check('K9 tap a day: its thread, title "Sun 08/11/26", empty hint names its capture', (await text(page, '#j-title')) === 'Sun 08/11/26'
@@ -278,23 +302,23 @@ const settle = (page) => page.waitForFunction(() => !syncing, null, { timeout: 1
   await page.waitForTimeout(100);
   await settle(page);
   await syncIdle(page);
-  check('K9 title suffix shows and reaches the server', (await text(page, '#j-title')) === 'Sun 08/11/26 Bangkok arrival'
+  check('K9 title suffix shows under the day title and reaches the server', (await text(page, '#j-title')) === 'Sun 08/11/26' && (await text(page, '#j-sub')) === 'Bangkok arrival'
     && mock.jdays.get('2026-11-08') && mock.jdays.get('2026-11-08').suffix === 'Bangkok arrival');
   check('K9 suffix no longer dirty after sync', await page.evaluate(async () => (await idb.get('jdays', '2026-11-08')).suffix_dirty === 0));
   await page.click('#j-title');
   await page.fill('#suffix-input', 'ignored');
   await page.click('#suffix-cancel');
   await page.waitForTimeout(100);
-  check('K9 Cancel leaves the title alone', (await text(page, '#j-title')) === 'Sun 08/11/26 Bangkok arrival');
-  await page.click('#capture');
-  await waitCap(page, true);
-  check('K9 Write on an older day writes into that day', await page.evaluate(() => cap.jdate === '2026-11-08'));
-  await page.click('#cap-close');
-  await waitCap(page, false);
+  check('K9 Cancel leaves the title alone', (await text(page, '#j-sub')) === 'Bangkok arrival');
+  await page.fill('#j-input', 'About the arrival day');
+  await page.waitForTimeout(100);
+  check('K9 the field on an older day writes into that day', await page.evaluate(async () => jInputDay === '2026-11-08'
+    && (await idb.get('drafts', 'journal:2026-11-08')).body === 'About the arrival day' && !(await idb.get('drafts', 'journal:2026-11-09'))));
   await page.click('#j-days');
   await page.click('#j-days');   // Today
   await page.waitForTimeout(100);
-  check('K9 Today returns to today\'s thread', (await text(page, '#j-title')) === 'Mon 09/11/26');
+  check('K9 Today returns to today\'s thread, with today\'s (empty) field', (await text(page, '#j-title')) === 'Mon 09/11/26' && (await page.inputValue('#j-input')) === '');
+  await page.evaluate(() => idb.del('drafts', 'journal:2026-11-08'));
 
   // --- 0400 rule: at 0130 on 10/11 "today" is still 09/11
   await page.clock.setFixedTime(bkk('0130', '2026-11-10'));

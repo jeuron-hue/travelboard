@@ -7,7 +7,79 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ## M1.3 Look and place (SPEC.md 7C)
 
-**Status 24/10/26: session A built; v11 run on the Pixel to step 6, which found the chips needed a fix the phone could not get indoors in airplane mode; fixed in v12. v13 adds the address chip (Gary's decision), renumbered 0.13.0. Steps 6, 7, 9, 10 and 11 pass on 0.13.0; step 8 passes at home (address chip) and waits for a named place. Session B not started.** Migration 0009 applied, `tb-journal` v6 deployed.
+**Status 24/10/26: sessions A and B built. Client 0.14.0 (session B): journal page with the inline field, Settings sheet, prompt editor, in-app confirm (no browser dialogs), option B icon. Every automated check passes (below). Next: the combined two-phone run, "Device steps (both phones), 0.14.0" below, which also closes M1.2. Session A's Pixel results on 0.13.0 stand; its step 8 at a named place is step 9 of the combined run.** Migration 0009 applied, `tb-journal` v6 deployed (unchanged in session B).
+
+### Automated results, 24/10/26 (session B, 0.14.0)
+
+| Check | Result | Evidence |
+|---|---|---|
+| `checks/static.cjs` | PASS, 114 of 114 | Adds 6: no `alert`, `confirm` or `prompt` call in `trip.html`; the app's own confirm and notice sheet; inline journal field and Send with a draft per day, no journal mode left on the capture screen; prompt editor on `tb_prompt_get` and `tb_prompt_set`, 4,000 count, default from `prompts/<key>.md`, Reset to default; Theme Light, Dark and Auto; icon source in paths only. Manifest icons still 192 and 512 PNGs at the same paths; precache covers the regenerated icons. |
+| `checks/smoke.sql` | PASS, 165 of 165 | Live project `travelboard`, one rolled-back transaction, through the connector (no migration in session B; regression run). |
+| `fn.test.cjs` | PASS, 62 of 62 | Deno 2.9.4. `tb-journal` unchanged. |
+| `m1.test.cjs` | PASS, 107 of 107, two runs | Unchanged apart from one wait (below). |
+| `m2.test.cjs` | PASS, 80 of 80, two runs | Composer checks rewritten to the inline field (7C.3), as deliberate changes. K1: the foot holds the field and Send, no Write or Capture button, placeholder "Tell Claude about today". K2: the field opens no screen and pushes no history entry, Send off when empty; draft `journal:<date>` written on input with `open` true; a reload mid-typing returns to the Journal tab, that day, the text, the field focused; leaving the field keeps the draft closed; the Captures tab shows Capture and no field; back on Journal the draft is there; the field grows from 54 px, stops at 40% of the screen and scrolls; emptying it drops the draft and shrinks it. K3: Send empties the field and clears the draft in one tap; own turn in Plex with the accent rule labelled "Gary, 2105 hrs", Claude's in Newsreader 17.5 px with the blue rule, no bubbles. K9: no field on the day list; the title suffix shows under the date (`#j-sub`); the field on an older day writes that day's draft. Every other K and L check unchanged and passing (send, queue, lost response, Retry, order, 0400, second device, upgrades, v6 move, Share). |
+| `m11.test.cjs` | PASS, 59 of 59, two runs | P16 and P20 moved from the composer to the field. |
+| `m12.test.cjs` | PASS, 56 of 56, two runs | Any browser dialog now fails the run. New M16: Remove opens the app's own sheet ("Remove Gary?", what leaves which phone, Cancel and Remove); Cancel sends nothing and keeps the link. M8 and M15 go through the sheet. M9, M10 send through the field. Hooks kept. |
+| `m13.test.cjs` | PASS, 104 of 104, three runs | Session A's 64 (N15 now checks the field opens no capture screen) plus 40 below (**items 6a, 7, 9**). Any browser dialog fails the run. |
+| Visual | Checked | Headless screenshots at 390 x 844, light and dark: journal page, the field growing, day list, Settings (signed in, signed out), prompt editor, confirm sheet, Change password, against `design/m1.3/Journal.dc.html` and `Panel.dc.html` (not committed). |
+| Icons | Checked | `icons/icon-192.png`, `icon-512.png` (rounded ink ground, clear corners) and `icon-maskable-512.png` (full bleed) rendered from `design/m1.3/icon-b.svg` by `design/m1.3/make-icons.cjs`; every mark within 36 of the 40-unit safe radius (184 px of 205 px on the 512). |
+
+Headless session B groups (`m13.test.cjs`):
+
+| Group | What it checks |
+|---|---|
+| N19 | Settings sheet: grabber, radius 14 px, paper surface, Newsreader 28 px title, X; the status block's stamp matches the pill in text and colour, Sync now, then Sync, Last sync, Last error, Storage, Version; groups Travelling with (Eric, Remove), Journal (My journal prompt, Edit; Export), Account (email, Sign out; Password, Change), no sign-in form; linked state in ink blue, Remove in the accent; every button at least 44 px |
+| N20 | Theme as a radio group Light, Dark, Auto; Auto stores nothing and follows the phone, and follows a change at once with the app open (theme colour too); Dark stays dark on a light phone and holds through a reload; the dark sheet is the night surface |
+| N21 (**item 7**) | Edit opens the default from `prompts/journal.md`; the count against 4,000; Reset off while the default is in force; 4,001 characters red and Save off, 4,000 (as code points) allowed, blank refused; Cancel keeps nothing; Save stores Gary's text only and says when it applies; the next turn's whole system prompt is his text, captures still in the context block; reopened shows it; Reset asks in the app's sheet, Cancel there changes nothing, Reset restores the file text and the next turn uses the file; saving the default unchanged stores nothing; offline Edit says "Needs a connection" and asks nothing; a signal lost before Save keeps the text and saves nothing; Eric's editor opens `journal-eric.md`, his Save sets only his row, his next turn follows it, Gary never sees it |
+| N22 (**item 6a**) | One tap on Send stores one turn, one tb-journal call, one reply, the field empties; the thread shows the turn and reply and quotes nothing; a draft survives a reload (force-close) |
+| N23 | A file that is not a photo gives the app's notice sheet with OK only; OK closes it and leaves the capture screen; `trip.html` calls no `alert`, `confirm` or `prompt` |
+| N24 | Maskable 512 full-bleed ink with the terracotta pin, every mark inside the safe circle; 512 and 192 with clear corners and the same art; manifest icon paths and the shortcut icon unchanged |
+
+Found and fixed while porting (24/10/26):
+- Typing straight after switching to the Journal tab could be overwritten when the day's draft finished loading. The field is now read-only from the start of the render that changes its day until that day's draft is in it.
+- Send now starts the sync before re-rendering, so the pill never reads idle between the two.
+- Journal Share labelled every turn "Gary", Eric's included; it now uses the phone owner's name (7B.3).
+- Test harness: Playwright 1.56's `waitForFunction` does not await an async condition (a Promise is truthy, so the wait returned at once). Every such wait in m1, m2, m11, m12 and m13, older ones included, now uses `until()` in `harness.cjs`, which polls for real. All suites pass with the stricter waits.
+
+
+### Device steps (both phones), 0.14.0: M1.2 and M1.3 in one run
+
+One run for SPEC 7B.5 (items 1 to 11 and 13) and 7C.7 (items 1 to 4, 6, 6a, 7). Item 12 of 7B.5 and items 5, 8 and 9 of 7C.7 are automated (results above). Gary on the Pixel, Eric on his Android phone. Steps marked **Eric** are his to do on his own phone, with Gary beside him reading out the step; everything else is Gary on the Pixel. Both phones on Asia/Singapore time. "Sync" means: tap the stamp at the top right, Sync now, then the X. Note the time of each step, and anything that looks wrong; screenshots help.
+
+Part A, Gary alone, any time before Eric is there (steps 1 to 9).
+
+1. **Update the Pixel.** Open travelboard; tap "Update ready, tap to reload" when it shows. Tap the stamp: the Settings sheet slides up from the bottom; Version reads 0.14.0. Close it with the X. Captures, photos and journal days are all still there. The home-screen icon becomes the notebook page with the terracotta pin on a dark ground; Chrome can take up to a day to change it, and may ask first. Report when it changes.
+2. **Journal page (7C item 1).** Journal tab. The date in the large serif, "Add a title" (or the day's title) under it, Days and Share on the right. Your messages have a terracotta line down the left and "GARY, 2105 HRS" above them; Claude's replies are in the serif with a blue line and "CLAUDE, ...". No bubbles, no quoted captures. At the foot: the Captures and Journal tabs, then a text field "Tell Claude about today" with an arrow button. There is no Write button.
+3. **Inline field and force-close (7C item 6a).** Tap the field: the keyboard opens on the same screen, no new screen. Check the Gboard mic works. Type four or five lines (`Line one`, Enter, `Line two` and so on): the field grows. Swipe travelboard away from recent apps, reopen it: it opens on the Journal tab with your lines in the field. Delete them all; type `Where am I today?` and tap the arrow once: the field empties at once, "Claude is replying" shows, and one reply comes.
+4. **Settings sheet (7C item 1).** Tap the stamp. Check against the approved panel: grabber, "Settings" in the serif, X; a box with the stamp, Sync now, Sync, Last sync, Last error, Storage, Version; TRAVELLING WITH (Eric, with "Not linked with Eric." and Add Eric); JOURNAL (My journal prompt with Edit, Export); ACCOUNT (gary@travelboard.local with Sign out, Password with Change); THEME (Light, Dark, Auto). Tap a free area above the sheet: it closes.
+5. **Theme (7C item 1).** Settings, Dark: the night page everywhere, the sheet included. Close and look at the Captures and Journal tabs, then open a capture: all readable. Settings, Auto: then open the Android quick settings and switch the phone's Dark theme on and off: travelboard follows each change at once. Settings, Light. Report anything hard to read in either theme.
+6. **Your journal prompt (7C item 7, Gary's half).** Settings, My journal prompt, Edit. The editor shows the default text, starting "You are the other half of Gary's travel journal", with "1,658 of 4,000" under it and Reset to default greyed. At the very end add a new line: `Always end every reply with the word Kopi.` Save. The sheet says "Saved. Claude uses it from your next journal turn." and the row reads "Your own text". Close, Journal, send `Prompt test one`: the reply ends with "Kopi". Settings, Edit again: your text is there; Reset to default, then Reset in the sheet that asks: the default text is back and "Back to the default text" shows. Cancel. Journal, send `Prompt test two`: no "Kopi".
+7. **Prompt needs a connection.** Airplane mode on. Settings, My journal prompt, Edit: "Needs a connection. Edit it when you have signal." under the row, no editor. Airplane mode off.
+8. **Change password, Cancel only (7B item 13, Gary's half).** Settings, Password, Change: two fields and Save password, Cancel. Cancel: the fields close. (Change it for real only if you want a new password.)
+9. **Named place and the journal (7C items 4 and 6; carried from session A step 8).** At a named place with signal (a mall, shop, station or park, for example Tampines Mall): Capture. Within a few seconds a dashed terracotta chip shows the place's name with "Map suggestion © OpenStreetMap contributors" under it; nothing is filled in. Tap the chip: the field fills. Type `M1.3 mall`, Save. Later, Journal: send `Where did I have lunch today?`: the reply names the place by its name.
+
+Part B, both phones side by side (steps 10 to 27). Before step 10 Claude confirms 0.14.0 is live (done for this release, see Deploy above). Gary hands Eric his password in person; it never goes into a chat or a file.
+
+10. **Eric installs.** **Eric:** in Chrome open `https://jeuron-hue.github.io/travelboard/trip.html`, menu, Install app (or Add to home screen), and open travelboard from the new icon (the notebook page and pin). Gboard as the keyboard with the on-device English pack (Settings, System, Languages, Speech, On-device recognition); in airplane mode, open a capture, tap the mic, check dictation works, close the capture, airplane mode off.
+11. **Eric signs in (7B item 1).** **Eric:** tap the stamp ("SIGN IN", in blue). The sheet shows the sign-in form under ACCOUNT. Enter `eric@travelboard.local` and his password, Sign in to sync. The stamp reads SYNCED; Version 0.14.0; the account row reads eric@travelboard.local. His day view is empty.
+12. **The look on Eric's phone (7C item 1).** **Eric:** Captures tab, Journal tab, Settings, a capture sheet: the same paper look as the Pixel. Settings, Dark, look again, then Light (or Auto, as he likes).
+13. **Separate by default (7B item 1).** **Eric:** Capture, `Eric before linking`, Save. Gary: Capture, `Gary before linking`, Save. Neither capture sheet shows a "Share with" switch. Both Sync. Each phone shows only its own capture. In Settings, Gary's TRAVELLING WITH reads "Not linked with Eric."; **Eric:** his reads "Not linked with Gary."
+14. **Link (7B item 2).** Gary: Settings, Add Eric: "You added Eric. Waiting for Eric to add you". **Eric:** Sync, then Settings: "Gary added you. Add him to link"; nothing of Gary's in his day view. **Eric:** Add Gary: "Linked with Gary", in blue. Gary: Sync, Settings: "Linked with Eric".
+15. **Share with, default on (7B item 3).** Gary: Capture. At the foot of the sheet, "Share with Eric" is on. Photo, Camera, take a photo, type `Shared test`, Save. **Eric:** Sync. `Shared test` shows with a blue "GARY" label, a blue dot on the timeline and the photo print. **Eric:** tap it: a sheet with "Gary, <date>", the time, the place, the photo and the text; nothing to edit, no Delete, no switches; Close.
+16. **Offline on Eric's phone (7B items 3, 11).** **Eric:** airplane mode on (stamp OFFLINE). Swipe travelboard away and reopen: `Shared test` and its photo still show. Still in airplane mode: Capture; "Share with Gary" is on; type `Eric airplane`, Save: the row shows QUEUED. Airplane mode off; the stamp reads SYNCED within about 30 s. Gary: Sync: `Eric airplane` shows, labelled ERIC.
+17. **A place named offline, shared (7C item 2).** Gary: airplane mode on. Capture, type `Named offline`, in Place type `Stall 12`, Save: the row shows `Stall 12` in bold, the stamp "OFFLINE, 1 QUEUED". Airplane mode off; SYNCED within about 30 s. **Eric:** Sync: `Named offline` shows with `Stall 12` as its place.
+18. **Not shared, and unsharing (7B item 4).** Gary: Capture, switch "Share with Eric" off, type `Not for Eric`, Save. **Eric:** Sync: `Not for Eric` does not show. Gary: tap `Shared test`, switch "Share with Eric" off, Save. **Eric:** Sync: `Shared test` and its photo are gone.
+19. **From before linking (7B item 5).** On Eric's phone `Gary before linking` is not there. Gary: tap it; "Share with Eric" shows off. Switch it on, Save. **Eric:** Sync: it appears, labelled GARY.
+20. **No editing the other's (7B item 6).** **Eric:** tap `Gary before linking`: only the read-only sheet opens. Gary: tap `Eric airplane`: the same.
+21. **Journals (7B items 9, 10; 7C item 6a on Eric's phone).** Gary: Journal, type `Gary private journal note` in the field, Send; a reply comes. **Eric:** Journal: his page shows none of Gary's messages. **Eric:** type `What did Gary note before we linked up?` in the field and tap Send once: one reply, which should mention Gary's `Gary before linking` capture by its content and not `Not for Eric` or `Shared test`. Gary: Journal: none of Eric's messages.
+22. **Eric's prompt (7C item 7, Eric's half).** **Eric:** Settings, My journal prompt, Edit: his default text, starting "You are the other half of Eric's travel journal". Add a last line `Always end every reply with the word Teh.` Save. Journal, send `Prompt test`: the reply ends with "Teh". Gary: Journal, send `Is Eric's prompt mine?`: no "Teh" (and no "Kopi", reset in step 6). **Eric:** Settings, Edit, Reset to default, Reset; or keep his line if he likes it, and say which.
+23. **Unlink in the app's own confirm (7B item 8; 7C.2a).** **Eric:** Settings, Remove (in terracotta). A sheet slides up in the app: "Remove Gary?", what leaves which phone, Cancel and Remove; no grey browser box. Cancel: still "Linked with Gary". Remove again, then Remove in the sheet: "Gary added you. Add him to link". Both Sync: Gary's captures are gone from Eric's phone and `Eric airplane` from Gary's. Gary's Settings: "You added Eric. Waiting for Eric to add you".
+24. **Relink (7B item 8).** **Eric:** Add Gary. Both Sync: Eric sees `Gary before linking` and `Named offline` again (not `Shared test` or `Not for Eric`); Gary sees `Eric airplane` again.
+25. **Eric changes his password (7B item 13).** **Eric:** Settings, Password, Change. He types a new password of at least 10 characters twice, on his own phone only, and taps Save password: "Password changed. Use the new one next time you sign in." Sign out: the sign-in form shows. Sign in with the old password: "Invalid login credentials". Sign in with the new one: SYNCED. If Save password shows an error about reauthentication instead, stop and tell Claude; do not try to work round it.
+26. **No browser dialogs.** Over the whole run, did any grey browser box appear (with the site address at the top)? Report yes or no on each phone.
+27. **Both phones, final look (7C item 1).** Each phone, light and then dark: day view, a capture sheet, Journal, Settings. Report anything that differs from the approved mockup.
+
+Report the time of each step and anything that looks wrong. Claude then checks the rows, links, place names, Storage reads, prompt rows and journal replies on the server.
 
 ### Automated results, 24/10/26 (session A)
 
@@ -94,36 +166,36 @@ v11 is live (`const CACHE_VERSION = 11;` confirmed 24/10/26 1323 hrs). Gary only
 
 Report the times and anything that looks wrong. Claude then checks the names on the server and the journal call.
 
-### Open items for session B (24/10/26, end of session A)
+### Open items (24/10/26, end of session B)
 
-To build (SPEC 7C.6 B)
-1. Journal screen to the mockup (`design/m1.3/Journal.dc.html`): notebook page, margin rule, replies in the serif, day list in the serif, inline field with Send at the foot, draft per day, Share unchanged (7C.2, item 6a). Rewrite m2's composer checks to the inline field; the hooks there now are `#capture` reading Write and the `cap` sheet in journal mode.
-2. Settings sheet (`Panel.dc.html`): bottom sheet with grabber, status block, Travelling with, Journal (My journal prompt, Export), Account (Sign out, Change password), Theme as Light, Dark, Auto. Today Theme is a two-way toggle; with no stored choice the app follows the phone at launch only, with no live listener.
-3. Prompt editor (7C.5 client): `tb_prompt_get`, `tb_prompt_set` are live and in the harness mock; default text from `prompts/<key>.md` on the live site. Add its tests to `m13.test.cjs` (7C.7 items 7 and 9).
-4. Partner panel, Change password, partner view and photo sheet in the paper style. The partner view already shows the place and no kind.
-5. App icon option B (SPEC 7C.8, added by Gary 24/10/26 at `b2b4519`): regenerate `icons/*.png` and the shortcut icon; bump the cache.
-6. Rewrite M1.2's device steps (above, v10) for the new UI and merge them with M1.3's into one two-phone script (7C.6). Eric gets no chips on his first capture: the open-time position waits for location permission, which Android asks for at his first Save.
-7. `renderJournal` has the same overlapping-render pattern fixed in `renderCaptures` (rows appended while awaiting). Build it off-screen the same way.
+Session A's build list (items 1 to 7) is done in 0.14.0: journal page and inline field, Settings sheet, prompt editor and its tests, panels in the paper style, icon option B, the combined device steps, and `renderJournal` built off-screen.
 
-Decisions put to Gary at the end of session A (answers to be recorded here)
-8a. Map chip where OpenStreetMap has an address but no name: Gary said yes 24/10/26. Built in v13 (house number and street); SPEC 7C.4 and change log updated.
-8. SPEC 7C.4 says replace `tb_captures_upsert`; it is a pass-through and needed no change (change log 24/10/26). Agree to reword 7C.4?
-9. `--crit` light `#b42318` is close in hue to the accent `#B4472A` (7C.8 kept it). The error stamp still reads "sync error". Keep, or deepen `--crit`?
+Untested
+1. The combined two-phone run above (steps 1 to 27): 7B.5 items 1 to 11 and 13, 7C.7 items 1 to 4, 6, 6a and 7 on the phones. Cut-off 05/11/26.
+2. 7C.7 item 4 at a named place and item 6 asking about it (step 9): carried from session A.
+3. Item 1 (every screen to the mockup) is checked headless only; the phones decide it, including Newsreader's weight at 34 px (session A item 10) and the new icon once Chrome updates it.
+4. Change password end to end (step 25). Gary reports "Secure password change" and "Require current password" both off (24/10/26), so `updateUser` should succeed with no reauthentication. The client path is proven against the mock (m12 P1 to P6); the real Auth server is proven only by Eric's run.
+
+Decisions for Gary (asked in the session B report; answers to be recorded here)
+5. SPEC 7C.4 says 0009 replaces `tb_captures_upsert`; it is a pass-through and needed no change (session A item 8). Reword 7C.4?
+6. `--crit` light `#b42318` sits close in hue to the accent `#B4472A` (session A item 9). Keep, or deepen it?
 
 Known, by design or minor
-10. Newsreader is vendored as the three static files 7C.8 names, which carry the default optical size. The mockup used Google's variable font, which sets optical size from the font size, so the 34 px title may look a little heavier on the phone than in the mockup. Check on the Pixel in step 2.
-11. A cached map name shows offline too, because it comes from the phone's own cache.
-12. The geocache never expires. A place renamed on OpenStreetMap keeps its old chip on that phone.
-13. Nominatim is called from the phone, about one request per new spot, with the browser's own Referer; no custom User-Agent is possible from a page.
-14. Catalogue baseline after 0009: outside 518, `493804029b51` (`checks/catalogue_scoped.sql`). Live: 2 people, both `journal_prompt_custom` null.
-15. Running the checks here: as M1.2 item 16; Deno from the GitHub release zip (2.9.4), fonts from the npm registry (`@fontsource/newsreader@5.3.0`, `@fontsource/ibm-plex-sans@5.3.0`; the Plex files already in `vendor/` match 5.3.0 byte for byte). The jsDelivr CDN is blocked here.
-16. M1.2 open items 1 and 3 to 12 above still stand. Item 2's selector worry is settled: the hooks were kept and m12 passes.
+7. Newsreader is the three static files 7C.8 names (default optical size); the mockup used the variable font, so the 34 px titles may look slightly heavier on the phone.
+8. A cached map name shows offline too; the geocache never expires; Nominatim is called from the phone with the browser's Referer, no custom User-Agent.
+9. The prompt editor counts characters as the server does (code points); an emoji built from several code points counts as several.
+10. Saving the default text unchanged stores no custom text, so a later edit of `prompts/<key>.md` reaches that person; once someone saves their own text, file edits no longer reach them until Reset to default.
+11. Android's home-screen icon changes when Chrome next checks the manifest, which can take up to a day and may ask first. The manifest paths are unchanged, so nothing else is needed.
+12. The journal field is hidden on the day list (nothing to write into there); tap a day or Today to write.
+13. Catalogue baseline after 0009 unchanged (no migration in session B): outside 518, `493804029b51`. Live: 2 people, both `journal_prompt_custom` null before the device run.
+14. Running the checks here: as M1.2 item 16 and session A; Deno 2.9.4 from the GitHub release zip; the icon generator needs the headless dev dependency (`npm install` in `checks/headless`).
+15. M1.2 open items below: 1, 3 and 4 wait on the combined run; 2, 5 and 11 are closed by session B.
 
 ---
 
 ## M1.2 Two travellers (SPEC.md 7B)
 
-**Status 24/10/26: built and passing every automated check; not yet run on the phones.** Migration 0008 applied, `tb-journal` v5 deployed, client v10 live. Item 13 (Change password) added on Gary's decision 24/10/26. Build session retired 24/10/26; M1.2 stays as built.
+**Status 24/10/26: built and passing every automated check (re-run on 0.14.0, M1.3 section); not yet run on the phones. Its device steps are now part of the combined run in the M1.3 section ("Device steps (both phones), 0.14.0").** Migration 0008 applied, `tb-journal` v5 deployed, client v10 live. Item 13 (Change password) added on Gary's decision 24/10/26. Build session retired 24/10/26; M1.2 stays as built.
 
 **Gary's decisions 24/10/26:** the two-phone test waits until after the UI redesign, so Eric's first look is the final UI. M1.2 cut-off moves from 31/10/26 to 05/11/26; the freeze from 01/11/26 to 06/11/26. The redesign, place names and editable journal prompts are M1.3 (SPEC 7C, D17, from Gary's planning chat, commit `5efd5d3`), built in two new sessions; SPEC and CLAUDE.md carry the new dates. The build session did not edit either for this.
 
@@ -131,12 +203,12 @@ Known, by design or minor
 
 Untested
 1. Every 7B.5 item on the phones (1 to 11 and 13). Item 12 passes. Eric has not installed the app or signed in yet (dashboard: "Last signed in" empty).
-2. The device steps below are written for v10's screens and labels. Rewrite them for the M1.3 design. The redesign will also change selectors used by `m12.test.cjs` (`#cap-share`, `#partners`, `#pw-*`, `#view-dlg`) and by `m1`, `m2`, `m11`.
+2. Closed 24/10/26 (M1.3 session B): the steps are rewritten for 0.14.0 and merged with M1.3's into one run (M1.3 section). The hooks were kept; m12 passes 56 of 56.
 3. Item 10 on a real call: Eric's reply referring to one of Gary's shared captures by its content. So far shown only in `fn.test.cjs` (G2) and `m12` (M10) against fakes.
 4. Item 7 REST part: no check from outside with a partner's JWT. The refusals are proven at the policy level (smoke T8, T12, T13); the admitted read is the Storage download on Eric's phone (device steps 6 and 8).
 
 Waiting on Gary
-5. Auth settings, not yet reported (Sign In / Providers, Email): "Secure password change", "Require current password when updating", minimum password length, password requirements, sign-ups off. If either of the first two is on, Change password shows the server's error. Gary asked to be told before anything works round it; the client calls `updateUser` only, with no `reauthenticate`.
+5. Answered 24/10/26: Gary reports "Secure password change" and "Require current password when updating" both off. Change password needs no reauthentication; Eric's step 25 of the combined run proves it end to end. (Minimum length, requirements and sign-ups not reported; the client enforces 10 characters itself.)
 
 Known behaviour, by design or minor
 6. The Share with switch uses the last link state the phone saw (`meta me`). Offline after an unlink, a new capture can still be saved shared. Nobody sees it unless the link is live again, and then it shows like any shared capture.
@@ -144,7 +216,7 @@ Known behaviour, by design or minor
 8. A partner photo is downloaded again only when `photo_bytes` changes. A Replace with a file of exactly the same size would keep the old image on the other phone.
 9. Journal Share (the text sent to another app) and the Days list count only the phone owner's own captures. Shared captures are not in the Share text (SPEC is silent).
 10. `meta me` is not cleared on sign-out. It refreshes at the next sync.
-11. Remove uses the browser's native confirm dialog.
+11. Closed 24/10/26 (0.14.0): Remove asks in the app's own confirm sheet; no browser dialog is left in the app (m12 M16, m13 N23, static check).
 12. Security advisors: `public.rls_auto_enable()` can be run by `anon`. It is Supabase's own function, not travelboard's, and was left alone under rule 1. The `tb_*` warnings are the intended design (rule 3).
 
 For the next session
@@ -187,9 +259,9 @@ Headless M1.2 groups (`m12.test.cjs`):
 
 Item 7's REST part: the photo reads go through the Storage REST API with the user's JWT, on the phones in device steps 5 and 8 (admitted while shared, gone after). The refusals (unshared, other folder, third user, after unlinking) are proven at the policy level by smoke T8, T12 and T13, as M1.1 item 8 was.
 
-### Device steps (both phones), v10
+### Device steps (both phones), v10 (superseded)
 
-To be run once v10 is live (Claude confirms `const CACHE_VERSION = 10;`). Gary on the Pixel, Eric on his Android phone, side by side. "Sync" means tap the pill, then Sync now, then Close. Both phones on Asia/Singapore time.
+Superseded 24/10/26 by the combined 0.14.0 run in the M1.3 section; kept as the record of what v10 asked. To be run once v10 is live (Claude confirms `const CACHE_VERSION = 10;`). Gary on the Pixel, Eric on his Android phone, side by side. "Sync" means tap the pill, then Sync now, then Close. Both phones on Asia/Singapore time.
 
 1. **Update Gary's Pixel.** Open travelboard; tap "Update ready, tap to reload" when it shows. Pill, Version reads v10. Gary's captures, photos and journal days are all still there.
 2. **Install on Eric's phone.** In Chrome open `https://jeuron-hue.github.io/travelboard/trip.html`, menu, Install app (or Add to home screen), open it from the new icon. Gboard as the keyboard, with the on-device English pack (Settings, System, Languages, Speech, On-device recognition); in airplane mode, tap the mic in a capture and check dictation works, then cancel.

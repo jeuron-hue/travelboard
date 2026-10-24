@@ -8,11 +8,18 @@
 // online with its credit, never filled in without a tap, the cached lookup (one request per
 // place), one request a second, failures, three chips at most, a capture saved offline getting
 // its map chip later, partner rows read-only with the owner's name for the place, export and
-// Share text. Session B adds 7C.5 (the prompt editor) to this file.
+// Share text.
+// Session B (24/10/26; SPEC.md 7C.2, 7C.2a Panels, 7C.5, 7C.7 items 6a, 7 and 9, 7C.8): the
+// Settings sheet to Panel.dc.html, Theme as Light, Dark and Auto (Auto follows the phone, live),
+// the prompt editor (default from prompts/<key>.md, Save, Cancel, Reset to default, a count
+// against 4,000, a connection needed, each person's own text only), the journal's inline field
+// (one tap sends one turn and gets one reply, the page look), the app's own confirm and notice
+// sheets in place of browser dialogs (any browser dialog fails the run), and the option B icons.
+// N15's composer check moved to the inline field.
 // Exit code 0 only when every check passes.
 'use strict';
 const fs = require('fs');
-const { launch, startServer, makeMock, attachMock, newContext, UID, ERIC_UID } = require('./harness.cjs');
+const { until, launch, startServer, makeMock, attachMock, newContext, UID, ERIC_UID } = require('./harness.cjs');
 
 const PORT = 8735;
 const BASE = `http://127.0.0.1:${PORT}/`;
@@ -71,7 +78,7 @@ async function chipsSettled(page) {
     await attachMock(ctx, mock, net);
     const page = await ctx.newPage();
     page.on('pageerror', (e) => console.log('PAGEERROR', who, e.message));
-    page.on('dialog', (d) => d.accept());
+    page.on('dialog', (d) => { check(`no browser dialog (${who}): ` + d.message(), false); d.dismiss(); });
     await page.goto(BASE + 'trip.html');
     await page.waitForFunction(() => document.getElementById('day-label').textContent !== '-');
     await syncIdle(page);
@@ -138,7 +145,7 @@ async function chipsSettled(page) {
     await G.fill('#cap-body', 'Coconut ice cream cart');
     await chipsSettled(G);
     await save(G);
-    await G.waitForFunction(() => idb.all('captures').then((a) => a.some((r) => r.body === 'Coconut ice cream cart' && r.lat != null)), null, { timeout: 3000 });
+    await until(G, () => idb.all('captures').then((a) => a.some((r) => r.body === 'Coconut ice cream cart' && r.lat != null)), null, { timeout: 3000 });
     rows = await store(G, 'captures');
     const cart = rows.find((r) => r.body === 'Coconut ice cream cart');
     let rp = await rowPlace(G, cart.id);
@@ -354,7 +361,7 @@ async function chipsSettled(page) {
     check('N13 offline at a new place: no chips', (await chips(G)).length === 0);
     await G.fill('#cap-body', 'Market, no signal');
     await save(G);
-    await G.waitForFunction(() => idb.all('captures').then((a) => a.some((r) => r.body === 'Market, no signal' && r.lat != null)), null, { timeout: 3000 });
+    await until(G, () => idb.all('captures').then((a) => a.some((r) => r.body === 'Market, no signal' && r.lat != null)), null, { timeout: 3000 });
     const market = (await store(G, 'captures')).find((r) => r.body === 'Market, no signal');
     await offline(false);
     await syncIdle(G);
@@ -368,14 +375,11 @@ async function chipsSettled(page) {
     // ---------- partner rows: read-only, no chips, the owner's name ----------
     check('N14 Eric\'s phone never asked OpenStreetMap for Gary\'s rows (no edit screen for them)', !mock.osm.calls.some((c) => c.phone === 'eric'));
 
-    // ---------- journal composer, export, Share text ----------
+    // ---------- the journal field, export, Share text ----------
     await G.click('#tab-journal');
-    await G.click('#capture');
-    await waitCap(G, true);
-    check('N15 the journal composer has no place field and no chips', !(await shown(G, '#cap-place-box')) && !(await shown(G, '#cap-chips')));
-    await G.click('#cap-close');
-    await waitCap(G, false);
-    await G.evaluate(() => idb.del('drafts', 'journal:' + jDay));
+    await G.focus('#j-input');
+    check('N15 the journal field opens no capture screen: no place field and no chips', (await G.$eval('#cap', (e) => e.hidden))
+      && !(await shown(G, '#cap-place-box')) && !(await shown(G, '#cap-chips')));
     const [dl] = await Promise.all([G.waitForEvent('download'), G.evaluate(() => exportCaptures())]);
     const ex = JSON.parse(fs.readFileSync(await dl.path(), 'utf8'));
     check('N15 export carries place_name (null when not named)', ex.captures.find((c) => c.id === lunch.id).place_name === 'Tampines Mall'
@@ -443,7 +447,7 @@ async function chipsSettled(page) {
     await openNew(G);
     await G.fill('#cap-body', 'Fix kept for next time');
     await save(G);
-    await G.waitForFunction((p) => idb.get('meta', 'last_fix').then((m) => m && Math.abs(m.value.lat - p.lat) < 1e-9), move(spot, 10, 10), { timeout: 3000 }).catch(() => {});
+    await until(G, (p) => idb.get('meta', 'last_fix').then((m) => m && Math.abs(m.value.lat - p.lat) < 1e-9), move(spot, 10, 10), { timeout: 3000 }).catch(() => {});
     check('N17 a Save\'s fix becomes the last fix', await G.evaluate((p) => idb.get('meta', 'last_fix').then((m) => !!m && Math.abs(m.value.lat - p.lat) < 1e-9), move(spot, 10, 10)));
     await offline(false);
     await syncIdle(G);
@@ -477,6 +481,258 @@ async function chipsSettled(page) {
     check('N18 v12 cache keys (no "a:") are not read, so an old empty answer cannot hide the address', await G.evaluate((p) => geoKey(p.lat, p.lng).startsWith('a:'), hdb)
       && mock.osm.calls.length === osm6 + 1);
     mock.osm.address = null;
+
+    // ================= Session B =================
+    await G.evaluate((p) => { __geo.mode = 'deny'; __geo.fix = p; }, BASE_POS);
+    await G.click('#tab-captures');
+    const openSettings = async (page) => {
+      await page.click('#status');
+      await page.waitForFunction(() => document.getElementById('settings').open);
+      await page.waitForTimeout(80);
+    };
+    const closeSettings = async (page) => { await page.click('#close'); await page.waitForFunction(() => !document.getElementById('settings').open); };
+    const confirmOpen = (page) => page.evaluate(() => document.getElementById('confirm-dlg').open);
+    // A journal turn through the field; waits until it is sent (or 20 s) and says where it stands.
+    const sendJ = async (page, msg) => {
+      await page.click('#tab-journal');
+      await page.fill('#j-input', msg);
+      await page.click('#j-send');
+      await until(page, async (m) => (await idb.all('journal')).some((r) => r.content === m && r.state === 'sent'), msg, { timeout: 20000, polling: 250 }).catch(() => {});
+      const st = await page.evaluate(async (m) => { const r = (await idb.all('journal')).find((x) => x.content === m); return `${r && r.state} ${r && r.error} ${syncState.phase} ${syncing} inflight=${jInflight.size}`; }, msg);
+      return st + ` fn=${mock.fnCalls.length} last=${mock.calls.slice(-4).join(',')}`;
+    };
+
+    // ---------- N19 the Settings sheet (Panel.dc.html) ----------
+    await syncIdle(G);
+    await openSettings(G);
+    const panel = await G.evaluate(() => {
+      const dlg = document.getElementById('settings');
+      const cs = (e) => getComputedStyle(e);
+      const dt = [...dlg.querySelectorAll('.statusbox dt')].map((e) => e.textContent);
+      const groups = [...dlg.querySelectorAll('.group')].filter((g) => !g.hidden).map((g) => ({
+        title: g.querySelector('h3').textContent,
+        rows: [...g.querySelectorAll('.prow')].filter((r) => !r.hidden).map((r) => ({ label: r.querySelector('.lbl').textContent, action: r.querySelector('button').textContent }))
+      }));
+      return { dt, groups, title: cs(dlg.querySelector('h2')).fontFamily + '|' + cs(dlg.querySelector('h2')).fontSize,
+        radius: cs(dlg).borderTopLeftRadius, grabber: !!dlg.querySelector('.grabber'), bg: cs(dlg).backgroundColor,
+        stamp: document.getElementById('s-stamp').textContent, pill: document.getElementById('status-text').textContent,
+        stampColor: cs(document.getElementById('s-stamp')).color, pillColor: cs(document.getElementById('status')).color,
+        syncNow: !!dlg.querySelector('.statusbox #sync-now'), theme: [...dlg.querySelectorAll('[role="radio"]')].map((b) => b.textContent),
+        x: document.getElementById('close').getAttribute('aria-label'), signin: !document.getElementById('signin').hidden };
+    });
+    check('N19 Settings sheet: grabber, radius 14 px, paper surface, title Newsreader 28 px, X to close', panel.grabber && panel.radius === '14px'
+      && panel.bg === 'rgb(251, 248, 241)' && /Newsreader/.test(panel.title) && /28px/.test(panel.title) && panel.x === 'Close panel', JSON.stringify(panel));
+    check('N19 status block: the stamp as the pill shows it, Sync now, then Sync, Last sync, Last error, Storage, Version', panel.stamp === panel.pill
+      && panel.stampColor === panel.pillColor && panel.syncNow && panel.dt.join() === 'Sync,Last sync,Last error,Storage,Version', JSON.stringify(panel));
+    check('N19 groups: Travelling with (Eric, Remove); Journal (My journal prompt, Edit; Export); Account (email, Sign out; Password, Change); no sign-in form',
+      JSON.stringify(panel.groups) === JSON.stringify([
+        { title: 'Travelling with', rows: [{ label: 'Eric', action: 'Remove' }] },
+        { title: 'Journal', rows: [{ label: 'My journal prompt', action: 'Edit' }, { label: 'Export', action: 'Export' }] },
+        { title: 'Account', rows: [{ label: 'gary@travelboard.local', action: 'Sign out' }, { label: 'Password', action: 'Change' }] }]) && !panel.signin,
+      JSON.stringify(panel.groups));
+    check('N19 the linked state reads in ink blue; Remove in the accent', await G.evaluate(() => getComputedStyle(document.querySelector('#partners .partner-state')).color === 'rgb(47, 85, 119)'
+      && getComputedStyle(document.querySelector('#partners [data-partner-action="remove"]')).color === 'rgb(180, 71, 42)'));
+    check('N19 every tap target in the sheet is at least 44 px high', await G.evaluate(() => [...document.querySelectorAll('#settings button')].filter((b) => b.offsetParent)
+      .every((b) => b.getBoundingClientRect().height >= 44)));
+
+    // ---------- N20 Theme: Light, Dark, Auto (7C.8) ----------
+    check('N20 Theme offers Light, Dark and Auto as a radio group; Light is checked here', panel.theme.join() === 'Light,Dark,Auto'
+      && (await G.getAttribute('#theme-light', 'aria-checked')) === 'true' && (await G.getAttribute('#theme-auto', 'aria-checked')) === 'false');
+    await G.emulateMedia({ colorScheme: 'dark' });
+    await G.click('#theme-auto');
+    check('N20 Auto stores no choice and follows the phone: dark phone, night page, dark theme colour', await G.evaluate(() => localStorage.getItem('tb-theme') === null
+      && document.documentElement.dataset.theme === 'dark' && document.querySelector('meta[name="theme-color"]').content === '#141C26')
+      && (await G.getAttribute('#theme-auto', 'aria-checked')) === 'true');
+    await G.emulateMedia({ colorScheme: 'light' });
+    await G.waitForTimeout(100);
+    check('N20 Auto follows a change of the phone\'s setting at once, with the app open', await G.evaluate(() => document.documentElement.dataset.theme === 'light'
+      && getComputedStyle(document.body).backgroundColor === 'rgb(244, 238, 226)' && document.querySelector('meta[name="theme-color"]').content === '#F4EEE2'));
+    await G.click('#theme-dark');
+    await G.emulateMedia({ colorScheme: 'light' });
+    check('N20 Dark stays dark on a light phone, and is kept', await G.evaluate(() => localStorage.getItem('tb-theme') === 'dark' && document.documentElement.dataset.theme === 'dark'));
+    await G.reload();
+    await G.waitForFunction(() => document.getElementById('day-label').textContent !== '-');
+    check('N20 after a reload the choice holds before first paint', await G.evaluate(() => document.documentElement.dataset.theme === 'dark'));
+    await openSettings(G);
+    check('N20 dark sheet: night surface', await G.evaluate(() => getComputedStyle(document.getElementById('settings')).backgroundColor === 'rgb(27, 37, 49)')
+      && (await G.getAttribute('#theme-dark', 'aria-checked')) === 'true');
+    await G.click('#theme-light');
+
+    // ---------- N21 My journal prompt (7C.5, items 7 and 9) ----------
+    const defGary = fs.readFileSync(require('path').join(__dirname, '..', '..', 'prompts', 'journal.md'), 'utf8');
+    const defEric = fs.readFileSync(require('path').join(__dirname, '..', '..', 'prompts', 'journal-eric.md'), 'utf8');
+    const promptCalls = () => mock.calls.filter((x) => /tb_prompt_(get|set)$/.test(x)).length;
+    const count = (t) => [...t.trim()].length.toLocaleString('en-GB') + ' of 4,000';
+    await G.click('#prompt-open');
+    await G.waitForFunction(() => document.getElementById('prompt-dlg').open, null, { timeout: 5000 }).catch(() => {});
+    check('N21 Edit opens the editor with the default text from prompts/journal.md (no custom text yet)', await G.evaluate(() => document.getElementById('prompt-dlg').open)
+      && (await G.inputValue('#prompt-text')) === defGary && /default text/.test(await text(G, '#prompt-state')));
+    check('N21 the count reads against 4,000; Reset to default is off while the default is in force; Save, Cancel shown',
+      (await text(G, '#prompt-count')) === count(defGary) && await G.$eval('#prompt-reset', (b) => b.disabled)
+      && (await shown(G, '#prompt-save')) && (await shown(G, '#prompt-cancel')), await text(G, '#prompt-count'));
+    await G.fill('#prompt-text', 'x'.repeat(4001));
+    check('N21 4,001 characters: the count turns red and Save is off', (await text(G, '#prompt-count')) === '4,001 of 4,000'
+      && await G.$eval('#prompt-count', (e) => e.classList.contains('over')) && await G.$eval('#prompt-save', (b) => b.disabled));
+    await G.fill('#prompt-text', 'é'.repeat(4000));
+    check('N21 4,000 characters (counted as the server counts them) can be saved', (await text(G, '#prompt-count')) === '4,000 of 4,000'
+      && !(await G.$eval('#prompt-save', (b) => b.disabled)));
+    await G.fill('#prompt-text', '   ');
+    check('N21 blank text cannot be saved (Reset to default is the way back)', await G.$eval('#prompt-save', (b) => b.disabled));
+    await G.fill('#prompt-text', 'Cancelled text');
+    await G.click('#prompt-cancel');
+    check('N21 Cancel closes and keeps nothing', !(await G.evaluate(() => document.getElementById('prompt-dlg').open)) && mock.people.get(UID).custom === null);
+    const garyCustom = 'You are Gary\'s travel journal. Answer in two sentences and always name the place.';
+    await G.click('#prompt-open');
+    await G.waitForFunction(() => document.getElementById('prompt-dlg').open, null, { timeout: 5000 });
+    await G.fill('#prompt-text', garyCustom + '\n');
+    await G.click('#prompt-save');
+    await G.waitForFunction(() => !document.getElementById('prompt-dlg').open, null, { timeout: 5000 }).catch(() => {});
+    check('N21 Save: stored on the server as Gary\'s own text, the editor closes, the panel says when it applies and "Your own text"',
+      mock.people.get(UID).custom === garyCustom && mock.people.get(ERIC_UID).custom === null && /next journal turn/.test(await text(G, '#prompt-row-ok'))
+      && (await text(G, '#prompt-detail')) === 'Your own text', String(mock.people.get(UID).custom));
+    await closeSettings(G);
+    let nC = mock.claude.length;
+    let jst = await sendJ(G, 'Where did I have lunch?');
+    let lastCall = mock.claude[mock.claude.length - 1];
+    check('N21 item 7: the next turn uses Gary\'s own text as the whole system prompt; the captures still go in the context block',
+      mock.claude.length === nC + 1 && lastCall.system === garyCustom && /<capture /.test(lastCall.context), jst + ' | ' + (lastCall && lastCall.system));
+    await openSettings(G);
+    await G.click('#prompt-open');
+    await G.waitForFunction(() => document.getElementById('prompt-dlg').open, null, { timeout: 5000 });
+    check('N21 reopened: the saved text, Reset to default on', (await G.inputValue('#prompt-text')) === garyCustom
+      && !(await G.$eval('#prompt-reset', (b) => b.disabled)) && /own text/.test(await text(G, '#prompt-state')));
+    await G.click('#prompt-reset');
+    await G.waitForFunction(() => document.getElementById('confirm-dlg').open, null, { timeout: 3000 }).catch(() => {});
+    check('N21 Reset to default asks first in the app\'s own sheet', await confirmOpen(G) && (await text(G, '#confirm-head')) === 'Reset to default?'
+      && (await text(G, '#confirm-ok')) === 'Reset');
+    await G.click('#confirm-cancel');
+    await G.waitForTimeout(100);
+    check('N21 Cancel there changes nothing', mock.people.get(UID).custom === garyCustom && (await G.inputValue('#prompt-text')) === garyCustom);
+    await G.click('#prompt-reset');
+    await G.waitForFunction(() => document.getElementById('confirm-dlg').open, null, { timeout: 3000 });
+    await G.click('#confirm-ok');
+    await G.waitForFunction(() => /default text/.test(document.getElementById('prompt-ok').textContent), null, { timeout: 5000 }).catch(() => {});
+    check('N21 Reset: the server holds no custom text, the editor shows the file text again, Reset off', mock.people.get(UID).custom === null
+      && (await G.inputValue('#prompt-text')) === defGary && await G.$eval('#prompt-reset', (b) => b.disabled) && (await text(G, '#prompt-detail')) === 'The default text');
+    await G.fill('#prompt-text', defGary.trim() + '\n\n');
+    await G.click('#prompt-save');
+    await G.waitForFunction(() => !document.getElementById('prompt-dlg').open, null, { timeout: 5000 }).catch(() => {});
+    check('N21 saving the default text unchanged stores no custom text, so the file stays in force', mock.people.get(UID).custom === null);
+    await closeSettings(G);
+    nC = mock.claude.length;
+    jst = await sendJ(G, 'And after lunch?');
+    lastCall = mock.claude[mock.claude.length - 1];
+    check('N21 after Reset the next turn uses the file again', mock.claude.length === nC + 1 && lastCall.system === 'PROMPT journal', jst + ' | ' + (lastCall && lastCall.system));
+    // offline: nothing opens, nothing is queued
+    await offline(true);
+    await openSettings(G);
+    const pc0 = promptCalls();
+    await G.click('#prompt-open');
+    await G.waitForFunction(() => document.getElementById('prompt-row-err').textContent, null, { timeout: 8000 }).catch(() => {});
+    check('N21 offline: Edit says it needs a connection and asks the server nothing', /Needs a connection/.test(await text(G, '#prompt-row-err'))
+      && !(await G.evaluate(() => document.getElementById('prompt-dlg').open)) && promptCalls() === pc0);
+    await offline(false);
+    await G.click('#prompt-open');
+    await G.waitForFunction(() => document.getElementById('prompt-dlg').open, null, { timeout: 5000 });
+    await G.fill('#prompt-text', 'Typed while the signal went');
+    await offline(true);
+    await G.click('#prompt-save');
+    await G.waitForFunction(() => document.getElementById('prompt-err').textContent, null, { timeout: 8000 }).catch(() => {});
+    check('N21 the signal goes before Save: "Needs a connection", nothing saved or queued, the text stays in the editor',
+      /Needs a connection/.test(await text(G, '#prompt-err')) && mock.people.get(UID).custom === null
+      && (await G.inputValue('#prompt-text')) === 'Typed while the signal went' && await G.evaluate(() => document.getElementById('prompt-dlg').open));
+    await offline(false);
+    await G.click('#prompt-close');
+    await closeSettings(G);
+    // Eric: his own default, his own text; Gary's untouched
+    await openSettings(E);
+    await E.click('#prompt-open');
+    await E.waitForFunction(() => document.getElementById('prompt-dlg').open, null, { timeout: 5000 }).catch(() => {});
+    check('N21 Eric\'s editor opens his own default, prompts/journal-eric.md', (await E.inputValue('#prompt-text')) === defEric);
+    await E.fill('#prompt-text', 'Eric\'s own prompt.');
+    await E.click('#prompt-save');
+    await E.waitForFunction(() => !document.getElementById('prompt-dlg').open, null, { timeout: 5000 }).catch(() => {});
+    check('N21 item 7: Eric\'s Save sets only his row; Gary\'s stays on the default', mock.people.get(ERIC_UID).custom === 'Eric\'s own prompt.'
+      && mock.people.get(UID).custom === null);
+    await closeSettings(E);
+    nC = mock.claude.length;
+    jst = await sendJ(E, 'Eric asks');
+    check('N21 Eric\'s next turn follows his text', mock.claude.length === nC + 1 && mock.claude[nC].uid === ERIC_UID && mock.claude[nC].system === 'Eric\'s own prompt.', jst);
+    await openSettings(G);
+    await G.click('#prompt-open');
+    await G.waitForFunction(() => document.getElementById('prompt-dlg').open, null, { timeout: 5000 });
+    check('N21 Gary\'s editor never shows Eric\'s text', (await G.inputValue('#prompt-text')) === defGary);
+    await G.click('#prompt-cancel');
+    await closeSettings(G);
+
+    // ---------- N22 the inline journal field (6a) ----------
+    await G.click('#tab-journal');
+    const fnN = mock.fnCalls.length, cN = mock.claude.length;
+    const jBefore = (await store(G, 'journal')).length;
+    await G.fill('#j-input', 'One tap, one reply');
+    await G.click('#j-send');
+    await until(G, async () => (await idb.all('journal')).some((r) => r.content === 'One tap, one reply' && r.state === 'sent'), null, { timeout: 8000 }).catch(() => {});
+    await syncIdle(G);
+    const jAfter = await store(G, 'journal');
+    const turn = jAfter.find((r) => r.content === 'One tap, one reply');
+    check('N22 item 6a: a turn typed in the field sends with one tap and gets exactly one reply', jAfter.length === jBefore + 2 && mock.fnCalls.length === fnN + 1
+      && mock.claude.length === cN + 1 && jAfter.filter((r) => r.reply_to === turn.id).length === 1 && (await G.inputValue('#j-input')) === '');
+    check('N22 the thread shows the turn and the reply, and quotes no capture', await G.evaluate((id) => {
+      const lis = [...document.querySelectorAll('#j-thread > li')];
+      const i = lis.findIndex((l) => l.dataset.id === id);
+      return i >= 0 && lis[i + 1] && lis[i + 1].className === 'msg assistant' && !document.querySelector('#j-thread .quote')
+        && lis.every((l) => /^msg (user|assistant)$/.test(l.className));
+    }, turn.id));
+    await G.fill('#j-input', 'Draft for the force-close');
+    await G.waitForTimeout(100);
+    await G.reload();
+    await G.waitForFunction(() => document.getElementById('j-input').value !== '', null, { timeout: 5000 }).catch(() => {});
+    check('N22 item 6a: an unsent draft survives a force-close', (await G.inputValue('#j-input')) === 'Draft for the force-close' && await G.evaluate(() => tab === 'journal'));
+    await G.fill('#j-input', '');
+    await G.click('#tab-captures');
+
+    // ---------- N23 the app's own sheets in place of browser dialogs (7C.2a) ----------
+    await G.click('#capture');
+    await waitCap(G, true);
+    await G.setInputFiles('#cap-file', { name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('not a picture') });
+    await G.waitForFunction(() => document.getElementById('confirm-dlg').open, null, { timeout: 5000 }).catch(() => {});
+    check('N23 a file that is not a photo: the app\'s notice sheet, OK only (no alert)', await confirmOpen(G)
+      && (await text(G, '#confirm-head')) === 'Could not read this photo' && !(await shown(G, '#confirm-cancel')) && (await text(G, '#confirm-ok')) === 'OK');
+    await G.click('#confirm-ok');
+    check('N23 OK closes it; the capture screen is still there', !(await confirmOpen(G)) && await G.evaluate(() => cap.open));
+    await G.click('#cap-close');
+    await waitCap(G, false);
+    await G.evaluate(() => idb.del('drafts', 'new'));
+    const src = fs.readFileSync(require('path').join(__dirname, '..', '..', 'trip.html'), 'utf8').replace(/<!--[\s\S]*?-->/g, '').replace(/^\s*\/\/.*$/gm, '');
+    check('N23 trip.html calls no alert, confirm or prompt', !/\b(alert|confirm|prompt)\s*\(/.test(src.replace(/askConfirm\(|answerConfirm\(|Prompt\(/g, '')));
+
+    // ---------- N24 app icon, option B (7C.8) ----------
+    const icons = await G.evaluate(async () => {
+      const load = (src) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src + '?t=' + Date.now(); });
+      const px = async (src, size) => {
+        const img = await load(src);
+        const c = document.createElement('canvas'); c.width = size; c.height = size;
+        const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+        return { w: img.naturalWidth, d: g.getImageData(0, 0, size, size).data };
+      };
+      const at = (r, x, y, n) => [...r.d.slice((y * n + x) * 4, (y * n + x) * 4 + 4)];
+      const m = await px('icons/icon-maskable-512.png', 512), a = await px('icons/icon-512.png', 512), s = await px('icons/icon-192.png', 192);
+      let maxR = 0, pin = 0;
+      for (let y = 0; y < 512; y++) for (let x = 0; x < 512; x++) {
+        const [r, g, b] = at(m, x, y, 512);
+        if (Math.abs(r - 31) + Math.abs(g - 42) + Math.abs(b - 54) > 12) maxR = Math.max(maxR, Math.hypot(x + 0.5 - 256, y + 0.5 - 256));
+        if (Math.abs(r - 180) + Math.abs(g - 71) + Math.abs(b - 42) < 12) pin++;
+      }
+      const man = await (await fetch('manifest.webmanifest')).json();
+      return { mw: m.w, aw: a.w, sw: s.w, mCorner: at(m, 0, 0, 512), aCorner: at(a, 0, 0, 512), sCorner: at(s, 0, 0, 192), aEdge: at(a, 256, 2, 512),
+        aCentre: at(a, 256, 256, 512), maxR, pin, icons: man.icons.map((i) => i.src).join(), sc: man.shortcuts[0].icons[0].src };
+    });
+    check('N24 maskable 512: full-bleed ink ground, terracotta pin, every mark inside the safe circle (40% radius)', icons.mw === 512
+      && icons.mCorner.slice(0, 3).join() === '31,42,54' && icons.pin > 2000 && icons.maxR > 150 && icons.maxR <= 0.4 * 512, JSON.stringify(icons));
+    check('N24 icon-512 and icon-192: the rounded ink ground with clear corners, the same art', icons.aw === 512 && icons.sw === 192
+      && icons.aCorner[3] === 0 && icons.sCorner[3] === 0 && icons.aEdge.slice(0, 3).join() === '31,42,54' && icons.aCentre.slice(0, 3).join() === '180,71,42', JSON.stringify(icons));
+    check('N24 manifest paths unchanged; the shortcut icon is icon-192', icons.icons === 'icons/icon-192.png,icons/icon-512.png,icons/icon-maskable-512.png'
+      && icons.sc === 'icons/icon-192.png');
   } finally {
     await browser.close();
     srv.close();

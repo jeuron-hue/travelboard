@@ -9,10 +9,14 @@
 // from either side clears both phones and adding again brings the still-shared back; journals
 // private, Eric's prompt and Gary's shared capture in Eric's journal call; an airplane-mode
 // capture on Eric's phone reaches Gary; export; the share switch in a draft; Change password.
+// M1.3 session B (SPEC.md 7C.2, 7C.2a Panels, 24/10/26): Remove asks in the app's own confirm
+// sheet (#confirm-dlg) instead of the browser's confirm, so any browser dialog now fails the
+// run; partnerButton answers the sheet. Journal turns go through the inline field. The panel's
+// hooks (#partners, .partner-state, #pw-*, #signin, #s-user) are kept.
 // Exit code 0 only when every check passes.
 'use strict';
 const APP = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'trip.html'), 'utf8').match(/const APP_VERSION = '([0-9.]+)';/)[1];
-const { launch, startServer, makeMock, attachMock, newContext, UID, ERIC_UID } = require('./harness.cjs');
+const { until, launch, startServer, makeMock, attachMock, newContext, UID, ERIC_UID } = require('./harness.cjs');
 
 const PORT = 8734;
 const BASE = `http://127.0.0.1:${PORT}/`;
@@ -83,11 +87,22 @@ async function closeSettings(page) {
   await page.click('#close');
   await page.waitForFunction(() => !document.getElementById('settings').open);
 }
+// Add, or Remove and then the confirm sheet's Remove.
 async function partnerButton(page, label) {
   await openSettings(page);
   await page.click(`#partners button:has-text("${label}")`);
+  if (label === 'Remove') {
+    await page.waitForFunction(() => document.getElementById('confirm-dlg').open, null, { timeout: 3000 });
+    await page.click('#confirm-ok');
+  }
   await page.waitForFunction(() => !syncing, null, { timeout: 10000 }).catch(() => {});
   await page.waitForTimeout(150);
+}
+async function journalTurn(page, msg) {
+  await page.click('#tab-journal');
+  await page.fill('#j-input', msg);
+  await page.click('#j-send');
+  await until(page, async (m) => (await idb.all('journal')).some((r) => r.content === m), msg, { timeout: 5000 });
 }
 
 (async () => {
@@ -100,7 +115,7 @@ async function partnerButton(page, label) {
     const net = { offline: false };           // this phone's airplane mode, for the Supabase host
     await attachMock(ctx, mock, net);
     const page = await ctx.newPage();
-    page.on('dialog', (d) => d.accept());      // Remove asks to confirm
+    page.on('dialog', (d) => { check('no browser dialog: ' + d.message(), false); d.dismiss(); });   // Remove asks in the app
     await page.goto(BASE + 'trip.html');
     await page.waitForFunction(() => document.getElementById('day-label').textContent !== '-');
     await syncIdle(page);
@@ -238,16 +253,10 @@ async function partnerButton(page, label) {
     check('M6 Eric\'s pill counts only his own rows (synced while he holds Gary\'s)', (await pill(E)) === 'synced' && (await store(E, 'partner')).length >= 1);
 
     // ---------- 9 and 10. Journals private; Eric's prompt; Gary's shared capture in Eric's call ----------
-    await G.click('#tab-journal');
-    await G.click('#capture'); await waitCap(G, true);
-    await G.fill('#cap-body', 'Gary private journal turn');
-    await save(G);
+    await journalTurn(G, 'Gary private journal turn');
     await syncIdle(G);
-    await E.click('#tab-journal');
-    await E.click('#capture'); await waitCap(E, true);
-    await E.fill('#cap-body', 'Did Gary find the stall?');
     const nClaude = mock.claude.length;
-    await save(E);
+    await journalTurn(E, 'Did Gary find the stall?');
     await syncIdle(E);
     const eCall = mock.claude.slice(nClaude).find((c) => c.uid === ERIC_UID);
     check('M10 Eric\'s journal call uses his prompt (journal-eric)', !!eCall && eCall.system === 'PROMPT journal-eric', eCall && eCall.system);
@@ -295,6 +304,21 @@ async function partnerButton(page, label) {
       && /error/.test(await pill(E)), await pill(E));
     mock.partnerFail = false;
     await syncIdle(E);
+
+    // ---------- Remove asks first, in the app's own sheet (7C.2a; no browser dialog) ----------
+    await openSettings(E);
+    const removes = () => mock.calls.filter((x) => x === '/rest/v1/rpc/tb_partner_remove').length;
+    const rm0 = removes();
+    await E.click('#partners button:has-text("Remove")');
+    await E.waitForFunction(() => document.getElementById('confirm-dlg').open, null, { timeout: 3000 }).catch(() => {});
+    check('M16 Remove opens the app\'s confirm sheet: "Remove Gary?", what leaves which phone, Cancel and Remove', await E.evaluate(() => document.getElementById('confirm-dlg').open)
+      && (await text(E, '#confirm-head')) === 'Remove Gary?' && /leave Gary's phone/.test(await text(E, '#confirm-body'))
+      && (await text(E, '#confirm-ok')) === 'Remove' && await shown(E, '#confirm-cancel'), await text(E, '#confirm-head'));
+    await E.click('#confirm-cancel');
+    await E.waitForTimeout(150);
+    check('M16 Cancel: nothing sent, still linked, panel unchanged, sheet closed', removes() === rm0 && mock.linked(UID, ERIC_UID)
+      && (await panelText(E)) === 'Linked with Gary' && !(await E.evaluate(() => document.getElementById('confirm-dlg').open)), await panelText(E));
+    await closeSettings(E);
 
     // ---------- Add or Remove offline: not queued ----------
     phones.eric.net.offline = true;

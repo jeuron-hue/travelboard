@@ -12,7 +12,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { chromium, launch, startServer, makeMock, attachMock, newContext } = require('./harness.cjs');
+const { until, chromium, launch, startServer, makeMock, attachMock, newContext } = require('./harness.cjs');
 
 const PORT = 8731;
 const APP_VERSION = fs.readFileSync(path.join(__dirname, '..', '..', 'trip.html'), 'utf8').match(/const APP_VERSION = '([0-9.]+)';/)[1];
@@ -335,7 +335,7 @@ async function gotoDay(page, ymd) {
   let g = (await all(page)).find((r) => r.body === 'gps pending');
   await editRow(page, g.id, 'gps pending, edited before the fix');
   await page.evaluate(() => __geo.pending.shift()());
-  await page.waitForFunction((id) => idb.get('captures', id).then((r) => r.lat != null), g.id);
+  await until(page, (id) => idb.get('captures', id).then((r) => r.lat != null), g.id);
   g = (await all(page)).find((r) => r.id === g.id);
   check('A18 GPS merge keeps the edit and adds coordinates', g.body === 'gps pending, edited before the fix' && g.lat === 13.7466 && g.lng === 100.5393 && Math.abs(g.accuracy_m - 12.5) < 1e-9);
   check('A18 GPS bumps updated_at and marks dirty', g.dirty === 1 || mock.rows.get(g.id));

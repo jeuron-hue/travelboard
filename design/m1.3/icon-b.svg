@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <!-- travelboard app icon, option B (SPEC.md 7C.8), from design/m1.3/Icons.dc.html on a 100-unit
+       grid: a ruled notebook page tilted -6deg on the ink ground, a terracotta map pin with a
+       paper-coloured hole. Paths only, no text, so no font is needed. Every mark lies within 38
+       units of the centre, inside Android's maskable safe circle (40). make-icons.cjs draws the
+       "any" icons with this rounded ground and the maskable one with a full-bleed square. -->
+  <rect id="ground" width="100" height="100" rx="22" fill="#1F2A36"/>
+  <g transform="rotate(-6 50 52)">
+    <rect x="27" y="25" width="46" height="54" rx="3" fill="#F4EEE2"/>
+    <path d="M33 38h34M33 47h34M33 56h34M33 65h24" stroke="#D9CFBD" stroke-width="1.6"/>
+    <path d="M31.5 28v48" stroke="#B4472A" stroke-opacity="0.35" stroke-width="1"/>
+  </g>
+  <path d="M58 73c-5.5-8.5-12-15.5-12-25a12 12 0 0 1 24 0c0 9.5-6.5 16.5-12 25z" fill="#B4472A"/>
+  <circle cx="58" cy="48" r="4.6" fill="#F4EEE2"/>
+</svg>
