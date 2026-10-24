@@ -24,7 +24,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 | Visual | Checked | Headless screenshots at 390 x 844, light and dark: journal page, the field growing, day list, Settings (signed in, signed out), prompt editor, confirm sheet, Change password, against `design/m1.3/Journal.dc.html` and `Panel.dc.html` (not committed). |
 | Deploy 0.14.0 | PASS | `main` at `2d53f04`; Pages build succeeded. Live `sw.js` reads `const CACHE_VERSION = '0.14.0';` (Last-Modified 24/10/26 1503 hrs SGT), fetched through Apify. |
 | 0.14.1 (24/10/26) | PASS | Light `--crit` `#8A1538` (Gary). static 114 (token table updated), m1 107, m2 80, m11 59, m12 56, m13 104. `main` at `a95b37e`; live `sw.js` reads `const CACHE_VERSION = '0.14.1';` (Last-Modified 1528 hrs SGT), fetched through Apify. |
-| 0.14.2 (24/10/26) | PASS | Dark `--crit` `#EC5F86` (Gary). static 114, m1 107, m2 80, m11 59, m12 56, m13 104. Live check below. |
+| 0.14.2 (24/10/26) | PASS | Dark `--crit` `#EC5F86` (Gary). static 114, m1 107, m2 80, m11 59, m12 56, m13 104. `main` at `8b62698`; live `sw.js` reads `const CACHE_VERSION = '0.14.2';` (Last-Modified 1540 hrs SGT), fetched through Apify. |
 | Icons | Checked | `icons/icon-192.png`, `icon-512.png` (rounded ink ground, clear corners) and `icon-maskable-512.png` (full bleed) rendered from `design/m1.3/icon-b.svg` by `design/m1.3/make-icons.cjs`; every mark within 36 of the 40-unit safe radius (184 px of 205 px on the 512). |
 
 Headless session B groups (`m13.test.cjs`):
@@ -61,7 +61,7 @@ Part A, Gary alone, any time before Eric is there (steps 1 to 9).
 8. **Change password, Cancel only (7B item 13, Gary's half).** Settings, Password, Change: two fields and Save password, Cancel. Cancel: the fields close. (Change it for real only if you want a new password.)
 9. **Named place and the journal (7C items 4 and 6; carried from session A step 8).** At a named place with signal (a mall, shop, station or park, for example Tampines Mall): Capture. Within a few seconds a dashed terracotta chip shows the place's name with "Map suggestion © OpenStreetMap contributors" under it; nothing is filled in. Tap the chip: the field fills. Type `M1.3 mall`, Save. Later, Journal: send `Where did I have lunch today?`: the reply names the place by its name.
 
-Part B, both phones side by side (steps 10 to 27). 0.14.1 is live (confirmed 24/10/26 1529 hrs, 0.14.1 row above). Gary hands Eric his password in person; it never goes into a chat or a file.
+Part B, both phones side by side (steps 10 to 27). 0.14.2 is live (confirmed 24/10/26 1543 hrs, 0.14.2 row above). Gary hands Eric his password in person; it never goes into a chat or a file.
 
 10. **Eric installs.** **Eric:** in Chrome open `https://jeuron-hue.github.io/travelboard/trip.html`, menu, Install app (or Add to home screen), and open travelboard from the new icon (the notebook page and pin). Gboard as the keyboard with the on-device English pack (Settings, System, Languages, Speech, On-device recognition); in airplane mode, open a capture, tap the mic, check dictation works, close the capture, airplane mode off.
 11. **Eric signs in (7B item 1).** **Eric:** tap the stamp ("SIGN IN", in blue). The sheet shows the sign-in form under ACCOUNT. Enter `eric@travelboard.local` and his password, Sign in to sync. The stamp reads SYNCED; Version 0.14.2; the account row reads eric@travelboard.local. His day view is empty.
