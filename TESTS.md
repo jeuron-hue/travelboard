@@ -7,7 +7,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ## M1.3 Look and place (SPEC.md 7C)
 
-**Status 24/10/26: session A built; v11 run on the Pixel to step 6, which found the chips needed a fix the phone could not get indoors in airplane mode; fixed in v12. v13 adds the address chip (Gary's decision). Steps 6 to 11 to run on 0.13.0 (v13 renumbered, Gary 24/10/26). Session B not started.** Migration 0009 applied, `tb-journal` v6 deployed.
+**Status 24/10/26: session A built; v11 run on the Pixel to step 6, which found the chips needed a fix the phone could not get indoors in airplane mode; fixed in v12. v13 adds the address chip (Gary's decision), renumbered 0.13.0. Steps 6, 7, 9, 10 and 11 pass on 0.13.0; step 8 passes at home (address chip) and waits for a named place. Session B not started.** Migration 0009 applied, `tb-journal` v6 deployed.
 
 ### Automated results, 24/10/26 (session A)
 
@@ -58,6 +58,23 @@ From Gary's screenshots and the server rows.
 v12 (24/10/26): the open-time request waits up to 30 s and accepts a fix up to 5 min old; the last fix the app saw, if under 5 min old, gives own-name chips at once (no OpenStreetMap lookup until a fresh fix). A Save's own fix keeps the 5 s limit.
 
 v13 (24/10/26, Gary's decision): where OpenStreetMap has no name, the map chip offers the address, house number and street. SPEC 7C.4 updated. Old cached empty answers are asked again once.
+
+### Device results, 0.13.0 (Pixel, Gary), 24/10/26
+
+From Gary's screenshots and the server rows (checked 1410 hrs).
+
+| Step | Time | Result |
+|---|---|---|
+| 1 | before 1401 | Updated to 0.13.0. |
+| 6 (item 3) | 1401 | PASS. Airplane mode, Wi-Fi off: blue chip `Home test 2 m` at open, field empty. |
+| 7 | 1402 to 1403 | PASS. `M1.3 test two` cleared back to coordinates; `place_name` null on the server (updated 1403:31). |
+| 8, home (item 4, address) | 1402 | PASS. Online at home: dashed chip `238 Tampines Street 21` with the OpenStreetMap credit, field empty. Tapped on `M1. 3 named place` (1404): `place_name` 238 Tampines Street 21 on the server. From then on it shows as Gary's own blue chip with distance (1405). |
+| 8, named place | | **Not run yet.** Needs a named place with signal, for example Tampines Mall. |
+| 9 | 1407 | PASS. `Draft text` saved with place `240 Tampines Street 21` (typed), coordinates kept. |
+| 10 | 1405 | PASS. Edit sheet for the 0931 photo capture: own time and date, place hint, chips, print with size and Remove, "Claude sees this photo" switch, info line with Delete, Replace and Save. |
+| 11 (items 6, 6a part) | 1407 to 1408 | PASS in substance. No quoted captures in the thread. Asked "Where did I have lunch today", Claude said no capture mentions lunch and placed the later captures "around 238 and 240 Tampines Street 21" by their place names. One reply stored (claude-sonnet-5-5, 555 input tokens). The mall lunch question waits for step 8 at a named place. |
+
+Left for session A: step 8 at a named place, then ask the journal about it (step 11 as written).
 
 ### Device steps (Pixel, Chrome), 0.13.0: session A
 
