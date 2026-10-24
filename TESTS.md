@@ -45,6 +45,19 @@ Found and fixed while porting (24/10/26):
 - Test harness: Playwright 1.56's `waitForFunction` does not await an async condition (a Promise is truthy, so the wait returned at once). Every such wait in m1, m2, m11, m12 and m13, older ones included, now uses `until()` in `harness.cjs`, which polls for real. All suites pass with the stricter waits.
 
 
+### Device results, 0.14.2 (Pixel, Gary), 24/10/26
+
+From Gary's report and screenshot and the server rows (checked 1600 hrs).
+
+| Step | Time | Result |
+|---|---|---|
+| 1 to 5 | before 1548 | PASS (Gary). Updated; journal page, field, Settings sheet and themes as described. Icon change not yet reported. |
+| 3 (item 6a) | 1548 | PASS. `Where am I today` sent with one tap; one reply stored (claude-sonnet-5-5, prompt cache written, 10,136 tokens). |
+| 6 (item 7, Gary) | 1551 to 1552 | PASS. Own text: `Prompt test one` reply ends "kopi"; the changed prompt wrote a new cache (10,150 tokens). After Reset to default: `Prompt test two` reply has no "kopi" and **read** the 1548 cache (10,136 tokens), so the restored text is byte for byte the file. `journal_prompt_custom` null for both people afterwards. Claude's second reply also remarked on its own earlier "kopi": it sees the day's thread, including replies written under the old prompt. Expected, not a defect. |
+| 7 | before 1553 | PASS (Gary). Offline Edit refused; screenshot at 1553 shows the OFFLINE stamp. |
+| 8 | | Moved to part B, done beside Eric's step 25. |
+| 9 (items 4, 6) | | Not run yet: needs a named place with signal. |
+
 ### Device steps (both phones), 0.14.0: M1.2 and M1.3 in one run
 
 One run for SPEC 7B.5 (items 1 to 11 and 13) and 7C.7 (items 1 to 4, 6, 6a, 7). Item 12 of 7B.5 and items 5, 8 and 9 of 7C.7 are automated (results above). Gary on the Pixel, Eric on his Android phone. Steps marked **Eric** are his to do on his own phone, with Gary beside him reading out the step; everything else is Gary on the Pixel. Both phones on Asia/Singapore time. "Sync" means: tap the stamp at the top right, Sync now, then the X. Note the time of each step, and anything that looks wrong; screenshots help.
