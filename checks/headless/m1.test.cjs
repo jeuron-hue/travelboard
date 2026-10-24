@@ -15,7 +15,7 @@ const path = require('path');
 const { chromium, launch, startServer, makeMock, attachMock, newContext } = require('./harness.cjs');
 
 const PORT = 8731;
-const APP_VERSION = fs.readFileSync(path.join(__dirname, '..', '..', 'trip.html'), 'utf8').match(/const APP_VERSION = (\d+);/)[1];
+const APP_VERSION = fs.readFileSync(path.join(__dirname, '..', '..', 'trip.html'), 'utf8').match(/const APP_VERSION = '([0-9.]+)';/)[1];
 const BASE = `http://127.0.0.1:${PORT}/`;
 const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok, detail }); console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail && !ok ? '  [' + detail + ']' : '')); };
@@ -92,7 +92,7 @@ async function gotoDay(page, ymd) {
   check('A1 M0 "Add test record" button removed', (await page.$('#add-test')) === null);
   check('A1 M0 hint text removed', !(await page.content()).includes('M0 foundation build'));
   check('A1 viewport has interactive-widget=resizes-content', (await page.$eval('meta[name=viewport]', (m) => m.content)).includes('interactive-widget=resizes-content'));
-  check(`A1 version v${APP_VERSION}`, (await page.$eval('#s-version', (e) => e.textContent)) === 'v' + APP_VERSION);
+  check(`A1 version v${APP_VERSION}`, (await page.$eval('#s-version', (e) => e.textContent)) === APP_VERSION);
   check('A1 label "Sun 04/10/26" at 1300 BKK', (await label(page)) === 'Sun 04/10/26', await label(page));
   check('A1 empty today text', (await page.$eval('#empty', (e) => !e.hidden && e.textContent)) === 'Nothing captured today yet.');
   check('A1 no draft: "draft kept" not shown', !(await shown(page, '#draft-note')));
@@ -445,7 +445,7 @@ async function gotoDay(page, ymd) {
   await ctxC.setOffline(true);
   await pc.reload();
   await pc.waitForFunction(() => document.getElementById('day-label').textContent !== '-');
-  check(`C2 offline reload renders v${APP_VERSION} from cache`, (await pc.$eval('#s-version', (e) => e.textContent)) === 'v' + APP_VERSION);
+  check(`C2 offline reload renders v${APP_VERSION} from cache`, (await pc.$eval('#s-version', (e) => e.textContent)) === APP_VERSION);
   await capture(pc, 'saved offline, no session');
   check('C2 offline capture with no session saves and queues', (await pill(pc)) === 'offline, 1 queued', await pill(pc));
   await pc.goto(BASE + 'trip.html?new=1');

@@ -3,9 +3,10 @@
    Edge Functions) is left to the network and never cached.
    Updates install in the background and wait; the page shows "update ready, tap
    to reload" and only a tap sends SKIP_WAITING. Never skipWaiting automatically.
-   Bump CACHE_VERSION on every release, together with APP_VERSION in trip.html. */
+   Bump CACHE_VERSION on every release, together with APP_VERSION in trip.html. Both are
+   0.<minor>.<patch> from 0.13.0 (24/10/26). */
 
-const CACHE_VERSION = 13;
+const CACHE_VERSION = '0.13.0';
 const CACHE = 'tb-shell-v' + CACHE_VERSION;
 
 const PRECACHE = [

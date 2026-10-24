@@ -227,7 +227,7 @@ Pull cursor: `server_ts` is `now()`, the transaction start time, so every row in
 - `share_target` (M1 uses it): GET to `./trip.html` with `title`, `text`, `url` params, so text or a Google Maps link shared from another app opens a prefilled capture.
 
 **sw.js**
-- Precache the shell: `trip.html`, `manifest.webmanifest`, icons, `vendor/*`. Cache name `tb-shell-v<N>`; bump N on every release, and `checks/static.cjs` verifies the precache list matches files on disk.
+- Precache the shell: `trip.html`, `manifest.webmanifest`, icons, `vendor/*`. Cache name `tb-shell-v<version>`; bump the version on every release (from 24/10/26 it reads `0.<minor>.<patch>`, starting at 0.13.0, the same in `trip.html` and `sw.js`), and `checks/static.cjs` verifies the precache list matches files on disk.
 - Shell requests: cache-first. Supabase and Edge Function requests: network-only, never cached.
 - New version: install in the background, then show an "update ready, tap to reload" bar. Never `skipWaiting` automatically, so an update never interrupts a capture in progress.
 
@@ -704,6 +704,7 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 24/10/26 6.4: Gary's decision. Version numbers become `0.<minor>.<patch>`, starting at 0.13.0 (was v13). `APP_VERSION` in `trip.html` and `CACHE_VERSION` in `sw.js` carry the same string; the cache is `tb-shell-v0.13.0`; the panel shows 0.13.0.
 - 24/10/26 7C.4: Gary's decision after the v11 Pixel run. Where Nominatim has no name for the spot (his HDB block came back as `238, Tampines Street 21` with an empty name), the map chip offers the address, house number and street. Still one tap, never filled in. The geocache key changes, so empty answers cached by v11 and v12 are asked again once. Client v13.
 - 24/10/26 7C.4, 7C.2, 7C.8, 4.2: details settled at the M1.3 session A build (no change to what Gary decided). 0009 replaces `tb_capture_upsert` and `tb_journal_turn`; `tb_captures_upsert` is not replaced because it passes each item to `tb_capture_upsert` unchanged, so it carries `place_name` as it is (smoke U10). A row pushed without `place_name` (an app before v11) keeps the stored name; a blank name is stored as null. A new capture takes a position at open for its chips only when location is already granted, so the permission prompt still comes at the first Save (7.2); the capture's coordinates still come from the fix at Save. Own-name chips show their distance; names differing only in case count as one; three own names in range mean no map lookup. A failed lookup is not cached; an empty answer is. The "sign in" stamp is ink blue, so no status uses the accent. Rows: a synced row shows no sync label, a queued row keeps a queued stamp; the city of a capture made in another zone follows its place. The day title's line reads the day's main city and its count. The Photo button keeps reading Replace once a photo is attached (7A.2). Newsreader is vendored as the three static files named in 7C.8. IndexedDB version 5 adds store `geocache`. Headless suite `m13.test.cjs`; `checks/catalogue_scoped.sql`.
 - 24/10/26 7C.8: app icon option B (notebook page and pin) chosen by Gary; built in session B. Source in `design/m1.3/Icons.dc.html`.

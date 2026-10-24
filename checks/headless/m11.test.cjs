@@ -104,8 +104,8 @@ async function save(page) {
   await page.waitForFunction(() => document.getElementById('day-label').textContent !== '-');
   await settle(page);
   const version = await page.$eval('#s-version', (e) => e.textContent);
-  const APP = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'trip.html'), 'utf8').match(/const APP_VERSION = (\d+);/)[1];
-  check(`P0 v${APP}, IndexedDB v5 with a photos store indexed on uploaded`, version === 'v' + APP && await page.evaluate(async () => {
+  const APP = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'trip.html'), 'utf8').match(/const APP_VERSION = '([0-9.]+)';/)[1];
+  check(`P0 v${APP}, IndexedDB v5 with a photos store indexed on uploaded`, version === APP && await page.evaluate(async () => {
     const db = await idb.open();
     return db.version === 5 && db.objectStoreNames.contains('photos') && db.transaction('photos').objectStore('photos').indexNames.contains('uploaded');
   }), version);

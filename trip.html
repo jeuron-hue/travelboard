@@ -39,6 +39,9 @@
     never filled in automatically.
 
   Change log (newest first)
+  - 24/10/26 0.13.0. Version numbers become 0.<minor>.<patch> (Gary's decision): APP_VERSION and
+    the service worker's CACHE_VERSION are '0.13.0', the panel shows 0.13.0, the cache is
+    tb-shell-v0.13.0, and the export's app_version is the string. Same behaviour as v13.
   - 24/10/26 v13. Map chip falls back to the address (house number and street) where
     OpenStreetMap has no name for the spot (SPEC.md 7C.4, Gary's decision after the v11 Pixel
     run at his HDB block). geocache keys gain an "a:" prefix, so v11 and v12's cached empty
@@ -699,7 +702,7 @@
 'use strict';
 
 // Bump together with CACHE_VERSION in sw.js on every release.
-const APP_VERSION = 13;
+const APP_VERSION = '0.13.0';     // 0.<minor>.<patch> from 0.13.0 (was 13), Gary 24/10/26
 
 const PROJECT_REF = 'nnnnonspfljdkrxstslw';           // Supabase project travelboard (SPEC.md D3, 6.8)
 const SUPABASE_URL = 'https://' + PROJECT_REF + '.supabase.co';
@@ -2762,7 +2765,7 @@ document.addEventListener('visibilitychange', () => {
 if (sb) sb.auth.onAuthStateChange(() => { renderAuth(); });
 
 (async function boot() {
-  $('s-version').textContent = 'v' + APP_VERSION;
+  $('s-version').textContent = APP_VERSION;
   await idb.open();
   await checkProject();               // before the first sync and before schema_version is written
   if ((await meta.get('schema_version')) !== 5) await meta.set('schema_version', 5);

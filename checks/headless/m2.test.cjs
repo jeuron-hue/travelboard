@@ -74,8 +74,8 @@ const settle = (page) => page.waitForFunction(() => !syncing, null, { timeout: 1
   await page.waitForFunction(() => document.getElementById('day-label').textContent !== '-');
   await settle(page);
 
-  const APP_VERSION = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'trip.html'), 'utf8').match(/const APP_VERSION = (\d+);/)[1];
-  check(`K0 version v${APP_VERSION}, IndexedDB v5 with journal, jdays, photos, partner, pphotos and geocache stores`, (await text(page, '#s-version')) === 'v' + APP_VERSION
+  const APP_VERSION = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'trip.html'), 'utf8').match(/const APP_VERSION = '([0-9.]+)';/)[1];
+  check(`K0 version v${APP_VERSION}, IndexedDB v5 with journal, jdays, photos, partner, pphotos and geocache stores`, (await text(page, '#s-version')) === APP_VERSION
     && await page.evaluate(async () => { const db = await idb.open(); return db.version === 5 && db.objectStoreNames.contains('geocache') && db.objectStoreNames.contains('photos') && db.objectStoreNames.contains('journal') && db.objectStoreNames.contains('jdays') && db.objectStoreNames.contains('partner') && db.objectStoreNames.contains('pphotos'); }));
   check('K0 opens on the Captures tab', await page.evaluate(() => tab === 'captures') && (await shown(page, '#daybar')) && !(await shown(page, '#jbar')));
 

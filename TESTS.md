@@ -7,7 +7,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ## M1.3 Look and place (SPEC.md 7C)
 
-**Status 24/10/26: session A built; v11 run on the Pixel to step 6, which found the chips needed a fix the phone could not get indoors in airplane mode; fixed in v12. v13 adds the address chip (Gary's decision). Steps 6 to 11 to run on v13. Session B not started.** Migration 0009 applied, `tb-journal` v6 deployed.
+**Status 24/10/26: session A built; v11 run on the Pixel to step 6, which found the chips needed a fix the phone could not get indoors in airplane mode; fixed in v12. v13 adds the address chip (Gary's decision). Steps 6 to 11 to run on 0.13.0 (v13 renumbered, Gary 24/10/26). Session B not started.** Migration 0009 applied, `tb-journal` v6 deployed.
 
 ### Automated results, 24/10/26 (session A)
 
@@ -59,11 +59,11 @@ v12 (24/10/26): the open-time request waits up to 30 s and accepts a fix up to 5
 
 v13 (24/10/26, Gary's decision): where OpenStreetMap has no name, the map chip offers the address, house number and street. SPEC 7C.4 updated. Old cached empty answers are asked again once.
 
-### Device steps (Pixel, Chrome), v13: session A
+### Device steps (Pixel, Chrome), 0.13.0: session A
 
 v11 is live (`const CACHE_VERSION = 11;` confirmed 24/10/26 1323 hrs). Gary only; the two-phone steps come with session B. Location is already allowed for travelboard on the Pixel. Note the time of each step.
 
-1. **Update.** Open travelboard; tap "Update ready, tap to reload" when it shows. Pill, Version reads v13. Close. Captures, photos and journal days are all still there.
+1. **Update.** Open travelboard; tap "Update ready, tap to reload" when it shows. Pill, Version reads 0.13.0. Close. Captures, photos and journal days are all still there.
 2. **The look (item 1, day view).** Paper-coloured page; "travelboard" in italic at the top left; the pill is a small tilted stamp (green "SYNCED"). Day title in the serif with "Singapore, N captures" under it; arrows on the right. Rows: the time in terracotta with "HRS" under it, a thin line with a dot, the place in bold (or coordinates in grey, or "no GPS"), the text, a tilted photo print. No "note" or "journal" labels anywhere, old journal captures included. Captures and Journal tabs sit above the Capture button. Compare with the approved mockup; report anything that differs.
 3. **Dark (item 1).** Pill, Theme. Night-blue page, light text, orange-terracotta times and button; everything readable. Theme again back to light. Report anything hard to read in either.
 4. **Capture sheet (item 1, 6a).** Capture. "New capture" title with an X; a sheet with the time in terracotta and today's date; PLACE with the coordinates as a grey hint; ruled lines; Photo and Save at the bottom. No Note/Journal toggle. Tap in the text, check the Gboard mic works, type `M1.3 test one`.

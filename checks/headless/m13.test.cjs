@@ -16,7 +16,7 @@ const { launch, startServer, makeMock, attachMock, newContext, UID, ERIC_UID } =
 
 const PORT = 8735;
 const BASE = `http://127.0.0.1:${PORT}/`;
-const APP = fs.readFileSync(require('path').join(__dirname, '..', '..', 'trip.html'), 'utf8').match(/const APP_VERSION = (\d+);/)[1];
+const APP = fs.readFileSync(require('path').join(__dirname, '..', '..', 'trip.html'), 'utf8').match(/const APP_VERSION = '([0-9.]+)';/)[1];
 const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok }); console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail && !ok ? '  [' + detail + ']' : '')); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

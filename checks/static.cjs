@@ -102,10 +102,10 @@ if (manifest) {
 const sw = read('sw.js');
 try { new vm.Script(sw, { filename: 'sw.js' }); check(true, 'sw.js: parses'); }
 catch (e) { check(false, `sw.js: parses (${e.message})`); }
-const ver = sw.match(/const CACHE_VERSION = (\d+);/);
-check(!!ver, 'sw.js: CACHE_VERSION declared');
+const ver = sw.match(/const CACHE_VERSION = '(\d+\.\d+\.\d+)';/);
+check(!!ver, 'sw.js: CACHE_VERSION declared as 0.<minor>.<patch>');
 check(/const CACHE = 'tb-shell-v' \+ CACHE_VERSION;/.test(sw), 'sw.js: cache name tb-shell-v<N>');
-const appVer = read('trip.html').match(/const APP_VERSION = (\d+);/);
+const appVer = read('trip.html').match(/const APP_VERSION = '(\d+\.\d+\.\d+)';/);
 check(!!(ver && appVer && ver[1] === appVer[1]), `sw.js CACHE_VERSION (${ver && ver[1]}) equals trip.html APP_VERSION (${appVer && appVer[1]})`);
 check(!/skipWaiting\(\)/.test(sw.replace(/if \(event\.data && event\.data\.type === 'SKIP_WAITING'\) self\.skipWaiting\(\);/, '')),
   'sw.js: skipWaiting only on the SKIP_WAITING message');
