@@ -7,7 +7,18 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ## M1.1 Photo capture (SPEC.md 7A)
 
-**Status 24/10/26: v8 run on the Pixel 0927 to 0936 hrs: items 2 to 11 pass. Item 1 (camera photo offline) could not run: Photo opened the Google Photos picker with no camera (SPEC 7A.2 corrected). v9 adds Camera and Gallery; the v9 steps below finish item 1. Cut-off on the Pixel 27/10/26.**
+**Status 24/10/26 1000 hrs: M1.1 done. Every item in SPEC 7A.6 passes: items 2 to 11 on v8 (0927 to 0936 hrs), item 1 and the Camera and Gallery sheet on v9 (0956 to 0958 hrs). `checks/static.cjs` 74 of 74, `checks/smoke.sql` 74 of 74. Three days inside the 27/10/26 cut-off.**
+
+### Device results, v9 (Pixel, Gary), 24/10/26
+
+| Step | Result | Evidence |
+|---|---|---|
+| 1 Update | PASS | Rows made on v9. |
+| 2 Sheet | PASS (Gary) | Camera, Gallery, Cancel. |
+| 3 Camera photo offline (item 1) | PASS | `Camera test` captured 0956:16 hrs; file stored 0956:51 hrs, 35 s later (an online save stores within 1 s, as `Gallery test` did), with GPS. 720 x 1280 (the camera's 9:16 frame shrunk to 1280 px), 103 440 B. |
+| 4 Gallery | PASS | `Gallery test` 0957:43 hrs, stored 0957:42 hrs (phone clock about 1 s ahead), 1280 x 1072. |
+| 5 Replace by camera | PASS | `Camera test` file rewritten at the same path 0958:22 hrs; row updated the same second. |
+
 
 ### Device results, v8 (Pixel, Gary), 24/10/26
 
@@ -107,9 +118,9 @@ Item 8 (anonymous and other-user access refused) is checked by Claude: the smoke
 
 ## Move to own project (SPEC.md 6.8)
 
-**Status 24/10/26: steps 2 to 6 done; step 8 PASSES (Pixel and keep-alive, 2347 hrs). The move is done. Step 7: Gary's yes 24/10/26; not yet run (below).**
+**Status 24/10/26: steps 2 to 6 done; step 8 PASSES (Pixel and keep-alive, 2347 hrs). The move is done. Step 7 done 24/10/26 1000 hrs: nothing of travelboard left in weatherboard (below).**
 
-Step 7, 24/10/26. Read-only inventory matched 6.8 exactly (3 tables with 33, 12 and 1 rows, 7 indexes, 11 constraints, 9 `tb_` functions, 4 history rows, 1 auth user; weatherboard's other 759 catalogue objects hash `1fc8e6b3fc48`, 12 cron jobs, bucket `radar`, 7 Edge Functions of its own plus `tb-journal`). The drop is `supabase/cleanup/weatherboard_6.8_step7.sql`: one transaction, no CASCADE, row-count guards. Sent three times through the Supabase connector; each call timed out at 60 s (the third with a 5 s lock timeout, so not a lock wait), and each time a read-only check showed nothing changed and no session left behind. Most likely the connector's confirmation for destructive statements went unanswered. Gary then ran the same file in weatherboard's SQL Editor at 0017 hrs 24/10/26: "Success". Checked after: weatherboard's other catalogue objects unchanged (759, hash `1fc8e6b3fc48`, same as before, covering tables, functions, cron jobs and the `radar` bucket); nothing named `travel`, `tb_` or `tb-` left in the database; the 4 history rows gone; its 7 own Edge Functions unchanged (same versions and hashes). Left for Gary in the dashboard: Edge Function `tb-journal` and auth user `gary@travelboard.local` (both still present at 0019 hrs).
+Step 7, 24/10/26. Read-only inventory matched 6.8 exactly (3 tables with 33, 12 and 1 rows, 7 indexes, 11 constraints, 9 `tb_` functions, 4 history rows, 1 auth user; weatherboard's other 759 catalogue objects hash `1fc8e6b3fc48`, 12 cron jobs, bucket `radar`, 7 Edge Functions of its own plus `tb-journal`). The drop is `supabase/cleanup/weatherboard_6.8_step7.sql`: one transaction, no CASCADE, row-count guards. Sent three times through the Supabase connector; each call timed out at 60 s (the third with a 5 s lock timeout, so not a lock wait), and each time a read-only check showed nothing changed and no session left behind. Most likely the connector's confirmation for destructive statements went unanswered. Gary then ran the same file in weatherboard's SQL Editor at 0017 hrs 24/10/26: "Success". Checked after: weatherboard's other catalogue objects unchanged (759, hash `1fc8e6b3fc48`, same as before, covering tables, functions, cron jobs and the `radar` bucket); nothing named `travel`, `tb_` or `tb-` left in the database; the 4 history rows gone; its 7 own Edge Functions unchanged (same versions and hashes). Left for Gary in the dashboard: Edge Function `tb-journal` and auth user `gary@travelboard.local` (both still present at 0019 hrs). Gary deleted both; checked 24/10/26 1000 hrs: weatherboard lists only its own 7 Edge Functions, no `gary@travelboard.local`, no schema `travel`, no `tb_` functions, no `tb_` history rows, no `tb` bucket. Step 7 done.
 
 ### Automated results, 23/10/26
 
