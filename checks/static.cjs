@@ -15,6 +15,9 @@
 //   cache in tb-journal, migration 0006 shape
 // - M1.2: stores partner and pphotos, shared pushed, partner rows never pushed, Change
 //   password via updateUser (10 characters minimum), migration 0008 shape
+// - M1.3: Newsreader and Plex 500 vendored, 7C.8 tokens in both themes, IndexedDB v5 with
+//   geocache, no kind toggle, place_name pushed, chip and Nominatim limits, tb-journal sends no
+//   kind and takes the custom prompt, migration 0009 shape
 'use strict';
 
 const fs = require('fs');
@@ -169,7 +172,7 @@ if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(
   const trip = read('trip.html');
   check(/const BUCKET = 'tb-photos';/.test(trip) && /const PHOTO_EDGE = 1280;/.test(trip) && /const PHOTO_QUALITY = 0\.82;/.test(trip),
     'photos: client uses bucket tb-photos, 1280 px long edge, JPEG 0.82');
-  check(/indexedDB\.open\('travelboard', 4\)/.test(trip) && /createObjectStore\('photos', \{ keyPath: 'id' \}\)/.test(trip), 'photos: IndexedDB v4 keeps store photos');
+  check(/indexedDB\.open\('travelboard', 5\)/.test(trip) && /createObjectStore\('photos', \{ keyPath: 'id' \}\)/.test(trip), 'photos: IndexedDB v5 (M1.3) keeps store photos');
   check(!/storage\.from\([^)]*\)\.remove\(/.test(trip) && !/method: 'DELETE'/.test(trip), 'photos: the client never deletes a file (rule 8)');
   if (exists(`${FN}/context.mjs`)) {
     const ctx = read(`${FN}/context.mjs`);
@@ -186,7 +189,7 @@ if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(
   const trip = read('trip.html');
   check(/createObjectStore\('partner', \{ keyPath: 'id' \}\)/.test(trip) && /createObjectStore\('pphotos', \{ keyPath: 'id' \}\)/.test(trip),
     'M1.2: IndexedDB v4 adds stores partner and pphotos');
-  check(/'photo_to_claude', 'shared', 'updated_at', 'deleted_at'\]/.test(trip) && /k === 'shared' \? row\[k\] === true/.test(trip),
+  check(/'photo_to_claude', 'shared', 'place_name', 'updated_at', 'deleted_at'\]/.test(trip) && /k === 'shared' \? row\[k\] === true/.test(trip),
     'M1.2: captures push shared, false when absent');
   check(/sb\.rpc\('tb_partner_captures'\)/.test(trip) && !/idb\.byIndex\('partner', 'dirty'/.test(trip) && !/toServer\([^)]*partner/.test(trip.replace(/idb\.all\('partner'\)\)\.map\(\(r\) => Object\.assign\(toServer\(r\)/, '')),
     'M1.2: partner rows come from tb_partner_captures and are never pushed');
@@ -196,6 +199,45 @@ if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(
   check(/alter policy tb_photos_select on storage\.objects/.test(m8) && !/drop (policy|table|function|schema)/i.test(m8)
     && !/grant [^;]* to (anon|public)/i.test(m8) && (m8.match(/security definer/g) || []).length === 10,
     'M1.2: 0008 alters tb_photos_select, drops nothing, grants nothing to anon, 10 definer functions');
+}
+
+// ---------- M1.3 look and place (SPEC.md 7C) ----------
+{
+  const trip = read('trip.html');
+  for (const [w, st] of [['500', 'normal'], ['600', 'normal'], ['500', 'italic']]) {
+    check(exists(`vendor/fonts/newsreader-latin-${w}-${st}.woff2`) && new RegExp(`font-family: 'Newsreader';\\s*font-style: ${st}; font-weight: ${w};[^}]*newsreader-latin-${w}-${st}\\.woff2`).test(trip),
+      `M1.3: Newsreader ${w} ${st} vendored and declared`);
+  }
+  check(exists('vendor/fonts/Newsreader-OFL-LICENSE') && /SIL Open Font License/.test(read('vendor/fonts/Newsreader-OFL-LICENSE')), 'M1.3: Newsreader OFL licence vendored');
+  check(exists('vendor/fonts/ibm-plex-sans-latin-500-normal.woff2') && /font-weight: 500;[^}]*ibm-plex-sans-latin-500-normal\.woff2/.test(trip), 'M1.3: Plex Sans 500 vendored and declared');
+  const light = (trip.match(/:root, \[data-theme="light"\] \{([^}]*)\}/) || [])[1] || '';
+  const dark = (trip.match(/\[data-theme="dark"\] \{([^}]*)\}/) || [])[1] || '';
+  const tok = (set, name, v) => new RegExp(`--${name}: ${v};`, 'i').test(set);
+  const T = [['ground', '#F4EEE2', '#141C26'], ['surface', '#FBF8F1', '#1B2531'], ['ink', '#1F2A36', '#ECE6DA'], ['muted', '#5E6670', '#A3ACB6'],
+    ['line', '#D9CFBD', '#2C3846'], ['ruled', '#E4DBCB', '#28333F'], ['accent', '#B4472A', '#E07A55'], ['accent-bg', '#F3DDD2', '#3A2620'],
+    ['on-accent', '#FFF8EE', '#141C26'], ['blue', '#2F5577', '#8DB4D9'], ['blue-bg', '#DCE6EF', '#1F3247'], ['good', '#2E6B4A', '#6FC596'],
+    ['good-bg', '#DDEBDF', '#173025'], ['warn', '#8A5A00', '#E2B355'], ['crit', '#b42318', '#e5534b'], ['photo', '#C2B08F', '#4A5566'], ['print', '#FFFDF8', '#2E3946']];
+  const bad = T.filter(([n, l, d]) => !tok(light, n, l) || !tok(dark, n, d)).map((x) => x[0]);
+  check(bad.length === 0, `M1.3: the 7C.8 colour tokens in both themes${bad.length ? ' (wrong: ' + bad.join(', ') + ')' : ''}`);
+  check(/<meta name="theme-color" content="#141C26">/.test(trip) && manifest && manifest.theme_color === '#141C26' && manifest.background_color === '#141C26', 'M1.3: theme colour and manifest from the dark ground');
+  check(/indexedDB\.open\('travelboard', 5\)/.test(trip) && /createObjectStore\('geocache', \{ keyPath: 'key' \}\)/.test(trip), 'M1.3: IndexedDB v5 adds store geocache');
+  check(!/id="kind-/.test(trip) && /kind: 'note',/.test(trip) && !/setKind\(/.test(trip), 'M1.3: no kind toggle; new captures save kind note (7C.2a)');
+  check(!/className = 'chip ' \+ \(r\.kind/.test(trip) && !/r\.kind === 'journal'/.test(trip), 'M1.3: no kind label on rows, no inline journal quotes');
+  check(/const PLACE_MAX = 120;/.test(trip) && /const PLACE_NEAR_M = 75;/.test(trip) && /const PLACE_CHIPS = 3;/.test(trip) && /maxlength="120"/.test(trip),
+    'M1.3: place names up to 120 characters; own names within 75 m; at most 3 chips');
+  check(/const NOMINATIM_URL = 'https:\/\/nominatim\.openstreetmap\.org\/reverse';/.test(trip) && /format=jsonv2&lat=/.test(trip) && /&zoom=18&accept-language=en/.test(trip)
+    && /const NOMINATIM_GAP_MS = 1000;/.test(trip) && /idb\.put\('geocache'/.test(trip), 'M1.3: Nominatim reverse jsonv2, zoom 18, English, one a second, cached in geocache');
+  check(/OpenStreetMap contributors/.test(trip), 'M1.3: OpenStreetMap credit shown with the map chip');
+  check(/if \(url\.origin !== self\.location\.origin\) return;/.test(sw), 'M1.3: the service worker never caches Nominatim (cross-origin is network only)');
+  if (exists(`${FN}/context.mjs`)) {
+    const ctx = read(`${FN}/context.mjs`);
+    check(!/kind=|c\.kind/.test(ctx) && /place="\$\{attr\(named\)\}"/.test(ctx), 'M1.3: tb-journal labels captures by place name, never by kind');
+    check(/export function pickPrompt/.test(ctx) && /pickPrompt\(turn\.me && turn\.me\.journal_prompt_custom, bundled\)/.test(read(`${FN}/index.ts`)), 'M1.3: tb-journal uses the custom prompt when set');
+  }
+  const m9 = exists('supabase/migrations/0009_place_and_prompt.sql') ? read('supabase/migrations/0009_place_and_prompt.sql') : '';
+  check(/^begin;$/m.test(m9) && /^commit;$/m.test(m9) && !/drop (policy|table|function|schema|column)/i.test(m9) && !/grant [^;]* to (anon|public)/i.test(m9)
+    && (m9.match(/security definer/g) || []).length === 4 && (m9.match(/^alter table (\S+)/gm) || []).every((x) => /alter table travel\./.test(x))
+    && !/storage\.|auth\.users/.test(m9.replace(/^--.*$/gm, '')), 'M1.3: 0009 in one transaction, travel and tb_ only, drops nothing, grants nothing to anon, 4 definer functions');
 }
 
 // ---------- keep-alive workflow (SPEC.md 6.8 step 5) ----------

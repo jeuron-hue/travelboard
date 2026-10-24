@@ -2,9 +2,12 @@
 //   node checks/headless/m2.test.cjs
 // Drives trip.html in Chromium against the RPC and tb-journal mocks in harness.cjs: Journal
 // tab, composer and drafts, send and reply, airplane-mode queue, lost responses, errors and
-// Retry, thread order, journal captures inline, day list and titles, pull on a second
-// device, 0400 rule, IndexedDB upgrade from v1, sending with no session, and the v6 move to
-// the travelboard project (SPEC.md 6.8 step 6).
+// Retry, thread order, day list and titles, pull on a second device, 0400 rule, IndexedDB
+// upgrade from v1, sending with no session, and the v6 move to the travelboard project
+// (SPEC.md 6.8 step 6). M1.3 (SPEC.md 7C.2a, 7C.3): journal-kind captures are no longer quoted
+// in the thread, and a new capture cannot be made journal-kind; the K1, K3, K4 and K11 checks
+// that saw the quote were rewritten on 24/10/26 to check its absence, with the journal-kind
+// capture now an old row from the server. Claude still sees it, unlabelled.
 // Exit code 0 only when every check passes.
 'use strict';
 const { chromium, launch, startServer, makeMock, attachMock, newContext, sessionJson, SUPA } = require('./harness.cjs');
@@ -21,7 +24,7 @@ const pill = (page) => text(page, '#status-text');
 const jrows = (page) => page.evaluate(() => idb.all('journal'));
 const thread = (page) => page.$$eval('#j-thread > li', (els) => els.map((e) => ({
   cls: e.className, id: e.dataset.id || e.dataset.capture || null,
-  text: e.classList.contains('quote') ? e.textContent : (e.querySelector('.text') || e).textContent,
+  text: (e.querySelector('.text') || e).textContent,
   meta: e.querySelector('.meta') ? e.querySelector('.meta').textContent : ''
 })));
 const waitCap = (page, open) => page.waitForFunction((o) => document.getElementById('cap').hidden === !o && (!o || !popWait), open, { timeout: 5000 });
@@ -42,13 +45,12 @@ async function write(page, msg, at) {
   await waitCap(page, false);
   await page.waitForFunction(() => !popWait);
 }
-async function capture(page, msg, kind, at) {
+async function capture(page, msg, at) {
   if (at) await page.clock.setFixedTime(at);
   await page.click('#tab-captures');
   await page.click('#capture');
   await waitCap(page, true);
   await page.fill('#cap-body', msg);
-  await page.click(kind === 'journal' ? '#kind-journal' : '#kind-note');
   await page.click('#cap-save');
   await waitCap(page, false);
   await page.waitForFunction(() => !popWait);
@@ -73,13 +75,15 @@ const settle = (page) => page.waitForFunction(() => !syncing, null, { timeout: 1
   await settle(page);
 
   const APP_VERSION = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'trip.html'), 'utf8').match(/const APP_VERSION = (\d+);/)[1];
-  check(`K0 version v${APP_VERSION}, IndexedDB v4 with journal, jdays, photos, partner and pphotos stores`, (await text(page, '#s-version')) === 'v' + APP_VERSION
-    && await page.evaluate(async () => { const db = await idb.open(); return db.version === 4 && db.objectStoreNames.contains('photos') && db.objectStoreNames.contains('journal') && db.objectStoreNames.contains('jdays') && db.objectStoreNames.contains('partner') && db.objectStoreNames.contains('pphotos'); }));
+  check(`K0 version v${APP_VERSION}, IndexedDB v5 with journal, jdays, photos, partner, pphotos and geocache stores`, (await text(page, '#s-version')) === 'v' + APP_VERSION
+    && await page.evaluate(async () => { const db = await idb.open(); return db.version === 5 && db.objectStoreNames.contains('geocache') && db.objectStoreNames.contains('photos') && db.objectStoreNames.contains('journal') && db.objectStoreNames.contains('jdays') && db.objectStoreNames.contains('partner') && db.objectStoreNames.contains('pphotos'); }));
   check('K0 opens on the Captures tab', await page.evaluate(() => tab === 'captures') && (await shown(page, '#daybar')) && !(await shown(page, '#jbar')));
 
-  // Two captures today, one tagged journal; one note on another day (pulled from "the server").
-  await capture(page, 'Jay Fai crab omelette, queue 40 min', 'note', bkk('1830'));
-  await capture(page, 'Feet done in. Best day so far.', 'journal', bkk('1845'));
+  // Two captures today: one made here, one old journal-kind row from the server (from before
+  // M1.3, when the kind toggle existed); one note on another day (pulled from "the server").
+  await capture(page, 'Jay Fai crab omelette, queue 40 min', bkk('1830'));
+  mock.upsertBatch([{ id: '00000000-0000-4000-8000-00000000d002', body: 'Feet done in. Best day so far.', kind: 'journal',
+    captured_at: bkk('1845').toISOString(), tz: 'Asia/Bangkok', local_date: '2026-11-09', updated_at: bkk('1845').toISOString() }]);
   mock.upsertBatch([{ id: '00000000-0000-4000-8000-00000000d001', body: 'Arrived BKK', kind: 'note',
     captured_at: bkk('1500', '2026-11-08').toISOString(), tz: 'Asia/Bangkok', local_date: '2026-11-08', updated_at: bkk('1500', '2026-11-08').toISOString() }]);
   await page.clock.setFixedTime(bkk('2100'));
@@ -93,15 +97,17 @@ const settle = (page) => page.waitForFunction(() => !syncing, null, { timeout: 1
     && await page.$eval('#j-title', (e) => e.classList.contains('today')));
   check('K1 bottom button reads Write', (await text(page, '#primary-label')) === 'Write');
   let th = await thread(page);
-  check('K1 empty thread shows the journal capture inline as a quote', th.length === 1 && th[0].cls === 'quote'
-    && th[0].text.includes('journal capture, 1845 hrs') && th[0].text.includes('Feet done in.'), JSON.stringify(th));
-  check('K1 empty-thread hint hidden once a quote shows', !(await shown(page, '#j-empty')));
+  check('K1 the thread quotes no capture, the journal-kind one included (7C.2a)', th.length === 0
+    && !(await page.$eval('#j-thread', (e) => e.textContent)).includes('Feet done in.') && !(await page.$('#j-thread .quote')), JSON.stringify(th));
+  check('K1 empty-thread hint shown, counting both of the day\'s captures', (await shown(page, '#j-empty'))
+    && (await text(page, '#j-empty')).includes('your 2 captures'), await text(page, '#j-empty'));
 
   // --- composer and drafts
   await page.click('#capture');
   await waitCap(page, true);
   check('K2 composer: focused, Send, no kind toggle, no Delete', await page.evaluate(() => document.activeElement.id === 'cap-body')
-    && (await text(page, '#cap-save')) === 'Send' && !(await shown(page, '#kind-group')) && !(await shown(page, '#cap-foot')));
+    && (await text(page, '#cap-save')) === 'Send' && (await page.$('#kind-group, #kind-note, #kind-journal')) === null && !(await shown(page, '#cap-foot'))
+    && !(await shown(page, '#cap-place-box')) && !(await shown(page, '#cap-switches')) && !(await shown(page, '#cap-photo-btn')));
   check('K2 composer label names the day', (await page.$eval('#cap', (e) => e.getAttribute('aria-label'))) === 'Journal, Mon 09/11/26');
   check('K2 Send disabled when empty', await page.$eval('#cap-save', (b) => b.disabled));
   await page.fill('#cap-body', 'Long day in the old town.');
@@ -147,11 +153,11 @@ const settle = (page) => page.waitForFunction(() => !syncing, null, { timeout: 1
     && rows.length === 2 && a1.model === 'claude-sonnet-5-5');
   check('K3 the draft is cleared on Send', !(await page.evaluate(() => idb.get('drafts', 'journal:2026-11-09'))) && !(await shown(page, '#draft-note')));
   const sys1 = mock.claude[mock.claude.length - 1].context;   // the day's context block (7A.4)
-  check('K3 Claude saw both of the day\'s captures (pushed before the turn was sent)', sys1.includes('Jay Fai crab omelette')
-    && sys1.includes('Feet done in.') && sys1.includes('1830 hrs Bangkok time') && !sys1.includes('Arrived BKK'));
+  check('K3 Claude saw both of the day\'s captures (pushed before the turn was sent), the journal-kind one unlabelled', sys1.includes('Jay Fai crab omelette')
+    && sys1.includes('Feet done in.') && sys1.includes('1830 hrs Bangkok time') && !sys1.includes('Arrived BKK') && !/kind=/.test(sys1));
   th = await thread(page);
-  check('K3 thread: journal capture (1845) before the turn (2105), then the reply', th.length === 3
-    && th[0].cls === 'quote' && th[1].cls === 'msg user' && th[2].cls === 'msg assistant' && th[2].text.startsWith('Reply'), JSON.stringify(th));
+  check('K3 thread: the turn (2105), then the reply; no quoted capture', th.length === 2
+    && th[0].cls === 'msg user' && th[1].cls === 'msg assistant' && th[1].text.startsWith('Reply'), JSON.stringify(th));
   check('K3 pill synced', (await pill(page)) === 'synced', await pill(page));
 
   // --- second turn: order
@@ -161,8 +167,8 @@ const settle = (page) => page.waitForFunction(() => !syncing, null, { timeout: 1
   check('K4 second turn: Claude gets user, assistant, user', last.map((x) => x.role).join() === 'user,assistant,user'
     && last[2].content === 'Wat Pho in the morning.');
   th = await thread(page);
-  check('K4 thread order on screen: quote, turn 1, reply 1, turn 2, reply 2',
-    th.map((x) => x.cls).join() === 'quote,msg user,msg assistant,msg user,msg assistant', th.map((x) => x.cls).join());
+  check('K4 thread order on screen: turn 1, reply 1, turn 2, reply 2',
+    th.map((x) => x.cls).join() === 'msg user,msg assistant,msg user,msg assistant', th.map((x) => x.cls).join());
 
   // --- airplane mode (acceptance 2)
   mock.offline = true;
@@ -353,7 +359,7 @@ const settle = (page) => page.waitForFunction(() => !syncing, null, { timeout: 1
   await pb.waitForTimeout(100);
   const thB = await thread(pb);
   check('K11 thread order on the second device matches the server order',
-    thB.filter((x) => x.cls !== 'quote').map((x) => x.id).join() === mock.jday('2026-11-09').messages.map((x) => x.id).join());
+    thB.map((x) => x.id).join() === mock.jday('2026-11-09').messages.map((x) => x.id).join());
   const daysCalls = mock.calls.filter((p) => p === '/rest/v1/rpc/tb_journal_day').length;
   await syncIdle(pb);
   check('K11 unchanged days are not fetched again', mock.calls.filter((p) => p === '/rest/v1/rpc/tb_journal_day').length === daysCalls);
@@ -400,8 +406,8 @@ const settle = (page) => page.waitForFunction(() => !syncing, null, { timeout: 1
   await settle(pc);
   const up = await pc.evaluate(async () => ({ v: (await idb.open()).version, caps: await idb.all('captures'),
     sv: await meta.get('schema_version'), draft: await idb.get('drafts', 'new') }));
-  check('K12 upgrade v1 to v4: capture, draft and meta kept, schema_version 4', up.v === 4 && up.caps.length === 1
-    && up.caps[0].body === 'M1 capture' && up.sv === 4 && up.draft && up.draft.body === 'M1 draft');
+  check('K12 upgrade v1 to v5: capture, draft and meta kept, schema_version 5', up.v === 5 && up.caps.length === 1
+    && up.caps[0].body === 'M1 capture' && up.sv === 5 && up.draft && up.draft.body === 'M1 draft');
   // v6: data from before the move is from the old project, so the session is cleared and the pill asks to sign in.
   check('K12 v6: the pre-move session is cleared, nothing sent, pill "sign in, 1 queued"', !mockC.rows.size
     && (await pill(pc)) === 'sign in, 1 queued' && !(await pc.evaluate(() => localStorage.getItem('tb-auth'))), await pill(pc));

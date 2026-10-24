@@ -146,6 +146,9 @@ function makeMock() {
   m.reauthRequired = false;     // true: PUT /auth/v1/user answers reauthentication_needed
   m.authOffline = false;        // true: PUT /auth/v1/user fails at the network
   m.partnerFail = false;        // true: tb_partner_captures answers 500
+  // OpenStreetMap Nominatim (M1.3): every reverse request, the name it answers with (a function
+  // of lat, lng, or a string; '' means nothing there), and a failure switch.
+  m.osm = { calls: [], name: '', fail: null };   // fail: null | 'network' | 'http'
   return m;
 }
 
@@ -295,6 +298,17 @@ function addJournal(m) {
 // airplane mode while the other syncs. m.offline still takes every phone off the network.
 async function attachMock(ctx, m, phone) {
   const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET,POST,OPTIONS' };
+  // No suite ever reaches the real Nominatim (SPEC.md 7C.4).
+  await ctx.route('https://nominatim.openstreetmap.org/**', async (route) => {
+    const u = new URL(route.request().url());
+    m.osm.calls.push({ path: u.pathname, q: Object.fromEntries(u.searchParams), at: Date.now(), phone: phone ? phone.name || null : null });
+    if (m.offline || (phone && phone.offline) || m.osm.fail === 'network') return route.abort('internetdisconnected');
+    if (m.osm.fail === 'http') return route.fulfill({ status: 503, headers: cors, body: 'busy' });
+    const lat = Number(u.searchParams.get('lat')), lng = Number(u.searchParams.get('lon'));
+    const name = typeof m.osm.name === 'function' ? m.osm.name(lat, lng) : m.osm.name;
+    return route.fulfill({ status: 200, headers: Object.assign({ 'content-type': 'application/json' }, cors),
+      body: JSON.stringify({ place_id: 1, lat: String(lat), lon: String(lng), category: 'shop', type: 'mall', name: name || '', display_name: (name ? name + ', ' : '') + 'Singapore' }) });
+  });
   await ctx.route(SUPA + '/**', async (route) => {
     const req = route.request();
     if (m.offline || (phone && phone.offline)) return route.abort('internetdisconnected');
@@ -401,13 +415,14 @@ function callerOf(req) {
   try { return JSON.parse(Buffer.from(t[2], 'base64url').toString('utf8')).sub || null; } catch (e) { return null; }
 }
 
-// Geolocation stub so the test controls timing: mode deny | grant | hold.
+// Geolocation stub so the test controls timing: mode deny | grant | hold; fix { lat, lng } moves it.
 const GEO_INIT = `
   window.__geo = { mode: 'deny', pending: [], calls: 0, lastOpts: null };
   Object.defineProperty(navigator, 'geolocation', { configurable: true, value: {
     getCurrentPosition(ok, err, opts) {
       const g = window.__geo; g.calls++; g.lastOpts = opts;
-      const fix = { coords: { latitude: 13.7466, longitude: 100.5393, accuracy: 12.5 }, timestamp: Date.now() };
+      const at = g.fix || { lat: 13.7466, lng: 100.5393 };    // g.fix (M1.3) moves the phone
+      const fix = { coords: { latitude: at.lat, longitude: at.lng, accuracy: 12.5 }, timestamp: Date.now() };
       if (g.mode === 'deny') setTimeout(() => err && err({ code: 1, message: 'User denied Geolocation' }), 10);
       else if (g.mode === 'hold') g.pending.push(() => ok(fix));
       else setTimeout(() => ok(fix), 10);

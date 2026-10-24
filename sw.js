@@ -5,7 +5,7 @@
    to reload" and only a tap sends SKIP_WAITING. Never skipWaiting automatically.
    Bump CACHE_VERSION on every release, together with APP_VERSION in trip.html. */
 
-const CACHE_VERSION = 10;
+const CACHE_VERSION = 11;
 const CACHE = 'tb-shell-v' + CACHE_VERSION;
 
 const PRECACHE = [
@@ -17,8 +17,13 @@ const PRECACHE = [
   './vendor/supabase-js-2.117.2.umd.js',
   './vendor/supabase-js-LICENSE',
   './vendor/fonts/ibm-plex-sans-latin-400-normal.woff2',
+  './vendor/fonts/ibm-plex-sans-latin-500-normal.woff2',
   './vendor/fonts/ibm-plex-sans-latin-600-normal.woff2',
-  './vendor/fonts/IBM-Plex-OFL-LICENSE'
+  './vendor/fonts/IBM-Plex-OFL-LICENSE',
+  './vendor/fonts/newsreader-latin-500-normal.woff2',
+  './vendor/fonts/newsreader-latin-600-normal.woff2',
+  './vendor/fonts/newsreader-latin-500-italic.woff2',
+  './vendor/fonts/Newsreader-OFL-LICENSE'
 ];
 
 self.addEventListener('install', (event) => {

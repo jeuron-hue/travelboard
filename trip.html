@@ -17,8 +17,8 @@
   - M2 Journal (SPEC.md 8): Journal tab with one thread per local day and a day list;
     the same full-screen textarea as capture for writing; a turn is stored locally as
     pending and sent to the tb-journal Edge Function by the sync engine, so it queues
-    offline and sends on reconnect; Claude's reply is stored once per turn; journal-kind
-    captures show inline in the day's thread; optional title suffix per day; Share sends
+    offline and sends on reconnect; Claude's reply is stored once per turn (until v11,
+    journal-kind captures also showed inline); optional title suffix per day; Share sends
     the whole day (captures and conversation) as plain text to another app.
   - M1.1 Photo capture (SPEC.md 7A): one photo per capture from the camera or gallery,
     shrunk on the phone to 1280 px JPEG, kept offline in IndexedDB, uploaded to the private
@@ -30,8 +30,34 @@
     switch, default on; shared captures of the other person are kept read-only on this phone
     (with their photos, so they show offline), shown in the day view with a name label and
     opened in a read-only view. Journals stay private.
+  - M1.3 Look and place (SPEC.md 7C): field-notebook identity (Newsreader for headings,
+    IBM Plex Sans for the rest, the approved 7C.8 tokens in light and dark); header with the
+    sync stamp; day view as a timeline (time, place, text, photo print); capture and edit as a
+    paper sheet with no kind toggle (every capture is a note, 7C.2a); place names: typed, or
+    one tap on a chip from your own names within 75 m (offline) or the nearest OpenStreetMap
+    name (online, Nominatim, cached in IndexedDB by position, at most one request a second),
+    never filled in automatically.
 
   Change log (newest first)
+  - 24/10/26 v11. M1.3 session A (SPEC.md 7C.1, 7C.2, 7C.2a, 7C.4, 7C.8). Vendored Newsreader
+    500, 600 and italic 500 and Plex Sans 500; the 7C.8 colour tokens in both themes; header
+    with the italic wordmark and the sync pill as a stamp (sign in in ink blue, not the
+    accent); Captures and Journal tabs move to the foot above the main button. Day view: serif
+    day title with a line for the city and count, rows on a timeline spine with the time
+    stamp, place (place_name, else coordinates to 4 decimals, else "no GPS"), text, photo as a
+    small tilted print; queued rows keep a queued stamp; partner rows keep the name label and
+    a blue dot. No kind label anywhere; the Note/Journal toggle is gone, new captures save
+    kind note and old journal-kind rows keep theirs. The journal thread no longer quotes
+    journal-kind captures. Capture and edit: a sheet with the time, a Place field and its
+    chips, the photo as a print with Remove, the ruled textarea, the switches together at the
+    foot, Photo and Save in the bottom bar. Place: own names within 75 m first (IndexedDB),
+    then, online, one OpenStreetMap Nominatim reverse lookup (jsonv2, zoom 18, English),
+    cached by position rounded to about 50 m in the new geocache store, at most one request a
+    second, with the OpenStreetMap credit; up to three chips; a tap fills the field, nothing
+    is filled without one. A new capture asks for a position at open only when location is
+    already granted, so the first permission prompt still comes at the first Save. place_name
+    is kept in drafts, pushed with the capture (null when cleared), shown in the partner view,
+    exported, and in the journal Share text. IndexedDB version 5 adds store geocache.
   - 24/10/26 v10. M1.2 Two travellers. IndexedDB version 4 adds stores partner (the other
     person's shared captures, replaced as a whole from tb_partner_captures on every sync) and
     pphotos (their photos, downloaded when online). Captures carry shared (false when absent),
@@ -93,7 +119,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-<meta name="theme-color" content="#12161a">
+<meta name="theme-color" content="#141C26">
 <title>travelboard</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
@@ -117,100 +143,169 @@
   }
   @font-face {
     font-family: 'IBM Plex Sans';
+    font-style: normal; font-weight: 500; font-display: swap;
+    src: url('vendor/fonts/ibm-plex-sans-latin-500-normal.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'IBM Plex Sans';
     font-style: normal; font-weight: 600; font-display: swap;
     src: url('vendor/fonts/ibm-plex-sans-latin-600-normal.woff2') format('woff2');
   }
+  @font-face {
+    font-family: 'Newsreader';
+    font-style: normal; font-weight: 500; font-display: swap;
+    src: url('vendor/fonts/newsreader-latin-500-normal.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'Newsreader';
+    font-style: normal; font-weight: 600; font-display: swap;
+    src: url('vendor/fonts/newsreader-latin-600-normal.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'Newsreader';
+    font-style: italic; font-weight: 500; font-display: swap;
+    src: url('vendor/fonts/newsreader-latin-500-italic.woff2') format('woff2');
+  }
 
+  /* Field notebook (SPEC.md 7C.1), values from the approved mockup (7C.8). --surface is the
+     sheet, --line the rule, --ruled the textarea lines; --crit and --crit-bg are unchanged. */
   :root, [data-theme="light"] {
-    --ground: #f5f3ef;  --surface: #ffffff; --ink: #1a1d21; --muted: #5f6b75; --line: #dcd8d0;
-    --accent: #c2531b;  --accent-bg: #fbe8dc;
-    --good: #1f7a4d;    --good-bg: #dcf1e5;
-    --warn: #8a6200;    --warn-bg: #faefd2;
+    --ground: #F4EEE2;  --surface: #FBF8F1; --ink: #1F2A36; --muted: #5E6670; --line: #D9CFBD;
+    --ruled: #E4DBCB;
+    --accent: #B4472A;  --accent-bg: #F3DDD2; --on-accent: #FFF8EE;
+    --blue: #2F5577;    --blue-bg: #DCE6EF;
+    --good: #2E6B4A;    --good-bg: #DDEBDF;
+    --warn: #8A5A00;    --warn-bg: #faefd2;
     --crit: #b42318;    --crit-bg: #fbe0dd;
-    --on-accent: #ffffff;
+    --photo: #C2B08F;   --print: #FFFDF8;
+    --shadow: rgba(31, 42, 54, 0.2); --scrim: rgba(31, 42, 54, 0.5);
   }
   [data-theme="dark"] {
-    --ground: #12161a;  --surface: #1b2127; --ink: #e8ecef; --muted: #93a0ab; --line: #2c343c;
-    --accent: #e06a2b;  --accent-bg: #3a2216;
-    --good: #3fb07a;    --good-bg: #15301f;
-    --warn: #e0a92b;    --warn-bg: #3a2f12;
+    --ground: #141C26;  --surface: #1B2531; --ink: #ECE6DA; --muted: #A3ACB6; --line: #2C3846;
+    --ruled: #28333F;
+    --accent: #E07A55;  --accent-bg: #3A2620; --on-accent: #141C26;
+    --blue: #8DB4D9;    --blue-bg: #1F3247;
+    --good: #6FC596;    --good-bg: #173025;
+    --warn: #E2B355;    --warn-bg: #3a2f12;
     --crit: #e5534b;    --crit-bg: #3d1a18;
-    --on-accent: #12161a;
+    --photo: #4A5566;   --print: #2E3946;
+    --shadow: rgba(0, 0, 0, 0.55); --scrim: rgba(4, 7, 11, 0.7);
   }
+  :root { --serif: 'Newsreader', Georgia, serif; }
 
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }   /* hidden always wins over a display rule */
   html, body { margin: 0; height: 100%; }
   body {
     font-family: 'IBM Plex Sans', system-ui, sans-serif;
-    font-size: 17px; line-height: 1.4;
+    font-size: 15px; line-height: 1.4;
     background: var(--ground); color: var(--ink);
     display: flex; flex-direction: column;
     -webkit-tap-highlight-color: transparent;
   }
   button, input, textarea { font: inherit; color: inherit; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .caps { font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+  .link {
+    min-height: 44px; padding: 0 4px; border: 0; background: transparent; cursor: pointer;
+    font-size: 15px; font-weight: 500; text-decoration: underline; text-underline-offset: 3px;
+  }
 
+  /* Header: wordmark and the sync stamp (SPEC.md 7C.2) */
   header {
     position: sticky; top: 0; z-index: 2;
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    padding: calc(env(safe-area-inset-top) + 10px) 16px 10px;
-    background: var(--ground); border-bottom: 1px solid var(--line);
+    padding: calc(env(safe-area-inset-top) + 14px) 16px 6px 20px;
+    background: var(--ground);
   }
-  header h1 { font-size: 20px; font-weight: 600; margin: 0; }
+  .wordmark { font-family: var(--serif); font-style: italic; font-weight: 500; font-size: 20px; color: var(--muted); }
   .status {
-    display: inline-flex; align-items: center; gap: 8px;
-    min-height: 44px; padding: 0 14px; border-radius: 22px;
-    border: 1px solid var(--line); background: var(--surface); cursor: pointer;
+    min-height: 44px; display: flex; align-items: center; padding: 0 0 0 12px;
+    border: 0; background: transparent; cursor: pointer; color: var(--muted);
   }
-  .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--muted); flex: none; }
-  .dot.synced  { background: var(--good); }
-  .dot.queued  { background: var(--warn); }
-  .dot.signin  { background: var(--accent); }
-  .dot.offline { background: var(--muted); }
-  .dot.error   { background: var(--crit); }
+  .stamp {
+    display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px;
+    border: 1.5px solid currentColor; border-radius: 4px; transform: rotate(-2deg);
+    font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap;
+  }
+  .status[data-state="synced"]  { color: var(--good); }
+  .status[data-state="queued"]  { color: var(--warn); }
+  .status[data-state="signin"]  { color: var(--blue); }
+  .status[data-state="offline"] { color: var(--muted); }
+  .status[data-state="error"]   { color: var(--crit); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+  .dot.synced { width: 10px; height: 6px; border-radius: 0; background: none; transform: rotate(-45deg) translate(1px, -1px);
+    border-left: 1.8px solid currentColor; border-bottom: 1.8px solid currentColor; }
 
-  .daybar {
-    position: sticky; top: 0; z-index: 1;
-    display: grid; grid-template-columns: 56px 1fr 56px; align-items: center; gap: 8px;
-    padding: 8px 16px; background: var(--ground); border-bottom: 1px solid var(--line);
+  /* Day heading: serif day title, the city and count, earlier and later day */
+  .dayhead {
+    display: flex; align-items: flex-end; justify-content: space-between; gap: 8px;
+    padding: 6px 12px 14px 20px; border-bottom: 1px solid var(--line); background: var(--ground);
   }
-  .daybar button {
-    min-height: 48px; border-radius: 10px; border: 1px solid var(--line);
-    background: var(--surface); cursor: pointer; font-size: 20px;
+  .dayhead .titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .dayhead h1 { margin: 0; font-size: inherit; }
+  #day-label {
+    padding: 0; border: 0; background: transparent; cursor: pointer; text-align: left;
+    font-family: var(--serif); font-weight: 600; font-size: 34px; line-height: 1.1; letter-spacing: -0.01em;
   }
-  .daybar button:disabled { opacity: 0.35; cursor: default; }
-  .daybar #day-label { font-weight: 600; font-variant-numeric: tabular-nums; }
-  .daybar #day-label.today { color: var(--accent); }
+  #day-sub { font-size: 15px; color: var(--muted); }
+  .dayhead .arrows { display: flex; flex: none; }
+  .arrow {
+    width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;
+    border: 0; background: transparent; cursor: pointer; color: var(--ink);
+  }
+  .arrow:disabled { color: var(--muted); opacity: 0.5; cursor: default; }
+  .arrow svg, .xbtn svg { pointer-events: none; }
 
-  main { flex: 1; overflow-y: auto; padding: 0 0 140px; }
-  .list { padding: 12px 16px 0; }
-  .hint { color: var(--muted); font-size: 15px; margin: 4px 0 12px; }
+  main { flex: 1; overflow-y: auto; padding: 0 0 170px; }
+  .list { padding: 4px 16px 0 12px; }
+  .hint { color: var(--muted); font-size: 15px; margin: 12px 0 12px 8px; }
+
+  /* Day rows on a timeline spine: time | spine | place, text, print. Hairlines, no cards. */
   ul.records { list-style: none; margin: 0; padding: 0; }
-  ul.records li { margin-bottom: 8px; }
   .row {
-    display: block; width: 100%; text-align: left; cursor: pointer;
-    padding: 10px 12px; border-radius: 10px;
-    background: var(--surface); border: 1px solid var(--line);
+    display: flex; align-items: stretch; width: 100%; padding: 0; margin: 0;
+    border: 0; background: transparent; text-align: left; cursor: pointer; color: inherit;
   }
-  .row:active { filter: brightness(0.96); }
-  .line1 { display: flex; align-items: center; gap: 8px; min-height: 26px; }
-  .when { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
-  .city { color: var(--muted); font-weight: 400; }
-  .spacer { flex: 1; }
+  .row:active .rowbody { background: var(--accent-bg); }
+  .tcol { width: 52px; flex: none; padding-top: 14px; text-align: right; }
+  .when { display: flex; flex-direction: column; align-items: flex-end; }
+  .when .hm { font-weight: 600; font-size: 16px; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; color: var(--accent); }
+  .when .hrs { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .spine { width: 26px; flex: none; position: relative; display: flex; justify-content: center; }
+  .spine::before { content: ''; position: absolute; top: 0; bottom: 0; width: 1.5px; background: var(--line); }
+  .spine .pin {
+    position: relative; margin-top: 19px; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--ground); border: 2px solid var(--accent); box-sizing: content-box;
+  }
+  .row.partner .spine .pin { border-color: var(--blue); }
+  .rowbody {
+    flex: 1; min-width: 0; display: flex; gap: 12px; padding: 12px 4px 14px 4px;
+    border-bottom: 1px solid var(--line);
+  }
+  .rowtext { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .line1 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .place { font-size: 17px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .place.coords, .place.nogps { font-weight: 500; color: var(--muted); }
+  .city { font-size: 13px; color: var(--muted); }
   .line2 {
-    color: var(--muted); margin-top: 2px;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    margin: 0; font-size: 15px; line-height: 1.4; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
   }
-  .gps { width: 10px; height: 10px; border-radius: 50%; background: var(--good); flex: none; }
-  .chip { font-size: 13px; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
-  .chip.note { background: var(--ground); color: var(--muted); border: 1px solid var(--line); }
-  .chip.journal { background: var(--accent-bg); color: var(--accent); }
-  .chip.queued { background: var(--warn-bg); color: var(--warn); }
-  .chip.synced { background: var(--good-bg); color: var(--good); }
-  .primary small { display: block; font-size: 14px; font-weight: 400; opacity: 0.9; }
-  .primary:disabled { opacity: 0.4; cursor: default; filter: none; }
+  .chip { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 6px; border-radius: 3px; white-space: nowrap; }
+  .chip.who { background: var(--blue-bg); color: var(--blue); }
+  .chip.queued { color: var(--warn); border: 1px solid var(--warn); background: transparent; }
+  .chip.synced { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); padding: 0; }
+  .chip.failed { background: var(--crit-bg); color: var(--crit); }
+  .print {
+    flex: none; width: 58px; height: 58px; margin-top: 4px; border: 4px solid var(--print);
+    background: var(--photo); box-shadow: 0 1px 3px var(--shadow); overflow: hidden;
+    display: flex; align-items: center; justify-content: center; color: var(--print);
+  }
+  .print img.thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
+  span.thumb { font-size: 11px; color: var(--print); }
 
-  /* Capture and edit screen: a fixed layer over the whole app. With
+  /* Capture and edit: a fixed layer over the whole app, a paper sheet. With
      interactive-widget=resizes-content it shrinks above the keyboard. */
   #cap {
     position: fixed; inset: 0; z-index: 5;
@@ -218,58 +313,98 @@
     background: var(--ground);
   }
   #cap[hidden] { display: none; }
-  .capbar {
-    display: flex; align-items: center; gap: 8px;
-    padding: calc(env(safe-area-inset-top) + 8px) 12px 8px;
-    border-bottom: 1px solid var(--line);
+  .caphead {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: calc(env(safe-area-inset-top) + 12px) 8px 4px 20px;
   }
-  .capbar .btn { min-width: 72px; }
-  .capbar .save {
-    min-height: 48px; min-width: 84px; padding: 0 16px; border: 0; border-radius: 10px;
-    background: var(--accent); color: var(--on-accent); font-weight: 600; cursor: pointer;
+  .caphead h2 { margin: 0; font-family: var(--serif); font-weight: 600; font-size: 28px; line-height: 1.15; min-width: 0; overflow-wrap: anywhere; }
+  .xbtn {
+    width: 44px; height: 44px; flex: none; display: flex; align-items: center; justify-content: center;
+    border: 0; background: transparent; color: var(--muted); cursor: pointer;
   }
-  .capbar .save:disabled { opacity: 0.4; cursor: default; }
-  .toggle { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-  .toggle button {
-    min-height: 46px; padding: 0 14px; border: 0; background: var(--surface); cursor: pointer;
+  .sheetpage {
+    flex: 1; min-height: 0; margin: 8px 12px 0; padding: 16px 16px 10px;
+    border-radius: 6px 6px 0 0; background: var(--surface); box-shadow: 0 1px 3px var(--shadow);
+    display: flex; flex-direction: column; gap: 14px; overflow-y: auto;
   }
-  .toggle button[aria-pressed="true"] { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+  .capwhen { display: flex; align-items: baseline; gap: 8px; }
+  .capwhen .hm { font-weight: 600; font-size: 16px; font-variant-numeric: tabular-nums; color: var(--accent); }
+  .capwhen .day { font-size: 14px; color: var(--muted); }
+  #cap-place-box { display: flex; flex-direction: column; gap: 8px; }
+  .placefield {
+    display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 10px;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--ground); color: var(--muted);
+  }
+  #cap-place {
+    flex: 1; min-width: 0; min-height: 42px; border: 0; background: transparent; outline: none;
+    font-size: 16px; font-variant-numeric: tabular-nums; color: var(--ink);
+  }
+  #cap-place::placeholder { color: var(--muted); opacity: 1; }
+  #cap-place-clear { width: 36px; height: 36px; flex: none; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 20px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pchip {
+    min-height: 36px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px;
+    border-radius: 18px; font-size: 14px; font-weight: 600; cursor: pointer; max-width: 100%;
+  }
+  .pchip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pchip.own { border: 1.5px solid var(--blue); background: var(--blue-bg); color: var(--blue); }
+  .pchip.own .dist { font-weight: 400; white-space: nowrap; }
+  .pchip.map { border: 1.5px dashed var(--accent); background: transparent; color: var(--accent); }
+  .pchip svg { flex: none; }
+  #cap-osm { font-size: 11.5px; color: var(--muted); }
+  #cap-photo { display: flex; gap: 12px; align-items: flex-start; }
+  #cap-photo .bigprint {
+    flex: none; width: 112px; height: 84px; border: 5px solid var(--print); background: var(--photo);
+    box-shadow: 0 1px 3px var(--shadow); transform: rotate(-1.5deg); overflow: hidden;
+  }
+  #cap-photo-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #cap-photo .side { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  #cap-photo-info { font-size: 13px; color: var(--muted); }
+  #cap-photo-remove { text-decoration: none; color: var(--muted); font-weight: 400; text-align: left; }
   #cap-body {
-    flex: 1; width: 100%; resize: none; border: 0; outline: none;
-    padding: 14px 16px; font: inherit; font-size: 19px; line-height: 1.45;
-    background: var(--ground); color: var(--ink);
+    flex: 1; min-height: 160px; width: 100%; resize: none; border: 0; outline: none;
+    padding: 4px 2px 0; font-size: 17px; line-height: 32px; color: var(--ink);
+    background: repeating-linear-gradient(to bottom, transparent 0, transparent 31px, var(--ruled) 31px, var(--ruled) 32px);
+    background-attachment: local;
   }
-  .capfoot {
-    display: flex; align-items: center; gap: 12px;
-    padding: 8px 12px calc(env(safe-area-inset-bottom) + 8px);
-    border-top: 1px solid var(--line); color: var(--muted); font-size: 14px;
+  .switches { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+  .switches[hidden] { display: none; }
+  .sw {
+    min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    border-bottom: 1px solid var(--line); font-size: 15px; cursor: pointer;
   }
+  .sw input {
+    -webkit-appearance: none; appearance: none; margin: 0; flex: none; cursor: pointer;
+    width: 44px; height: 26px; border-radius: 13px; background: var(--line); position: relative; transition: background 0.15s;
+  }
+  .sw input::after {
+    content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%;
+    background: var(--surface); transition: left 0.15s;
+  }
+  .sw input:checked::after { left: 21px; }
+  #cap-photo-claude:checked { background: var(--accent); }
+  #cap-photo-claude:checked::after { background: var(--on-accent); }
+  #cap-share-on:checked { background: var(--blue); }
+  .capfoot { display: flex; align-items: center; gap: 12px; padding: 6px 0 2px; color: var(--muted); font-size: 13px; }
   .capfoot[hidden] { display: none; }
   .capfoot .info { flex: 1; }
-  .danger { color: var(--crit); border-color: var(--crit); }
-  .capbar #cap-photo-btn { min-width: 0; padding: 0 12px; }
-  #cap-photo {
-    display: flex; align-items: center; gap: 12px; padding: 8px 12px;
-    border-bottom: 1px solid var(--line); background: var(--surface);
+  #cap-delete { color: var(--crit); }
+  .capbar {
+    display: flex; gap: 10px; padding: 12px 16px calc(env(safe-area-inset-bottom) + 22px);
+    border-top: 1px solid var(--line); background: var(--ground);
   }
-  #cap-photo img { max-height: 34vh; max-width: 70%; border-radius: 8px; object-fit: contain; }
-  #cap-photo .side { display: flex; flex-direction: column; gap: 8px; color: var(--muted); font-size: 14px; }
-  .row.hasthumb { display: flex; align-items: center; gap: 10px; }
-  .row .rowtext { flex: 1; min-width: 0; }
-  .thumb {
-    width: 52px; height: 52px; flex: none; border-radius: 8px; object-fit: cover;
-    background: var(--ground); border: 1px solid var(--line);
+  .capbar .btn2 {
+    min-height: 54px; flex: 1; border-radius: 10px; border: 1.5px solid var(--line); background: transparent;
+    font-size: 17px; font-weight: 500; cursor: pointer;
   }
-  span.thumb { display: grid; place-items: center; font-size: 12px; color: var(--muted); }
-  .claude-switch {
-    display: flex; align-items: center; gap: 10px; min-height: 44px; color: var(--ink); font-size: 16px; cursor: pointer;
+  .capbar .save {
+    min-height: 54px; flex: 2.2; border: 0; border-radius: 10px; cursor: pointer;
+    background: var(--accent); color: var(--on-accent); font-size: 18px; font-weight: 600;
   }
-  .claude-switch input { width: 24px; height: 24px; accent-color: var(--accent); margin: 0; }
-  #cap-share { padding: 4px 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
-  .chip.who { background: var(--good-bg); color: var(--good); }
-  .row.partner { border-style: dashed; }
+  .capbar .save:disabled { opacity: 0.4; cursor: default; }
+
   #view-dlg .sheet { max-height: 85vh; overflow-y: auto; }
-  #view-dlg img { display: block; max-width: 100%; max-height: 50vh; margin: 8px 0; border-radius: 8px; }
+  #view-dlg img { display: block; max-width: 100%; max-height: 50vh; margin: 8px 0; border: 5px solid var(--print); box-shadow: 0 1px 3px var(--shadow); }
   #view-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
   .meta-line { color: var(--muted); font-size: 15px; margin: 4px 0; }
   .partner-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
@@ -280,55 +415,67 @@
 
   #toast {
     position: fixed; left: 16px; right: 16px; z-index: 4;
-    bottom: calc(env(safe-area-inset-bottom) + 96px);
+    bottom: calc(env(safe-area-inset-bottom) + 156px);
     display: flex; align-items: center; gap: 12px;
-    min-height: 52px; padding: 4px 4px 4px 16px; border-radius: 12px;
+    min-height: 52px; padding: 4px 4px 4px 16px; border-radius: 10px;
     background: var(--ink); color: var(--ground);
   }
   #toast[hidden] { display: none; }
   #toast span { flex: 1; }
   #toast button {
     min-height: 44px; padding: 0 16px; border: 0; border-radius: 10px;
-    background: transparent; color: var(--accent); font-weight: 600; cursor: pointer;
+    background: transparent; color: var(--accent-bg); font-weight: 600; cursor: pointer;
   }
 
+  /* Foot: section tabs, then the main button in thumb reach */
   footer {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 2;
-    padding: 12px 16px calc(env(safe-area-inset-bottom) + 12px);
-    background: linear-gradient(to top, var(--ground) 70%, transparent);
+    display: flex; flex-direction: column; gap: 10px;
+    padding: 10px 16px calc(env(safe-area-inset-bottom) + 22px);
+    border-top: 1px solid var(--line); background: var(--ground);
   }
+  .tabs { display: flex; gap: 8px; }
+  .tabs button {
+    flex: 1; min-height: 44px; border: 0; border-bottom: 2.5px solid transparent; background: transparent; cursor: pointer;
+    font-family: var(--serif); font-size: 18px; font-weight: 500; color: var(--muted);
+  }
+  .tabs button[aria-pressed="true"] { font-weight: 600; color: var(--ink); border-bottom-color: var(--accent); }
   .primary {
-    width: 100%; min-height: 60px; border: 0; border-radius: 14px;
-    background: var(--accent); color: var(--on-accent); font-size: 19px; font-weight: 600; cursor: pointer;
+    width: 100%; min-height: 54px; border: 0; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    background: var(--accent); color: var(--on-accent); font-size: 18px; font-weight: 600; cursor: pointer;
   }
   .primary:active { filter: brightness(0.92); }
+  .primary:disabled { opacity: 0.4; cursor: default; filter: none; }
+  .primary small { font-size: 13px; font-weight: 400; opacity: 0.9; }
+  #draft-note::before { content: '\00b7'; margin-right: 8px; }
 
   #update-bar {
     position: fixed; left: 16px; right: 16px; z-index: 3;
-    bottom: calc(env(safe-area-inset-bottom) + 88px);
-    min-height: 52px; border-radius: 12px; border: 1px solid var(--accent);
+    bottom: calc(env(safe-area-inset-bottom) + 150px);
+    min-height: 52px; border-radius: 10px; border: 1.5px solid var(--accent);
     background: var(--accent-bg); color: var(--ink); font-weight: 600; cursor: pointer;
   }
   #update-bar[hidden] { display: none; }
 
   dialog {
     width: 100%; max-width: 560px; margin: auto auto 0; padding: 0;
-    border: 1px solid var(--line); border-radius: 16px 16px 0 0;
+    border: 0; border-radius: 14px 14px 0 0;
     background: var(--surface); color: var(--ink);
   }
-  dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
-  .sheet { padding: 16px 16px calc(env(safe-area-inset-bottom) + 16px); }
-  .sheet h2 { font-size: 18px; margin: 0 0 8px; }
+  dialog::backdrop { background: var(--scrim); }
+  .sheet { padding: 16px 20px calc(env(safe-area-inset-bottom) + 16px); }
+  .sheet h2 { font-family: var(--serif); font-weight: 600; font-size: 24px; margin: 0 0 8px; }
   .rows { margin: 0 0 12px; }
   .rows div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
   .rows dt { color: var(--muted); }
   .rows dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
   .actions.pick { display: grid; gap: 12px; }
-  .actions.pick .btn { min-height: 56px; font-size: 17px; }
+  .actions.pick .btn { min-height: 54px; font-size: 17px; }
   .btn {
     min-height: 48px; padding: 0 16px; border-radius: 10px; cursor: pointer;
-    border: 1px solid var(--line); background: var(--ground);
+    border: 1.5px solid var(--line); background: var(--ground);
   }
   form.signin { display: grid; gap: 8px; margin: 12px 0; }
   form.signin input {
@@ -337,35 +484,35 @@
   }
   .err { color: var(--crit); font-size: 15px; min-height: 1.2em; margin: 0; }
 
-  /* Tabs in the header: Captures | Journal */
-  .tabs { display: flex; border: 1px solid var(--line); border-radius: 22px; overflow: hidden; }
-  .tabs button {
-    min-height: 44px; padding: 0 14px; border: 0; background: var(--surface); cursor: pointer; font-weight: 600;
+  /* Journal (restyled in M1.3 session B; tokens only for now) */
+  .daybar {
+    position: sticky; top: 0; z-index: 1;
+    display: grid; align-items: center; gap: 8px;
+    padding: 8px 16px; background: var(--ground); border-bottom: 1px solid var(--line);
   }
-  .tabs button[aria-pressed="true"] { background: var(--accent-bg); color: var(--accent); }
-
-  /* Journal */
+  .daybar button {
+    min-height: 48px; border-radius: 10px; border: 1.5px solid var(--line);
+    background: var(--surface); cursor: pointer; font-size: 17px;
+  }
   .jbar { grid-template-columns: auto 1fr auto; }
-  .jbar #j-share { padding: 0 14px; font-size: 17px; }
-  .jbar #j-days { padding: 0 14px; font-size: 17px; }
-  .jbar #j-title { font-weight: 600; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 10px; font-size: 17px; }
+  .jbar #j-share, .jbar #j-days { padding: 0 14px; }
+  .jbar #j-title { font-family: var(--serif); font-weight: 600; font-size: 19px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 10px; }
   .jbar #j-title.today { color: var(--accent); }
   .thread { list-style: none; margin: 0; padding: 12px 16px 0; display: flex; flex-direction: column; gap: 10px; }
-  .msg { max-width: 88%; padding: 10px 12px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg { max-width: 88%; padding: 10px 12px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 16px; }
   .msg.user { align-self: flex-end; background: var(--accent-bg); color: var(--ink); border-bottom-right-radius: 4px; }
-  .msg.assistant { align-self: flex-start; background: var(--surface); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
-  .msg .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; font-size: 13px; color: var(--muted); white-space: normal; }
-  .msg .meta .chip.failed { background: var(--crit-bg); color: var(--crit); }
+  .msg.assistant { align-self: flex-start; background: var(--surface); border: 1px solid var(--line); border-bottom-left-radius: 4px; font-family: var(--serif); font-size: 17.5px; line-height: 1.5; }
+  .msg .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; line-height: 1.4; color: var(--muted); white-space: normal; }
   .msg .retry { min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--crit); background: var(--surface); color: var(--crit); font-weight: 600; cursor: pointer; }
-  .quote {
-    align-self: stretch; padding: 8px 12px; border-left: 4px solid var(--accent);
-    background: var(--surface); border-radius: 4px 10px 10px 4px; white-space: pre-wrap; overflow-wrap: anywhere;
-  }
-  .quote .meta { display: block; font-size: 13px; color: var(--muted); margin-bottom: 2px; }
   .typing { align-self: flex-start; color: var(--muted); font-size: 15px; padding: 0 4px; }
   ul.days { list-style: none; margin: 0; padding: 12px 16px 0; }
   ul.days li { margin-bottom: 8px; }
-  .dayrow .line1 .when.today { color: var(--accent); }
+  .dayrow { display: block; padding: 10px 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); }
+  .dayrow .line1 { display: flex; align-items: center; gap: 8px; min-height: 26px; }
+  .dayrow .when { display: inline; font-family: var(--serif); font-weight: 600; font-size: 18px; }
+  .dayrow .when.today { color: var(--accent); }
+  .dayrow .line2 { color: var(--muted); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .spacer { flex: 1; }
   #suffix-dlg input {
     width: 100%; min-height: 48px; padding: 0 12px; border-radius: 10px;
     border: 1px solid var(--line); background: var(--ground); margin: 4px 0 8px;
@@ -374,20 +521,22 @@
 </head>
 <body>
 <header>
-  <nav class="tabs" aria-label="Section">
-    <button id="tab-captures" type="button" aria-pressed="true">Captures</button>
-    <button id="tab-journal" type="button" aria-pressed="false">Journal</button>
-  </nav>
+  <span class="wordmark">travelboard</span>
   <button class="status" id="status" type="button" aria-label="Sync status and settings">
-    <span class="dot" id="status-dot"></span><span id="status-text">starting</span>
+    <span class="stamp"><span class="dot" id="status-dot"></span><span id="status-text">starting</span></span>
   </button>
 </header>
 
-<nav class="daybar" id="daybar" aria-label="Day">
-  <button id="day-prev" type="button" aria-label="Earlier day with captures">&#8249;</button>
-  <button id="day-label" type="button" aria-label="Go to today">-</button>
-  <button id="day-next" type="button" aria-label="Later day with captures">&#8250;</button>
-</nav>
+<section class="dayhead" id="daybar" aria-label="Day">
+  <div class="titles">
+    <h1><button id="day-label" type="button" aria-label="Go to today">-</button></h1>
+    <span id="day-sub"></span>
+  </div>
+  <div class="arrows">
+    <button class="arrow" id="day-prev" type="button" aria-label="Earlier day with captures"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 4 6.5 10l6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <button class="arrow" id="day-next" type="button" aria-label="Later day with captures"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+  </div>
+</section>
 
 <nav class="daybar jbar" id="jbar" aria-label="Journal day" hidden>
   <button id="j-days" type="button">Days</button>
@@ -412,38 +561,54 @@
 <div id="toast" role="status" hidden><span id="toast-text"></span><button id="toast-undo" type="button">Undo</button></div>
 
 <footer>
-  <button class="primary" id="capture" type="button"><span id="primary-label">Capture</span><small id="draft-note" hidden>draft kept</small></button>
+  <nav class="tabs" aria-label="Section">
+    <button id="tab-captures" type="button" aria-pressed="true">Captures</button>
+    <button id="tab-journal" type="button" aria-pressed="false">Journal</button>
+  </nav>
+  <button class="primary" id="capture" type="button"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg><span id="primary-label">Capture</span><small id="draft-note" hidden>draft kept</small></button>
 </footer>
 
 <section id="cap" role="dialog" aria-modal="true" aria-label="Capture" hidden>
-  <div class="capbar">
-    <button class="btn" id="cap-close" type="button">Close</button>
-    <div class="toggle" id="kind-group" role="group" aria-label="Kind">
-      <button id="kind-note" type="button" aria-pressed="true">note</button>
-      <button id="kind-journal" type="button" aria-pressed="false">journal</button>
+  <div class="caphead">
+    <h2 id="cap-title">New capture</h2>
+    <button class="xbtn" id="cap-close" type="button" aria-label="Close"><svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><path d="M5.5 5.5l11 11M16.5 5.5l-11 11" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg></button>
+  </div>
+  <div class="sheetpage">
+    <span class="capwhen" id="cap-when"><span class="hm" id="cap-hm"></span><span class="day" id="cap-day"></span></span>
+    <div id="cap-place-box">
+      <label class="caps" for="cap-place">Place</label>
+      <div class="placefield">
+        <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M9 16s5-5 5-8.6A5 5 0 0 0 4 7.4C4 11 9 16 9 16z" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="9" cy="7.4" r="1.8" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+        <input id="cap-place" type="text" maxlength="120" autocomplete="off" spellcheck="false" enterkeyhint="done" placeholder="no GPS">
+        <button id="cap-place-clear" type="button" aria-label="Clear the place name" hidden>&times;</button>
+      </div>
+      <div class="chips" id="cap-chips" hidden></div>
+      <span id="cap-osm" hidden>Map suggestion &copy; OpenStreetMap contributors</span>
     </div>
-    <button class="btn" id="cap-photo-btn" type="button">Photo</button>
+    <div id="cap-photo" hidden>
+      <div class="bigprint"><img id="cap-photo-img" alt="Photo on this capture"></div>
+      <div class="side">
+        <span id="cap-photo-info"></span>
+        <button class="link" id="cap-photo-remove" type="button">Remove</button>
+      </div>
+    </div>
+    <label class="sr" for="cap-body">Note</label>
+    <textarea id="cap-body" maxlength="20000" autocomplete="off" spellcheck="true"
+      enterkeyhint="enter" placeholder="Type, or tap the mic on the keyboard"></textarea>
+    <div class="switches" id="cap-switches">
+      <label class="sw" id="cap-claude-row" hidden><span>Claude sees this photo</span><input id="cap-photo-claude" type="checkbox" checked></label>
+      <label class="sw" id="cap-share" hidden><span id="cap-share-label">Share</span><input id="cap-share-on" type="checkbox"></label>
+    </div>
+    <div class="capfoot" id="cap-foot" hidden>
+      <span class="info" id="cap-info"></span>
+      <button class="link" id="cap-delete" type="button">Delete</button>
+    </div>
+  </div>
+  <div class="capbar">
+    <button class="btn2" id="cap-photo-btn" type="button">Photo</button>
     <input id="cap-camera" type="file" accept="image/*" capture="environment" hidden>
     <input id="cap-file" type="file" accept="image/*" hidden>
-    <span class="spacer"></span>
     <button class="save" id="cap-save" type="button" disabled>Save</button>
-  </div>
-  <div id="cap-photo" hidden>
-    <img id="cap-photo-img" alt="Photo on this capture">
-    <div class="side">
-      <span id="cap-photo-info"></span>
-      <label class="claude-switch"><input id="cap-photo-claude" type="checkbox" checked> Claude sees this</label>
-      <button class="btn" id="cap-photo-remove" type="button">Remove</button>
-    </div>
-  </div>
-  <div id="cap-share" hidden>
-    <label class="claude-switch"><input id="cap-share-on" type="checkbox"> <span id="cap-share-label">Share</span></label>
-  </div>
-  <textarea id="cap-body" maxlength="20000" autocomplete="off" spellcheck="true"
-    enterkeyhint="enter" placeholder="Type, or tap the mic on the keyboard"></textarea>
-  <div class="capfoot" id="cap-foot" hidden>
-    <span class="info" id="cap-info"></span>
-    <button class="btn danger" id="cap-delete" type="button">Delete</button>
   </div>
 </section>
 
@@ -524,7 +689,7 @@
 'use strict';
 
 // Bump together with CACHE_VERSION in sw.js on every release.
-const APP_VERSION = 10;
+const APP_VERSION = 11;
 
 const PROJECT_REF = 'nnnnonspfljdkrxstslw';           // Supabase project travelboard (SPEC.md D3, 6.8)
 const SUPABASE_URL = 'https://' + PROJECT_REF + '.supabase.co';
@@ -544,6 +709,13 @@ const BUCKET = 'tb-photos';          // private Storage bucket, own folder <uid>
 const PHOTO_EDGE = 1280;            // long edge after shrinking on the phone (SPEC.md 7A.2)
 const PHOTO_QUALITY = 0.82;
 const PASSWORD_MIN = 10;            // Change password (SPEC.md 7B.3)
+const PLACE_MAX = 120;              // server check: char_length(place_name) between 1 and 120 (SPEC.md 7C.4)
+const PLACE_NEAR_M = 75;            // own names offered within 75 m
+const PLACE_CHIPS = 3;              // at most three chips, own names first
+const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/reverse';
+const NOMINATIM_GAP_MS = 1000;      // at most one request a second (OSM usage policy)
+const NOMINATIM_TIMEOUT_MS = 8000;
+const GEO_CELL_DEG = 0.00045;       // cache cell: about 50 m of latitude
 
 const $ = (id) => document.getElementById(id);
 
@@ -606,14 +778,16 @@ const deviceTz = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 // at (when this blob was set, so an upload never confirms a photo replaced meanwhile) }.
 // v4 (M1.2): partner, the other person's shared captures as read-only mirrors (keyPath id,
 // index local_date; replaced as a whole on every sync, never dirty, never pushed), and
-// pphotos, their photos by capture id: { id, blob, w, h, bytes }.
+// pphotos, their photos by capture id: { id, blob, w, h, bytes }. v5 (M1.3): geocache, the
+// OpenStreetMap name for a position rounded to about 50 m: { key, name (null: nothing there),
+// at }, so each place is looked up once (SPEC.md 7C.4).
 
 const idb = (() => {
   let dbp = null;
   function open() {
     if (dbp) return dbp;
     dbp = new Promise((resolve, reject) => {
-      const r = indexedDB.open('travelboard', 4);
+      const r = indexedDB.open('travelboard', 5);
       r.onupgradeneeded = () => {
         const db = r.result;
         if (!db.objectStoreNames.contains('captures')) {
@@ -638,6 +812,7 @@ const idb = (() => {
           pc.createIndex('local_date', 'local_date');
         }
         if (!db.objectStoreNames.contains('pphotos')) db.createObjectStore('pphotos', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('geocache')) db.createObjectStore('geocache', { keyPath: 'key' });
       };
       r.onsuccess = () => {
         const db = r.result;
@@ -770,9 +945,10 @@ try {
 
 const SERVER_FIELDS = ['id', 'body', 'kind', 'captured_at', 'tz', 'local_date', 'lat', 'lng',
   'accuracy_m', 'trip_id', 'place_id', 'photo_path', 'photo_w', 'photo_h', 'photo_bytes',
-  'photo_to_claude', 'shared', 'updated_at', 'deleted_at'];
+  'photo_to_claude', 'shared', 'place_name', 'updated_at', 'deleted_at'];
 // photo_to_claude: the "Claude sees this" switch, true when absent (rows from before v8).
 // shared: the "Share with" switch, false when absent (rows from before v10, SPEC.md 7B.3).
+// place_name: the name the user gave the place, null when absent or cleared (SPEC.md 7C.4).
 const toServer = (row) => Object.fromEntries(SERVER_FIELDS.map((k) =>
   [k, k === 'photo_to_claude' ? row[k] !== false : k === 'shared' ? row[k] === true
     : row[k] === undefined ? null : row[k]]));
@@ -790,14 +966,16 @@ const partnerNames = () => livePartners().map((p) => p.name).join(' and ');
 
 // ---------- capture rows: save, edit, delete, GPS ----------
 
-function newCaptureRow(body, kind) {
+// Every new capture is a note: the kind toggle is gone (SPEC.md 7C.2a); old journal-kind rows
+// keep their kind.
+function newCaptureRow(body, placeName) {
   const now = new Date();
   const iso = now.toISOString();
   const tz = deviceTz();
   return {
     id: crypto.randomUUID(),
     body,
-    kind,
+    kind: 'note',
     captured_at: iso,
     tz,
     local_date: localDay(now, tz),
@@ -805,6 +983,7 @@ function newCaptureRow(body, kind) {
     trip_id: null, place_id: null,
     photo_path: null, photo_w: null, photo_h: null, photo_bytes: null, photo_to_claude: true,
     shared: false,
+    place_name: placeName || null,
     updated_at: iso,
     deleted_at: null,
     server_ts: null,
@@ -832,19 +1011,159 @@ function requestGps(id) {
   } catch (e) { /* no geolocation: same as denied */ }
 }
 
+// ---------- place names (SPEC.md 7C.4) ----------
+
+// A row's place: the name the user chose, else its coordinates to 4 decimals, else "no GPS".
+const hasPlaceName = (r) => typeof r.place_name === 'string' && r.place_name.trim() !== '';
+const coordsText = (lat, lng) => `${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}`;
+const placeText = (r) => hasPlaceName(r) ? r.place_name.trim()
+  : r.lat != null && r.lng != null ? coordsText(r.lat, r.lng) : 'no GPS';
+
+function distM(aLat, aLng, bLat, bLng) {
+  const rad = Math.PI / 180, dLat = (bLat - aLat) * rad, dLng = (bLng - aLng) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * rad) * Math.cos(bLat * rad) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+// Distinct names on the user's own live captures within PLACE_NEAR_M, nearest first. IndexedDB
+// only, so it works offline. Names differing only in case count as one.
+async function ownNamesNear(lat, lng) {
+  const best = new Map();
+  for (const r of await idb.all('captures')) {
+    if (r.deleted_at || !hasPlaceName(r) || r.lat == null || r.lng == null) continue;
+    const d = distM(lat, lng, r.lat, r.lng);
+    if (d > PLACE_NEAR_M) continue;
+    const k = r.place_name.trim().toLowerCase();
+    if (!best.has(k) || best.get(k).d > d) best.set(k, { name: r.place_name.trim(), d });
+  }
+  return [...best.values()].sort((a, b) => a.d - b.d);
+}
+
+// The nearest named place from OpenStreetMap Nominatim, or null. Cached in IndexedDB by position
+// rounded to about 50 m (an empty answer too), so a place is looked up once. Requests go one at
+// a time, at least a second apart. A failure is not cached and gives no chip. Network only: the
+// service worker never caches cross-origin requests.
+const geoKey = (lat, lng) => `${Math.round(lat / GEO_CELL_DEG)}:${Math.round(lng / (GEO_CELL_DEG / Math.max(0.2, Math.cos(lat * Math.PI / 180))))}`;
+let osmLast = 0, osmChain = Promise.resolve();
+async function osmName(lat, lng) {
+  const key = geoKey(lat, lng);
+  const hit = await idb.get('geocache', key);
+  if (hit) return hit.name || null;
+  if (!navigator.onLine) return null;
+  const run = osmChain.then(async () => {
+    const again = await idb.get('geocache', key);    // filled by a lookup queued ahead of this one
+    if (again) return again.name || null;
+    const wait = osmLast + NOMINATIM_GAP_MS - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    osmLast = Date.now();
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), NOMINATIM_TIMEOUT_MS);
+    try {
+      const url = `${NOMINATIM_URL}?format=jsonv2&lat=${Number(lat).toFixed(6)}&lon=${Number(lng).toFixed(6)}&zoom=18&accept-language=en`;
+      const res = await fetch(url, { cache: 'no-store', signal: ctl.signal, headers: { Accept: 'application/json' } });
+      if (!res.ok) throw new Error('Nominatim HTTP ' + res.status);
+      const j = await res.json();
+      const name = j && typeof j.name === 'string' && j.name.trim() ? j.name.trim().slice(0, PLACE_MAX) : null;
+      await idb.put('geocache', { key, name, at: new Date().toISOString() });
+      return name;
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+  osmChain = run.catch(() => {});
+  return run;
+}
+
+// The capture screen's position for chips: the saved capture's coordinates in an edit, or the
+// fix taken at open for a new capture (only when location is already granted, see fixAtOpen).
+function capPos() {
+  if (!cap.open || cap.mode === 'journal') return null;
+  if (cap.mode === 'edit') return cap.row && cap.row.lat != null && cap.row.lng != null ? { lat: cap.row.lat, lng: cap.row.lng } : null;
+  return cap.fix;
+}
+function updatePlaceField() {
+  const pos = capPos();
+  $('cap-place').placeholder = pos ? coordsText(pos.lat, pos.lng) : 'no GPS';
+  $('cap-place-clear').hidden = !$('cap-place').value;
+}
+
+// Up to PLACE_CHIPS chips: own names within PLACE_NEAR_M first, then the OpenStreetMap name.
+// A chip equal to what the field already says is left out. Nothing is filled in without a tap.
+let chipSeq = 0;
+const PIN_SVG = '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7.5 5.8 10 11 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const MAP_SVG = '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 3.5l3.3-1.3 3.4 1.3 3.3-1.3v8.3l-3.3 1.3-3.4-1.3L2 11.8z M5.3 2.2v8.3 M8.7 3.5v8.3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>';
+function drawChips(own, mapName) {
+  const box = $('cap-chips');
+  box.replaceChildren();
+  for (const o of own) {
+    const b = el('button', 'pchip own');
+    b.type = 'button';
+    b.dataset.place = o.name;
+    b.dataset.source = 'own';
+    b.insertAdjacentHTML('afterbegin', PIN_SVG);
+    b.append(el('span', 'nm', o.name), el('span', 'dist', `${Math.round(o.d)} m`));
+    box.append(b);
+  }
+  if (mapName) {
+    const b = el('button', 'pchip map');
+    b.type = 'button';
+    b.dataset.place = mapName;
+    b.dataset.source = 'osm';
+    b.insertAdjacentHTML('afterbegin', MAP_SVG);
+    b.append(el('span', 'nm', mapName));
+    box.append(b);
+  }
+  box.hidden = !box.children.length;
+  $('cap-osm').hidden = !mapName;
+}
+async function refreshPlaceChips() {
+  const seq = ++chipSeq;
+  const pos = capPos();
+  if (!pos) { drawChips([], null); return; }
+  const cur = $('cap-place').value.trim().toLowerCase();
+  const own = (await ownNamesNear(pos.lat, pos.lng)).filter((o) => o.name.toLowerCase() !== cur).slice(0, PLACE_CHIPS);
+  if (seq !== chipSeq) return;
+  drawChips(own, null);
+  if (own.length >= PLACE_CHIPS) return;
+  // One lookup per position for as long as the screen is up, so typing never asks again.
+  const key = geoKey(pos.lat, pos.lng);
+  if (!cap.osm || cap.osm.key !== key) {
+    const o = { key, done: false };
+    o.p = osmName(pos.lat, pos.lng).catch((e) => { console.warn('place lookup failed', e); return null; })
+      .then((n) => { o.done = true; return n; });
+    cap.osm = o;
+  }
+  const name = await cap.osm.p;
+  if (seq !== chipSeq || !cap.open) return;
+  if (name && name.toLowerCase() !== cur && !own.some((o) => o.name.toLowerCase() === name.toLowerCase())) drawChips(own, name);
+}
+
+// A new capture's position at open, for its chips. Asked only when location is already
+// granted, so the permission prompt still comes at the first Save (SPEC.md 7.2). Never awaited;
+// the capture's own coordinates still come from the fix taken at Save.
+async function fixAtOpen(seq) {
+  if (!navigator.geolocation || !navigator.permissions || !navigator.permissions.query) return;
+  try {
+    if ((await navigator.permissions.query({ name: 'geolocation' })).state !== 'granted') return;
+    navigator.geolocation.getCurrentPosition((pos) => {
+      if (!cap.open || cap.seq !== seq || cap.mode !== 'new') return;
+      cap.fix = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      updatePlaceField();
+      refreshPlaceChips();
+    }, () => {}, GPS_OPTS);
+  } catch (e) { /* no permission API or no position: no chips */ }
+}
+
 // ---------- capture screen ----------
 
 // mode 'new' (draft key "new"), 'edit' (draft key = capture id) or 'journal' (the same
 // screen as the journal composer, draft key "journal:<local_date>", Save reads Send).
-const cap = { open: false, mode: null, row: null, kind: 'note', busy: false, jdate: null, photo: null, toClaude: true, share: false };
+// fix: a new capture's position at open (chips only); seq counts openings; osm: this opening's
+// OpenStreetMap lookup.
+const cap = { open: false, mode: null, row: null, busy: false, jdate: null, photo: null, toClaude: true, share: false, fix: null, seq: 0, osm: null };
 const draftKey = () => (cap.mode === 'new' ? 'new' : cap.mode === 'journal' ? 'journal:' + cap.jdate : cap.row.id);
 const capBody = () => $('cap-body').value.trim().slice(0, BODY_MAX);
-
-function setKind(kind) {
-  cap.kind = kind === 'journal' ? 'journal' : 'note';
-  $('kind-note').setAttribute('aria-pressed', String(cap.kind === 'note'));
-  $('kind-journal').setAttribute('aria-pressed', String(cap.kind === 'journal'));
-}
+const capPlace = () => $('cap-place').value.trim().slice(0, PLACE_MAX) || null;
 // The photo on the capture screen (SPEC.md 7A.2). state: 'none'; 'keep' (the saved capture's
 // own photo, unchanged); 'new' (attached on this screen: blob, w, h, bytes); 'removed' (an
 // edit that takes the saved photo off). A photo counts as content: Save works without text.
@@ -859,6 +1178,7 @@ function setPhoto(p) {
   if (photoUrl) { URL.revokeObjectURL(photoUrl); photoUrl = null; }
   const show = hasPhoto();
   $('cap-photo').hidden = !show;
+  $('cap-claude-row').hidden = !show;
   $('cap-photo-claude').checked = cap.toClaude;
   $('cap-photo-btn').textContent = show ? 'Replace' : 'Photo';
   if (show) {
@@ -904,11 +1224,11 @@ function draftPhoto() {
   return undefined;
 }
 function draftRecord(open) {
-  const d = { id: draftKey(), body: $('cap-body').value, kind: cap.kind, open, updated_at: new Date().toISOString() };
+  const d = { id: draftKey(), body: $('cap-body').value, open, updated_at: new Date().toISOString() };
   const ph = draftPhoto();
   if (ph !== undefined) d.photo = ph;
   if (cap.mode !== 'journal' && hasPhoto()) d.photo_to_claude = cap.toClaude;
-  if (cap.mode !== 'journal') d.shared = cap.share;
+  if (cap.mode !== 'journal') { d.shared = cap.share; d.place_name = $('cap-place').value; }
   return d;
 }
 
@@ -958,9 +1278,13 @@ async function openCapture(mode, row, draft) {
   cap.mode = mode;
   cap.row = row || null;
   cap.busy = false;
+  cap.fix = null;
+  cap.osm = null;
+  cap.seq++;
   const ta = $('cap-body');
   ta.value = draft ? draft.body : row ? row.body : '';
-  setKind(draft ? draft.kind : row ? row.kind : 'note');
+  // Place: the draft's text, else the saved name (SPEC.md 7C.4).
+  $('cap-place').value = draft && typeof draft.place_name === 'string' ? draft.place_name : row && hasPlaceName(row) ? row.place_name : '';
   // Photo: the draft's own first (attached, or removed in an edit), else the saved one.
   cap.savedPhoto = mode === 'edit' ? await idb.get('photos', row.id) : null;
   // "Claude sees this": the draft's value, else the saved capture's (on when absent), else on.
@@ -972,6 +1296,7 @@ async function openCapture(mode, row, draft) {
   cap.share = draft && typeof draft.shared === 'boolean' ? draft.shared
     : row ? row.shared === true : linkedNow();
   $('cap-share').hidden = mode === 'journal' || !linkedNow();
+  $('cap-switches').hidden = mode === 'journal';
   $('cap-share-on').checked = cap.share;
   $('cap-share-label').textContent = 'Share with ' + partnerNames();
   if (mode === 'journal') setPhoto(null);
@@ -988,9 +1313,17 @@ async function openCapture(mode, row, draft) {
     $('cap-info').textContent = parts.join(', ');
   }
   $('cap-foot').hidden = mode !== 'edit';
-  $('kind-group').hidden = mode === 'journal';
+  $('cap-place-box').hidden = mode === 'journal';
   $('cap-photo-btn').hidden = mode === 'journal';
   $('cap-save').textContent = mode === 'journal' ? 'Send' : 'Save';
+  // Time line: the capture's own time in an edit, now for a new capture or a journal turn.
+  const whenIso = mode === 'edit' ? row.captured_at : new Date().toISOString();
+  const whenTz = mode === 'edit' ? row.tz : deviceTz();
+  $('cap-hm').textContent = fmtTime(whenIso, whenTz);
+  $('cap-day').textContent = mode === 'journal' ? jTitleText(cap.jdate)
+    : fmtDayLabel(mode === 'edit' ? row.local_date : localDay(new Date(), whenTz)) + (whenTz !== deviceTz() ? ', ' + cityOf(whenTz) : '');
+  $('cap-title').textContent = mode === 'edit' ? 'Edit capture' : mode === 'journal' ? 'Journal' : 'New capture';
+  $('cap-close').setAttribute('aria-label', mode === 'edit' ? 'Close, changes not kept' : 'Close, draft kept');
   ta.placeholder = mode === 'journal'
     ? 'Tell Claude about the day. Tap the mic on the keyboard to talk.'
     : 'Type, or tap the mic on the keyboard';
@@ -999,6 +1332,10 @@ async function openCapture(mode, row, draft) {
   $('cap').hidden = false;
   cap.open = true;
   history.pushState({ tbCap: true }, '');
+  updatePlaceField();
+  drawChips([], null);
+  if (mode !== 'journal') refreshPlaceChips().catch((e) => console.warn('place chips failed', e));
+  if (mode === 'new') fixAtOpen(cap.seq);
   updateSaveEnabled();
   if (draft) writeDraft();            // re-mark an existing draft as open
   if (mode === 'new' || mode === 'journal') {
@@ -1044,6 +1381,8 @@ async function closeCapture(how) {
     }
   }
   setPhoto(null);
+  chipSeq++;
+  drawChips([], null);
   await updateDraftNote();
 }
 
@@ -1069,7 +1408,7 @@ async function saveCapture() {
   const at = new Date().toISOString();
   try {
     if (cap.mode === 'new') {
-      const row = newCaptureRow(body, cap.kind);
+      const row = newCaptureRow(body, capPlace());
       if (ph.state === 'new') row.photo_to_claude = cap.toClaude;
       // Made while not linked: unshared, and stays so unless switched on later in edit.
       row.shared = linkedNow() ? cap.share : false;
@@ -1087,10 +1426,11 @@ async function saveCapture() {
       await render();
       requestGps(row.id);
     } else {
-      const id = cap.row.id, kind = cap.kind;
+      const id = cap.row.id, place = capPlace();
       const toClaude = hasPhoto() ? cap.toClaude : true;
       const linked = linkedNow(), share = cap.share;
-      // Body, kind and photo only; captured_at, tz and local_date never change on edit.
+      // Body, place, switches and photo only; captured_at, tz, local_date and kind never change
+      // on edit (an old journal-kind row stays journal-kind, SPEC.md 7C.2a).
       // A new photo replaces the old one (uploaded to the same path on the next sync); a
       // removed photo clears the four fields, and the file stays in Storage (SPEC.md 7A.2).
       await idb.tx(['captures', 'drafts', 'photos'], (t) => {
@@ -1101,9 +1441,9 @@ async function saveCapture() {
           // The switch is on screen only while linked; otherwise the saved value stands.
           const shared = linked ? share : !!(row && row.shared === true);
           const change = ph.state === 'new' || ph.state === 'removed' || (row && (row.photo_to_claude !== false) !== toClaude)
-            || (row && (row.shared === true) !== shared);
-          if (!row || (row.body === body && row.kind === kind && !change)) return;
-          const next = Object.assign({}, row, { body, kind, photo_to_claude: toClaude, shared,
+            || (row && (row.shared === true) !== shared) || (row && (hasPlaceName(row) ? row.place_name.trim() : null) !== place);
+          if (!row || (row.body === body && !change)) return;
+          const next = Object.assign({}, row, { body, place_name: place, photo_to_claude: toClaude, shared,
             updated_at: nextUpdatedAt(row.updated_at), dirty: 1 });
           if (ph.state === 'new') {
             t.objectStore('photos').put({ id, blob: ph.blob, w: ph.w, h: ph.h, bytes: ph.bytes, uploaded: 0, at });
@@ -1196,7 +1536,7 @@ async function handleEntry() {
       let body = old && old.body ? old.body : '';
       if (!body.includes(prefill)) body = body.trim() ? body.replace(/\s+$/, '') + '\n' + prefill : prefill;
       await idb.put('drafts', Object.assign({}, old || {}, {
-        id: 'new', body: body.slice(0, BODY_MAX), kind: old ? old.kind : 'note', open: true,
+        id: 'new', body: body.slice(0, BODY_MAX), open: true,
         updated_at: new Date().toISOString()
       }));
     }
@@ -1269,7 +1609,9 @@ async function render() {
   await renderStatus();
 }
 
+let capRenderSeq = 0;               // only the newest render writes the list (renders can overlap)
 async function renderCaptures() {
+  const seq = ++capRenderSeq;
   const live = (await idb.all('captures')).filter((r) => !r.deleted_at);
   const theirs = await idb.all('partner');        // the other person's shared captures (read-only)
   const today = todayLocal();
@@ -1291,87 +1633,83 @@ async function renderCaptures() {
   const rows = live.filter((r) => r.local_date === viewDay)
     .concat(theirs.filter((r) => r.local_date === viewDay).map((r) => Object.assign({}, r, { partner: true })))
     .sort((a, b) => (a.captured_at < b.captured_at ? 1 : a.captured_at > b.captured_at ? -1 : 0));
+  // Under the title: the day's city (the zone most of its captures were made in) and the count.
+  const zones = new Map();
+  for (const r of rows) zones.set(r.tz, (zones.get(r.tz) || 0) + 1);
+  const city = cityOf([...zones.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || here);
+  $('day-sub').textContent = rows.length ? `${city}, ${rows.length} capture${rows.length === 1 ? '' : 's'}` : city;
   const photoIds = new Set(await idb.keys('photos'));
   const pphotoIds = new Set(await idb.keys('pphotos'));
-  for (const u of thumbUrls) URL.revokeObjectURL(u);
-  thumbUrls = [];
-  const ul = $('records');
-  ul.replaceChildren();
+  // Rows are built off-screen and swapped in at the end: two renders that overlap (a sync and a
+  // tap) used to interleave their rows, doubling them or leaving the list empty for a moment.
+  const items = [], urls = [];
   for (const r of rows) {
+    // One row: time stamp | timeline spine and dot | place, text, photo print (SPEC.md 7C.2).
     const li = document.createElement('li');
-    const btn = document.createElement('button');
+    const btn = el('button', r.partner ? 'row partner' : 'row');
     btn.type = 'button';
-    btn.className = r.partner ? 'row partner' : 'row';
     btn.dataset.id = r.id;
     if (r.partner) btn.dataset.partner = '1';
 
-    const l1 = document.createElement('div');
-    l1.className = 'line1';
-    const when = document.createElement('span');
-    when.className = 'when';
-    when.textContent = fmtTime(r.captured_at, r.tz);
-    if (r.tz !== here) {
-      const city = document.createElement('span');
-      city.className = 'city';
-      city.textContent = ' ' + cityOf(r.tz);
-      when.append(city);
-    }
-    const spacer = document.createElement('span');
-    spacer.className = 'spacer';
-    const kind = document.createElement('span');
-    kind.className = 'chip ' + (r.kind === 'journal' ? 'journal' : 'note');
-    kind.textContent = r.kind === 'journal' ? 'journal' : 'note';
-    l1.append(when, spacer, kind);
-    if (r.lat != null && r.lng != null) {
-      const gps = document.createElement('span');
-      gps.className = 'gps';
-      gps.title = 'GPS fix recorded';
-      gps.setAttribute('aria-label', 'GPS fix recorded');
-      l1.append(gps);
-    }
+    const when = el('span', 'when');
+    when.append(el('span', 'hm', fmtTime(r.captured_at, r.tz).slice(0, 4)), el('span', 'hrs', ' hrs'));
+    const tcol = el('span', 'tcol');
+    tcol.append(when);
+    const spine = el('span', 'spine');
+    spine.append(el('span', 'pin'));
+
+    const l1 = el('span', 'line1');
+    const named = hasPlaceName(r), gps = r.lat != null && r.lng != null;
+    l1.append(el('span', 'place' + (named ? ' named' : gps ? ' coords' : ' nogps'), placeText(r)));
+    if (r.tz !== here) l1.append(el('span', 'city', cityOf(r.tz)));
     let local;
     if (r.partner) {
-      // The other person's: a name label instead of a sync chip (it is never queued here).
+      // The other person's: a name label, never a sync state (it is never queued here).
       local = pphotoIds.has(r.id) ? await idb.get('pphotos', r.id) : null;
       l1.append(el('span', 'chip who', r.owner_name || 'shared'));
     } else {
       // A photo still waiting to upload keeps the row queued even once its text is on the server.
+      // A synced row shows nothing (its stamp is for screen readers only).
       local = photoIds.has(r.id) ? await idb.get('photos', r.id) : null;
       const queued = !!r.dirty || !!(local && !local.uploaded);
-      const chip = document.createElement('span');
-      chip.className = 'chip ' + (queued ? 'queued' : 'synced');
-      chip.textContent = queued ? 'queued' : 'synced';
-      l1.append(chip);
+      l1.append(el('span', 'chip ' + (queued ? 'queued' : 'synced'), queued ? 'queued' : 'synced'));
     }
-
-    const l2 = document.createElement('div');
-    l2.className = 'line2';
     const hasPic = !!local || !!r.photo_path;
-    l2.textContent = (r.body || '').split('\n').find((s) => s.trim()) || (hasPic ? '(photo)' : '(empty)');
-
+    const l2 = el('span', 'line2', (r.body || '').split('\n').find((x) => x.trim()) || (hasPic ? '(photo)' : '(empty)'));
+    const text = el('span', 'rowtext');
+    text.append(l1, l2);
+    const body = el('span', 'rowbody');
+    body.append(text);
     if (hasPic) {
-      const text = el('div', 'rowtext');
-      text.append(l1, l2);
-      let thumb;
+      const print = el('span', 'print');
+      print.style.transform = `rotate(${tiltOf(r.id)}deg)`;
       if (local) {
-        thumb = document.createElement('img');
+        const thumb = document.createElement('img');
         thumb.className = 'thumb';
         thumb.alt = 'Photo';
         const u = URL.createObjectURL(local.blob);
-        thumbUrls.push(u);
+        urls.push(u);
         thumb.src = u;
+        print.append(thumb);
       } else {
-        thumb = el('span', 'thumb', 'photo');      // on the server, not on this phone yet
+        print.append(el('span', 'thumb', 'photo'));      // on the server, not on this phone yet
       }
-      btn.classList.add('hasthumb');
-      btn.append(text, thumb);
-    } else btn.append(l1, l2);
+      body.append(print);
+    }
+    btn.append(tcol, spine, body);
     li.append(btn);
-    ul.append(li);
+    items.push(li);
   }
+  if (seq !== capRenderSeq) { for (const u of urls) URL.revokeObjectURL(u); return; }
+  for (const u of thumbUrls) URL.revokeObjectURL(u);
+  thumbUrls = urls;
+  $('records').replaceChildren(...items);
   $('empty').textContent = viewDay === today ? 'Nothing captured today yet.' : 'No captures on this day.';
   $('empty').hidden = rows.length > 0;
 }
+
+// A photo print's tilt, steady per capture: 2, -2, 1.5 or -1.5 degrees (SPEC.md 7C.8).
+const tiltOf = (id) => [2, -2, 1.5, -1.5][parseInt(String(id).replace(/-/g, '').slice(-2), 16) % 4 || 0];
 
 // The other person's shared capture, read-only: text, photo, time, place. No Edit, no
 // Delete, no switches (SPEC.md 7B.3).
@@ -1383,9 +1721,9 @@ async function openPartnerView(id) {
   if (viewUrl) { URL.revokeObjectURL(viewUrl); viewUrl = null; }
   const city = r.tz !== deviceTz() ? ' ' + cityOf(r.tz) : '';
   $('view-head').textContent = `${r.owner_name || 'Shared'}, ${fmtDayLabel(r.local_date)}`;
-  $('view-meta').textContent = [`${fmtTime(r.captured_at, r.tz)}${city}`, r.kind,
-    r.lat != null && r.lng != null ? `GPS ${Number(r.lat).toFixed(5)}, ${Number(r.lng).toFixed(5)}` +
-      (r.accuracy_m != null ? ` (${Math.round(r.accuracy_m)} m)` : '') : 'no GPS'].join(', ');
+  // Time and place; no kind (SPEC.md 7C.2a). The place is the owner's name for it, else coordinates.
+  $('view-meta').textContent = [`${fmtTime(r.captured_at, r.tz)}${city}`,
+    placeText(r) + (!hasPlaceName(r) && r.lat != null && r.accuracy_m != null ? ` (${Math.round(r.accuracy_m)} m)` : '')].join(', ');
   if (ph) { viewUrl = URL.createObjectURL(ph.blob); $('view-img').src = viewUrl; }
   else $('view-img').removeAttribute('src');
   $('view-img').hidden = !ph;
@@ -1491,29 +1829,13 @@ async function renderJournal() {
   $('j-title').classList.toggle('today', jDay === today);
   const msgs = threadOrder(await idb.byIndex('journal', 'local_date', jDay));
   const caps = (await idb.byIndex('captures', 'local_date', jDay)).filter((r) => !r.deleted_at);
-  // Captures tagged journal show inline as quoted context, placed by time.
-  const quotes = caps.filter((r) => r.kind === 'journal').sort((a, b) => (a.captured_at < b.captured_at ? -1 : 1));
-  const items = [];
-  let qi = 0;
-  const byId = new Map(msgs.map((m) => [m.id, m]));
-  for (const m of msgs) {
-    const t = Date.parse(m.role === 'assistant' && byId.get(m.reply_to) ? byId.get(m.reply_to).created_at : m.created_at);
-    while (qi < quotes.length && Date.parse(quotes[qi].captured_at) <= t && m.role === 'user') items.push(quotes[qi++]);
-    items.push(m);
-  }
-  while (qi < quotes.length) items.push(quotes[qi++]);
+  // The thread holds only the person's turns and Claude's replies: journal-kind captures are no
+  // longer quoted inline (SPEC.md 7C.2a). Claude still sees every capture of the day.
+  const items = msgs;
 
   const ul = $('j-thread');
   ul.replaceChildren();
   for (const it of items) {
-    if (it.role === undefined) {
-      const li = el('li', 'quote');
-      li.dataset.capture = it.id;
-      li.append(el('span', 'meta', `journal capture, ${fmtTime(it.captured_at, it.tz)}${it.tz !== here ? ' ' + cityOf(it.tz) : ''}`),
-        document.createTextNode(it.body || ''));
-      ul.append(li);
-      continue;
-    }
     const li = el('li', 'msg ' + (it.role === 'assistant' ? 'assistant' : 'user'));
     li.dataset.id = it.id;
     li.append(el('div', 'text', it.content));
@@ -1598,7 +1920,8 @@ async function dayText(date) {
   lines.push(caps.length ? `Captures (${caps.length})` : 'Captures: none');
   for (const c of caps) {
     let head = `${when(c.captured_at, c.tz)}, ${c.kind}`;
-    if (c.lat != null && c.lng != null) head += `, at ${Number(c.lat).toFixed(5)}, ${Number(c.lng).toFixed(5)}`;
+    if (hasPlaceName(c)) head += `, at ${c.place_name.trim()}`;
+    if (c.lat != null && c.lng != null) head += hasPlaceName(c) ? ` (${Number(c.lat).toFixed(5)}, ${Number(c.lng).toFixed(5)})` : `, at ${Number(c.lat).toFixed(5)}, ${Number(c.lng).toFixed(5)}`;
     // A photo switched off for Claude is not mentioned: this text may be pasted into Claude.
     if ((c.photo_path || photoIds.has(c.id)) && c.photo_to_claude !== false) head += ', with a photo';
     lines.push(`- ${head}: ${indent(c.body) || '(no text)'}`);
@@ -1680,6 +2003,8 @@ async function renderStatus() {
   }
   $('status-dot').className = 'dot ' + cls;
   $('status-text').textContent = text;
+  $('status').dataset.state = cls;
+  $('status').setAttribute('aria-label', `Sync status: ${text}. Open settings`);
   $('s-sync').textContent = text;
   setRetry(queued > 0 || offline);
 
@@ -2217,7 +2542,7 @@ async function initPersistence() {
 function applyTheme(t) {
   document.documentElement.setAttribute('data-theme', t);
   try { localStorage.setItem('tb-theme', t); } catch (e) {}
-  document.querySelector('meta[name="theme-color"]').content = t === 'light' ? '#f5f3ef' : '#12161a';
+  document.querySelector('meta[name="theme-color"]').content = t === 'light' ? '#F4EEE2' : '#141C26';
 }
 $('theme').addEventListener('click', () => {
   applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
@@ -2307,8 +2632,19 @@ $('cap-close').addEventListener('click', () => { closeCapture('close').catch(fai
 $('cap-save').addEventListener('click', () => { saveCapture(); });
 $('cap-delete').addEventListener('click', () => { deleteCapture(); });
 $('cap-body').addEventListener('input', () => { updateSaveEnabled(); writeDraft(); });
-$('kind-note').addEventListener('click', () => { setKind('note'); writeDraft(); });
-$('kind-journal').addEventListener('click', () => { setKind('journal'); writeDraft(); });
+$('cap-place').addEventListener('input', () => { updatePlaceField(); writeDraft(); refreshPlaceChips().catch(() => {}); });
+$('cap-place').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); $('cap-place').blur(); } });
+$('cap-place-clear').addEventListener('click', () => {
+  $('cap-place').value = '';                  // back to the coordinates (SPEC.md 7C.4)
+  updatePlaceField(); writeDraft(); refreshPlaceChips().catch(() => {});
+});
+// A chip fills the field with its name; nothing else is taken from OpenStreetMap.
+$('cap-chips').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-place]');
+  if (!b || !cap.open) return;
+  $('cap-place').value = b.dataset.place.slice(0, PLACE_MAX);
+  updatePlaceField(); writeDraft(); refreshPlaceChips().catch(() => {});
+});
 // Photo opens Camera or Gallery (SPEC.md 7A.2). The input is clicked inside the button's own
 // click, so the tap still counts as the user gesture Chrome needs to open a picker.
 $('cap-photo-btn').addEventListener('click', () => { if (cap.open) $('photo-dlg').showModal(); });
@@ -2382,7 +2718,7 @@ if (sb) sb.auth.onAuthStateChange(() => { renderAuth(); });
   $('s-version').textContent = 'v' + APP_VERSION;
   await idb.open();
   await checkProject();               // before the first sync and before schema_version is written
-  if ((await meta.get('schema_version')) !== 4) await meta.set('schema_version', 4);
+  if ((await meta.get('schema_version')) !== 5) await meta.set('schema_version', 5);
   await loadMe();
   // A reload while the capture screen was up leaves its history entry on top: pop it.
   popCaptureState();

@@ -11,6 +11,7 @@
 // capture on Eric's phone reaches Gary; export; the share switch in a draft; Change password.
 // Exit code 0 only when every check passes.
 'use strict';
+const APP = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'trip.html'), 'utf8').match(/const APP_VERSION = (\d+);/)[1];
 const { launch, startServer, makeMock, attachMock, newContext, UID, ERIC_UID } = require('./harness.cjs');
 
 const PORT = 8734;
@@ -109,10 +110,10 @@ async function partnerButton(page, label) {
   const img = await makeImage(G, 1600, 1200);
   try {
     // ---------- 1. Separate by default ----------
-    check('M0 both phones on v10 with IndexedDB v4 (partner, pphotos)', await G.evaluate(async () => {
+    check(`M0 both phones on v${APP} with IndexedDB v5 (partner, pphotos kept; geocache from M1.3)`, await G.evaluate(async (app) => {
       const db = await idb.open();
-      return APP_VERSION === 10 && db.version === 4 && db.objectStoreNames.contains('partner') && db.objectStoreNames.contains('pphotos');
-    }) && (await text(E, '#s-version')) === 'v10');
+      return APP_VERSION === app && db.version === 5 && db.objectStoreNames.contains('partner') && db.objectStoreNames.contains('pphotos');
+    }, Number(APP)) && (await text(E, '#s-version')) === 'v' + APP);
     await openCapture(G);
     check('M1 not linked: no Share with switch on the capture screen', !(await shown(G, '#cap-share')));
     await G.click('#cap-close'); await waitCap(G, false);
@@ -267,7 +268,7 @@ async function partnerButton(page, label) {
     const [dl] = await Promise.all([E.waitForEvent('download'), E.evaluate(() => exportCaptures())]);
     const ex = JSON.parse(require('fs').readFileSync(await dl.path(), 'utf8'));
     const exG = ex.captures.find((c) => c.id === gPre.id), exE = ex.captures.find((c) => c.id === eAir.id);
-    check('M12 export: own and partner captures, with owner_name and shared', ex.app_version === 10 && ex.own >= 2 && ex.partner >= 1
+    check('M12 export: own and partner captures, with owner_name and shared', ex.app_version === Number(APP) && ex.own >= 2 && ex.partner >= 1
       && exG && exG.owner_name === 'Gary' && exG.partner === true && exG.shared === true
       && exE && exE.owner_name === 'Eric' && exE.shared === true && !exE.partner, JSON.stringify({ own: ex.own, partner: ex.partner }));
 

@@ -105,9 +105,9 @@ async function save(page) {
   await settle(page);
   const version = await page.$eval('#s-version', (e) => e.textContent);
   const APP = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'trip.html'), 'utf8').match(/const APP_VERSION = (\d+);/)[1];
-  check(`P0 v${APP}, IndexedDB v4 with a photos store indexed on uploaded`, version === 'v' + APP && await page.evaluate(async () => {
+  check(`P0 v${APP}, IndexedDB v5 with a photos store indexed on uploaded`, version === 'v' + APP && await page.evaluate(async () => {
     const db = await idb.open();
-    return db.version === 4 && db.objectStoreNames.contains('photos') && db.transaction('photos').objectStore('photos').indexNames.contains('uploaded');
+    return db.version === 5 && db.objectStoreNames.contains('photos') && db.transaction('photos').objectStore('photos').indexNames.contains('uploaded');
   }), version);
 
   const big = await makeImage(page, 4000, 3000, 'image/jpeg');
@@ -450,6 +450,12 @@ async function save(page) {
   const dayB = await pb.$eval('#day-label', (e) => e.textContent);
   const thumbsB = await pb.$$eval('.row img.thumb', (e) => e.length);
   check('P17 rows on the second phone show thumbnails', thumbsB >= 1, `${dayB}: ${thumbsB}`);
+  // M1.3: overlapping renders (a sync and a tap) used to interleave their rows. Ten at once
+  // must leave exactly one row per capture of the day.
+  const nDay = await pb.evaluate(async () => (await idb.all('captures')).filter((r) => !r.deleted_at && r.local_date === viewDay).length);
+  await pb.evaluate(() => Promise.all(Array.from({ length: 10 }, () => render())));
+  check('P18 ten overlapping renders: one row per capture, no doubles, none missing', (await pb.$$eval('#records .row', (e) => e.length)) === nDay
+    && new Set(await pb.$$eval('#records .row', (e) => e.map((x) => x.dataset.id))).size === nDay, `${await pb.$$eval('#records .row', (e) => e.length)} vs ${nDay}`);
 
   await browser.close();
   srv.close();

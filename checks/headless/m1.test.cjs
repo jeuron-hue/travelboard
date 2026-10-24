@@ -3,6 +3,10 @@
 // Drives trip.html in Chromium against the RPC mock in harness.cjs: capture screen,
 // drafts, 0400 local day on a fake clock in Asia/Bangkok, date switcher, edit and delete
 // propagation, GPS merge, share target, ?new=1, export, service worker offline shell.
+// M1.3 (SPEC.md 7C.2, 7C.2a, 7C.3): rows are a time stamp, a place (coordinates or "no GPS"
+// until named) and the text, with no kind label; there is no kind toggle, so every new capture
+// is a note, and an edit keeps an old journal-kind row's kind. Assertions on the old row layout
+// and the toggle were rewritten to that behaviour on 24/10/26; what they check is unchanged.
 // Exit code 0 only when every check passes.
 'use strict';
 const fs = require('fs');
@@ -30,7 +34,13 @@ const all = (page) => page.evaluate(() => idb.all('captures'));
 const draft = (page, id) => page.evaluate((k) => idb.get('drafts', k), id);
 const capOpen = (page) => page.evaluate(() => !document.getElementById('cap').hidden);
 const waitCap = (page, open) => page.waitForFunction((o) => document.getElementById('cap').hidden === !o && (!o || !popWait), open, { timeout: 5000 });
-const rowLines = (page) => page.$$eval('.row', (els) => els.map((e) => ({ id: e.dataset.id, l1: e.querySelector('.line1').innerText.replace(/\s+/g, ' ').trim(), l2: e.querySelector('.line2').textContent, gps: !!e.querySelector('.gps') })));
+// A row as text: l1 is "<time> hrs[ <city>] <sync>" (the M1 line one, without the kind label that
+// M1.3 retired); place is what the place line says; gps is true when it shows coordinates.
+const rowLines = (page) => page.$$eval('.row', (els) => els.map((e) => {
+  const t = (sel) => (e.querySelector(sel) || { textContent: '' }).textContent.replace(/\s+/g, ' ').trim();
+  return { id: e.dataset.id, l1: [t('.when'), t('.city'), t('.chip')].filter(Boolean).join(' '), place: t('.place'),
+    l2: e.querySelector('.line2').textContent, gps: !!e.querySelector('.place.coords'), kindLabel: /\b(note|journal)\b/i.test(e.textContent.replace(e.querySelector('.line2').textContent, '')) };
+}));
 async function tap(page, sel) {
   const before = await page.$eval('#day-label', (e) => e.textContent);
   await page.click(sel);
@@ -41,20 +51,18 @@ const shown = (page, sel) => page.$eval(sel, (e) => !!(e.offsetWidth || e.offset
 const label = (page) => page.$eval('#day-label', (e) => e.textContent);
 const pill = (page) => page.$eval('#status-text', (e) => e.textContent);
 
-async function capture(page, text, kind = 'note') {
+async function capture(page, text) {
   await page.click('#capture');
   await waitCap(page, true);
   await page.fill('#cap-body', text);
-  if (kind === 'journal') await page.click('#kind-journal'); else await page.click('#kind-note');
   await page.click('#cap-save');
   await waitCap(page, false);
   await page.waitForFunction(() => !popWait);
 }
-async function editRow(page, id, text, kind) {
+async function editRow(page, id, text) {
   await page.click(`.row[data-id="${id}"]`);
   await waitCap(page, true);
   await page.fill('#cap-body', text);
-  if (kind) await page.click('#kind-' + kind);
   await page.click('#cap-save');
   await waitCap(page, false);
   await page.waitForFunction(() => !popWait);
@@ -101,6 +109,7 @@ async function gotoDay(page, ymd) {
   check('A2 capture screen opens, textarea focused', await page.evaluate(() => document.activeElement.id === 'cap-body'));
   check('A2 history state pushed', await page.evaluate(() => !!(history.state && history.state.tbCap)));
   check('A2 Save disabled when empty', await page.$eval('#cap-save', (b) => b.disabled));
+  check('A2 no kind toggle on the capture screen (M1.3, 7C.2a)', (await page.$('#kind-group, #kind-note, #kind-journal')) === null && !/\bjournal\b/i.test(await page.$eval('#cap', (e) => e.innerText)));
   await page.fill('#cap-body', '   \n  ');
   check('A2 Save disabled when only whitespace', await page.$eval('#cap-save', (b) => b.disabled));
   await page.fill('#cap-body', 'Draft one');
@@ -136,18 +145,18 @@ async function gotoDay(page, ymd) {
   await page.click('#capture');
   await waitCap(page, true);
   await page.fill('#cap-body', 'Draft one\nnight market at 0030');
-  await page.click('#kind-journal');
   await page.click('#cap-save');
   await waitCap(page, false);
   let rows = await all(page);
   const r0030 = rows.find((r) => r.body.startsWith('Draft one'));
   check('A6 0030 BKK capture: local_date is previous day 2026-10-03', r0030 && r0030.local_date === '2026-10-03', r0030 && r0030.local_date);
-  check('A6 tz Asia/Bangkok, kind journal, dirty, null coords', r0030 && r0030.tz === 'Asia/Bangkok' && r0030.kind === 'journal' && r0030.dirty === 1 && r0030.lat === null && r0030.lng === null && r0030.accuracy_m === null);
+  check('A6 tz Asia/Bangkok, kind note (every new capture, 7C.2a), dirty, null coords', r0030 && r0030.tz === 'Asia/Bangkok' && r0030.kind === 'note' && r0030.dirty === 1 && r0030.lat === null && r0030.lng === null && r0030.accuracy_m === null);
   check('A6 captured_at = updated_at = save time', r0030 && r0030.captured_at === bkk('0030').toISOString() && r0030.updated_at === r0030.captured_at);
   check('A6 draft cleared on save, "draft kept" hidden', !(await draft(page, 'new')) && !(await shown(page, '#draft-note')));
   check('A6 at 0030 "today" is Sat 03/10/26', (await label(page)) === 'Sat 03/10/26', await label(page));
   let lines = await rowLines(page);
-  check('A6 row line 1: "0030 hrs", no city (same zone), journal chip, queued, no GPS dot', lines.length === 1 && lines[0].l1 === '0030 hrs journal queued' && !lines[0].gps, JSON.stringify(lines));
+  check('A6 row: "0030 hrs", no city (same zone), queued, no kind label, place "no GPS"', lines.length === 1 && lines[0].l1 === '0030 hrs queued'
+    && lines[0].place === 'no GPS' && !lines[0].gps && !lines[0].kindLabel, JSON.stringify(lines));
   check('A6 row line 2: first line of body', lines[0] && lines[0].l2 === 'Draft one');
   check('A6 GPS requested once with spec options', await page.evaluate(() => __geo.calls === 1 && __geo.lastOpts.enableHighAccuracy === true && __geo.lastOpts.timeout === 5000 && __geo.lastOpts.maximumAge === 60000));
   await page.waitForTimeout(100);
@@ -203,9 +212,9 @@ async function gotoDay(page, ymd) {
     const t = times[i % times.length];
     const date = i < 12 ? '2026-10-05' : '2026-10-06';
     await page.clock.setFixedTime(bkk(t, date));
-    const kind = i % 3 === 0 ? 'journal' : 'note';
+    const kind = 'note';                       // M1.3: no toggle, every capture is a note
     const body = `Offline ${String(i + 1).padStart(2, '0')} at ${t}\nLebuh Keng Kwee, ไทย ✓ "quoted" \\ back`;
-    await capture(page, body, kind);
+    await capture(page, body);
     const h = Number(t.slice(0, 2));
     const ldExp = h < 4 ? new Date(Date.UTC(2026, 9, Number(date.slice(8)) - 1)).toISOString().slice(0, 10) : date;
     expected.push({ body, kind, local_date: ldExp });
@@ -228,12 +237,12 @@ async function gotoDay(page, ymd) {
   // --- edit after sync (acceptance 3)
   await gotoDay(page, '2026-10-04');
   const before = (await all(page)).find((r) => r.id === r0400.id);
-  await editRow(page, r0400.id, 'Bangkok 0400 sharp, edited', 'journal');
+  await editRow(page, r0400.id, 'Bangkok 0400 sharp, edited');
   let after = (await all(page)).find((r) => r.id === r0400.id);
-  check('A13 edit: body and kind changed, updated_at bumped', after.body === 'Bangkok 0400 sharp, edited' && after.kind === 'journal' && Date.parse(after.updated_at) > Date.parse(before.updated_at));
+  check('A13 edit: body changed, updated_at bumped, kind unchanged', after.body === 'Bangkok 0400 sharp, edited' && after.kind === 'note' && Date.parse(after.updated_at) > Date.parse(before.updated_at));
   check('A13 edit: captured_at, tz, local_date unchanged', after.captured_at === before.captured_at && after.tz === before.tz && after.local_date === before.local_date);
   await syncIdle(page);
-  check('A13 edit after sync propagates to server', mock.rows.get(r0400.id).body === 'Bangkok 0400 sharp, edited' && mock.rows.get(r0400.id).kind === 'journal');
+  check('A13 edit after sync propagates to server', mock.rows.get(r0400.id).body === 'Bangkok 0400 sharp, edited' && mock.rows.get(r0400.id).kind === 'note');
 
   // same-millisecond edits on a frozen clock: updated_at strictly increases, server applies each
   const u0 = (await all(page)).find((r) => r.id === r0400.id).updated_at;
@@ -333,7 +342,8 @@ async function gotoDay(page, ymd) {
   await syncIdle(page);
   check('A18 server has edit and coordinates', mock.rows.get(g.id).body === g.body && mock.rows.get(g.id).lat === 13.7466);
   lines = await rowLines(page);
-  check('A18 GPS dot shown on the row', lines.find((l) => l.id === g.id).gps);
+  check('A18 the row shows the coordinates to 4 decimals as its place (7C.4)', lines.find((l) => l.id === g.id).gps
+    && lines.find((l) => l.id === g.id).place === '13.7466, 100.5393', JSON.stringify(lines.find((l) => l.id === g.id)));
   await page.evaluate(() => { __geo.mode = 'deny'; });
 
   // --- share target and ?new=1
@@ -380,7 +390,7 @@ async function gotoDay(page, ymd) {
   const ex = exp.captures.find((c) => c.id === r0400.id);
   check('A21 deleted capture included and flagged', ex && ex.deleted === true && !!ex.deleted_at);
   check('A21 synced flag and server_ts per row', exp.captures.every((c) => typeof c.synced === 'boolean' && 'server_ts' in c) && exp.captures.filter((c) => c.synced).every((c) => c.server_ts));
-  check('A21 export carries every server field', ['id', 'body', 'kind', 'captured_at', 'tz', 'local_date', 'lat', 'lng', 'accuracy_m', 'updated_at', 'deleted_at'].every((k) => k in exp.captures[0]));
+  check('A21 export carries every server field, place_name too (7C.4)', ['id', 'body', 'kind', 'captured_at', 'tz', 'local_date', 'lat', 'lng', 'accuracy_m', 'place_name', 'updated_at', 'deleted_at'].every((k) => k in exp.captures[0]));
   await page.click('#close');
   await ctx.setOffline(false);
   mock.offline = false;
@@ -406,11 +416,19 @@ async function gotoDay(page, ymd) {
   if (!lines.length) console.log('DEBUG', await label(pb), JSON.stringify(await all(pb)).slice(0, 600));
   const bk = lines.find((l) => l.id === id1), sg = lines.find((l) => l.id === id2);
   check('B1 Bangkok 0030 row on Sat 03/10/26 reads "0030 hrs Bangkok"', (await label(pb)) === 'Sat 03/10/26' && bk && bk.l1.startsWith('0030 hrs Bangkok') && bk.gps, JSON.stringify(lines));
-  check('B1 Singapore row has no city suffix', sg && sg.l1.startsWith('1200 hrs note'), sg && sg.l1);
+  check('B1 Singapore row has no city suffix', sg && sg.l1 === '1200 hrs synced' && sg.place === 'no GPS', sg && sg.l1);
+  check('B1 the old journal-kind row shows like any other: no kind label on either row (7C.2a)', bk && !bk.kindLabel && sg && !sg.kindLabel);
+  check('B1 heading line: the day\'s city and count', (await pb.$eval('#day-sub', (e) => e.textContent)) === 'Bangkok, 2 captures' || (await pb.$eval('#day-sub', (e) => e.textContent)) === 'Singapore, 2 captures', await pb.$eval('#day-sub', (e) => e.textContent));
   check('B1 rows newest first', lines[0].id === id1);
   await pb.click(`.row[data-id="${id1}"]`);
   await waitCap(pb, true);
   check('B1 edit info names Bangkok and GPS', await pb.$eval('#cap-info', (e) => e.textContent === 'Captured 04/10/26 0030 hrs, Bangkok, GPS 9 m'), await pb.$eval('#cap-info', (e) => e.textContent));
+  await pb.fill('#cap-body', 'Bangkok night, 0030, edited on v11');
+  await pb.click('#cap-save');
+  await waitCap(pb, false);
+  await syncIdle(pb);
+  check('B2 editing an old journal-kind capture keeps kind journal locally and on the server (7C.2a)',
+    (await all(pb)).find((r) => r.id === id1).kind === 'journal' && mockB.rows.get(id1).kind === 'journal' && mockB.rows.get(id1).body.endsWith('edited on v11'));
   await ctxB.close();
 
   // ================= C: service worker, offline shell, update bar =================
@@ -423,7 +441,7 @@ async function gotoDay(page, ymd) {
   await pc.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 10000 });
   const cacheName = 'tb-shell-v' + APP_VERSION;
   const cacheInfo = await pc.evaluate(async (name) => { const k = await caches.keys(); const c = await caches.open(name); return { keys: k, n: (await c.keys()).length }; }, cacheName);
-  check(`C1 cache ${cacheName} with 10 shell files`, cacheInfo.keys.includes(cacheName) && cacheInfo.n === 10, JSON.stringify(cacheInfo));
+  check(`C1 cache ${cacheName} with 15 shell files (M1.3 adds Plex 500 and Newsreader 500, 600, italic 500 with its licence)`, cacheInfo.keys.includes(cacheName) && cacheInfo.n === 15, JSON.stringify(cacheInfo));
   await ctxC.setOffline(true);
   await pc.reload();
   await pc.waitForFunction(() => document.getElementById('day-label').textContent !== '-');
