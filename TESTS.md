@@ -7,7 +7,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ## M1.3 Look and place (SPEC.md 7C)
 
-**Status 24/10/26: sessions A and B built. Client 0.14.1 (0.14.0 plus the deeper error red); 0.14.0 (session B): journal page with the inline field, Settings sheet, prompt editor, in-app confirm (no browser dialogs), option B icon. Every automated check passes (below). Next: the combined two-phone run, "Device steps (both phones), 0.14.0" below, which also closes M1.2. Session A's Pixel results on 0.13.0 stand; its step 8 at a named place is step 9 of the combined run.** Migration 0009 applied, `tb-journal` v6 deployed (unchanged in session B).
+**Status 24/10/26: sessions A and B built. Client 0.14.2 (0.14.0 plus the crimson error red, light 0.14.1, dark 0.14.2); 0.14.0 (session B): journal page with the inline field, Settings sheet, prompt editor, in-app confirm (no browser dialogs), option B icon. Every automated check passes (below). Next: the combined two-phone run, "Device steps (both phones), 0.14.0" below, which also closes M1.2. Session A's Pixel results on 0.13.0 stand; its step 8 at a named place is step 9 of the combined run.** Migration 0009 applied, `tb-journal` v6 deployed (unchanged in session B).
 
 ### Automated results, 24/10/26 (session B, 0.14.0)
 
@@ -24,6 +24,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 | Visual | Checked | Headless screenshots at 390 x 844, light and dark: journal page, the field growing, day list, Settings (signed in, signed out), prompt editor, confirm sheet, Change password, against `design/m1.3/Journal.dc.html` and `Panel.dc.html` (not committed). |
 | Deploy 0.14.0 | PASS | `main` at `2d53f04`; Pages build succeeded. Live `sw.js` reads `const CACHE_VERSION = '0.14.0';` (Last-Modified 24/10/26 1503 hrs SGT), fetched through Apify. |
 | 0.14.1 (24/10/26) | PASS | Light `--crit` `#8A1538` (Gary). static 114 (token table updated), m1 107, m2 80, m11 59, m12 56, m13 104. `main` at `a95b37e`; live `sw.js` reads `const CACHE_VERSION = '0.14.1';` (Last-Modified 1528 hrs SGT), fetched through Apify. |
+| 0.14.2 (24/10/26) | PASS | Dark `--crit` `#EC5F86` (Gary). static 114, m1 107, m2 80, m11 59, m12 56, m13 104. Live check below. |
 | Icons | Checked | `icons/icon-192.png`, `icon-512.png` (rounded ink ground, clear corners) and `icon-maskable-512.png` (full bleed) rendered from `design/m1.3/icon-b.svg` by `design/m1.3/make-icons.cjs`; every mark within 36 of the 40-unit safe radius (184 px of 205 px on the 512). |
 
 Headless session B groups (`m13.test.cjs`):
@@ -50,7 +51,7 @@ One run for SPEC 7B.5 (items 1 to 11 and 13) and 7C.7 (items 1 to 4, 6, 6a, 7). 
 
 Part A, Gary alone, any time before Eric is there (steps 1 to 9).
 
-1. **Update the Pixel.** Open travelboard; tap "Update ready, tap to reload" when it shows. Tap the stamp: the Settings sheet slides up from the bottom; Version reads 0.14.1. Close it with the X. Captures, photos and journal days are all still there. The home-screen icon becomes the notebook page with the terracotta pin on a dark ground; Chrome can take up to a day to change it, and may ask first. Report when it changes.
+1. **Update the Pixel.** Open travelboard; tap "Update ready, tap to reload" when it shows. Tap the stamp: the Settings sheet slides up from the bottom; Version reads 0.14.2. Close it with the X. Captures, photos and journal days are all still there. The home-screen icon becomes the notebook page with the terracotta pin on a dark ground; Chrome can take up to a day to change it, and may ask first. Report when it changes.
 2. **Journal page (7C item 1).** Journal tab. The date in the large serif, "Add a title" (or the day's title) under it, Days and Share on the right. Your messages have a terracotta line down the left and "GARY, 2105 HRS" above them; Claude's replies are in the serif with a blue line and "CLAUDE, ...". No bubbles, no quoted captures. At the foot: the Captures and Journal tabs, then a text field "Tell Claude about today" with an arrow button. There is no Write button.
 3. **Inline field and force-close (7C item 6a).** Tap the field: the keyboard opens on the same screen, no new screen. Check the Gboard mic works. Type four or five lines (`Line one`, Enter, `Line two` and so on): the field grows. Swipe travelboard away from recent apps, reopen it: it opens on the Journal tab with your lines in the field. Delete them all; type `Where am I today?` and tap the arrow once: the field empties at once, "Claude is replying" shows, and one reply comes.
 4. **Settings sheet (7C item 1).** Tap the stamp. Check against the approved panel: grabber, "Settings" in the serif, X; a box with the stamp, Sync now, Sync, Last sync, Last error, Storage, Version; TRAVELLING WITH (Eric, with "Not linked with Eric." and Add Eric); JOURNAL (My journal prompt with Edit, Export); ACCOUNT (gary@travelboard.local with Sign out, Password with Change); THEME (Light, Dark, Auto). Tap a free area above the sheet: it closes.
@@ -63,7 +64,7 @@ Part A, Gary alone, any time before Eric is there (steps 1 to 9).
 Part B, both phones side by side (steps 10 to 27). 0.14.1 is live (confirmed 24/10/26 1529 hrs, 0.14.1 row above). Gary hands Eric his password in person; it never goes into a chat or a file.
 
 10. **Eric installs.** **Eric:** in Chrome open `https://jeuron-hue.github.io/travelboard/trip.html`, menu, Install app (or Add to home screen), and open travelboard from the new icon (the notebook page and pin). Gboard as the keyboard with the on-device English pack (Settings, System, Languages, Speech, On-device recognition); in airplane mode, open a capture, tap the mic, check dictation works, close the capture, airplane mode off.
-11. **Eric signs in (7B item 1).** **Eric:** tap the stamp ("SIGN IN", in blue). The sheet shows the sign-in form under ACCOUNT. Enter `eric@travelboard.local` and his password, Sign in to sync. The stamp reads SYNCED; Version 0.14.1; the account row reads eric@travelboard.local. His day view is empty.
+11. **Eric signs in (7B item 1).** **Eric:** tap the stamp ("SIGN IN", in blue). The sheet shows the sign-in form under ACCOUNT. Enter `eric@travelboard.local` and his password, Sign in to sync. The stamp reads SYNCED; Version 0.14.2; the account row reads eric@travelboard.local. His day view is empty.
 12. **The look on Eric's phone (7C item 1).** **Eric:** Captures tab, Journal tab, Settings, a capture sheet: the same paper look as the Pixel. Settings, Dark, look again, then Light (or Auto, as he likes).
 13. **Separate by default (7B item 1).** **Eric:** Capture, `Eric before linking`, Save. Gary: Capture, `Gary before linking`, Save. Neither capture sheet shows a "Share with" switch. Both Sync. Each phone shows only its own capture. In Settings, Gary's TRAVELLING WITH reads "Not linked with Eric."; **Eric:** his reads "Not linked with Gary."
 14. **Link (7B item 2).** Gary: Settings, Add Eric: "You added Eric. Waiting for Eric to add you". **Eric:** Sync, then Settings: "Gary added you. Add him to link"; nothing of Gary's in his day view. **Eric:** Add Gary: "Linked with Gary", in blue. Gary: Sync, Settings: "Linked with Eric".
@@ -180,7 +181,7 @@ Untested
 
 Decisions for Gary (asked in the session B report; answers to be recorded here)
 5. Answered 24/10/26: Gary said yes. SPEC 7C.4 reworded (0009 replaces `tb_capture_upsert` only; `tb_captures_upsert` is a pass-through).
-6. Answered 24/10/26: Gary said deepen. Light `--crit` is `#8A1538` from 0.14.1 (crimson; 8.1:1 on the paper, 7.5:1 on its tint). Dark `--crit` `#e5534b` unchanged; it sits close to the dark accent `#E07A55` too (question in the 0.14.1 report).
+6. Answered 24/10/26: Gary said deepen. Light `--crit` is `#8A1538` from 0.14.1 (crimson; 8.1:1 on the paper, 7.5:1 on its tint). Dark `--crit` `#EC5F86` from 0.14.2 (Gary said deepen it too): a crimson, apart from the dark accent `#E07A55`; 5.4:1 on the night page, 4.8:1 on the sheet and its tint.
 
 Known, by design or minor
 7. Newsreader is the three static files 7C.8 names (default optical size); the mockup used the variable font, so the 34 px titles may look slightly heavier on the phone.

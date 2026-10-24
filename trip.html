@@ -37,6 +37,8 @@
     page with an inline field at the foot; Settings sheet; prompt editor; no browser dialogs.
 
   Change log (newest first)
+  - 24/10/26 0.14.2. Dark --crit from #e5534b to #EC5F86, a crimson (Gary's decision), apart from
+    the dark accent #E07A55; still AA on the night page, the sheet and the error tint. No other change.
   - 24/10/26 0.14.1. Light --crit from #b42318 to #8A1538, a deep crimson (Gary's decision), so
     the error stamp, Delete and error text stand apart from the terracotta accent. No other change.
   - 24/10/26 0.14.0. M1.3 session B (SPEC.md 7C.2, 7C.2a Panels, 7C.5, 7C.8). Journal: the Write
@@ -204,8 +206,8 @@
   }
 
   /* Field notebook (SPEC.md 7C.1), values from the approved mockup (7C.8). --surface is the
-     sheet, --line the rule, --ruled the textarea lines. Light --crit deepened to a crimson in
-     0.14.1 (Gary 24/10/26) so errors never read as the terracotta accent. */
+     sheet, --line the rule, --ruled the textarea lines. --crit is a crimson in both themes
+     (light 0.14.1, dark 0.14.2; Gary 24/10/26) so errors never read as the terracotta accent. */
   :root, [data-theme="light"] {
     --ground: #F4EEE2;  --surface: #FBF8F1; --ink: #1F2A36; --muted: #5E6670; --line: #D9CFBD;
     --ruled: #E4DBCB;
@@ -224,7 +226,7 @@
     --blue: #8DB4D9;    --blue-bg: #1F3247;
     --good: #6FC596;    --good-bg: #173025;
     --warn: #E2B355;    --warn-bg: #3a2f12;
-    --crit: #e5534b;    --crit-bg: #3d1a18;
+    --crit: #EC5F86;    --crit-bg: #3d1a18;
     --photo: #4A5566;   --print: #2E3946;
     --shadow: rgba(0, 0, 0, 0.55); --scrim: rgba(4, 7, 11, 0.7);
   }
@@ -887,7 +889,7 @@
 'use strict';
 
 // Bump together with CACHE_VERSION in sw.js on every release.
-const APP_VERSION = '0.14.1';     // 0.<minor>.<patch> from 0.13.0 (was 13), Gary 24/10/26
+const APP_VERSION = '0.14.2';     // 0.<minor>.<patch> from 0.13.0 (was 13), Gary 24/10/26
 
 const PROJECT_REF = 'nnnnonspfljdkrxstslw';           // Supabase project travelboard (SPEC.md D3, 6.8)
 const SUPABASE_URL = 'https://' + PROJECT_REF + '.supabase.co';
