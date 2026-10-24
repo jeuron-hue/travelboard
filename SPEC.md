@@ -450,14 +450,20 @@ Added 24/10/26 on Gary's decision (D17). The phone app gets its own visual ident
 ### 7C.2 Screens
 
 - **Header and pill:** serif app or day title; the sync pill restyled as a stamp, same states and wording.
-- **Day view:** the day title in the serif with its date. Each row leads with time (stamp-style, 24-hour) and place (7C.4), then the text, then the photo as a small framed print. Kind is a small stamp label. A thin timeline spine joins the day's rows. Partner rows (7B.3) keep their name label and read-only view. Ruled hairlines separate rows; no cards.
-- **Capture and edit:** a paper sheet. Place field with its chips (7C.4) under the time; ruled textarea; photo attached as a print with Remove; the switches ("Claude sees this", "Share with") grouped together at the foot. Save stays in thumb reach.
-- **Journal:** the day's thread as a notebook page. Gary's (or Eric's) turns and Claude's replies are told apart by a margin rule and type colour, not chat bubbles. Day list in the serif. Composer and Share unchanged in behaviour.
+- **Day view:** the day title in the serif with its date. Each row leads with time (stamp-style, 24-hour) and place (7C.4), then the text, then the photo as a small framed print. No kind label (7C.2a). A thin timeline spine joins the day's rows. Partner rows (7B.3) keep their name label and read-only view. Ruled hairlines separate rows; no cards.
+- **Capture and edit:** a paper sheet with no Note/Journal toggle (7C.2a). Place field with its chips (7C.4) under the time; ruled textarea; photo attached as a print with Remove; the switches ("Claude sees this", "Share with") grouped together at the foot. Save stays in thumb reach.
+- **Journal:** the day's thread as a notebook page, holding only the person's turns and Claude's replies. Turns and replies are told apart by a margin rule and type face (replies in the serif), not chat bubbles. Day list in the serif. The Write button and its separate composer go: a text field sits at the foot of the screen with Send beside it; tapping it opens the keyboard (and Gboard voice), the field grows with the text, and the draft is kept per day as now. Share unchanged.
+
+### 7C.2a Capture kinds retired (24/10/26)
+
+- Every capture is just a capture. The Note/Journal toggle and the kind label on rows go. New captures save `kind = 'note'`; the column and its check stay, and existing `journal` rows are kept as they are and shown like any other capture. No migration.
+- The journal thread no longer quotes journal-kind captures inline. What Claude sees is unchanged: every non-deleted capture of the day, own and shared with you, with photos as switched (7A.4, 7B.4). `tb-journal` stops labelling captures by kind.
+- Share text and export keep `kind` for old rows; the client stops showing it.
 - **Panels:** the pill panel, partner panel, Change password and the prompt editor (7C.5) in the same paper style.
 
 ### 7C.3 Rules for the redesign
 
-- No behaviour changes beyond 7C.4 and 7C.5. Sync, drafts, queues, switches and the 0400 day rule are untouched.
+- No behaviour changes beyond 7C.2 (inline journal field), 7C.2a, 7C.4 and 7C.5. Tests that check the removed Write composer, the kind toggle or inline journal captures are rewritten to the new behaviour, as deliberate changes. Sync, drafts, queues, switches and the 0400 day rule are untouched.
 - The M1, M1.1, M2 and M1.2 headless suites stay the regression guard. Keep their hooks (ids, data attributes, roles). Where a suite asserts on copy or structure that the design changes, update the assertion and keep the behaviour it checks; never weaken a check to pass.
 - Tap targets at least 44 px. One-handed: primary actions at the bottom.
 - UI copy: dates dd/mm/yy, times 24-hour (0901 hrs), SI units, no em dashes.
@@ -500,6 +506,7 @@ Run one after the other: both change `trip.html`.
 4. Online at a named place (for example Tampines Mall), the map chip offers its name with the OSM credit; tapping it fills the field; nothing is filled without a tap.
 5. A second capture at the same spot uses the cached lookup (no second Nominatim request, headless test).
 6. Journal: Claude refers to a capture by its place name.
+6a. The capture screen has no kind toggle; the journal thread shows no quoted captures; a turn typed in the inline field at the foot sends with one tap and gets one reply, and an unsent draft survives a force-close.
 7. Each of you edits his prompt, the next reply follows it, and Reset to default restores the file text. Neither can read or set the other's prompt (smoke test).
 8. Catalogue diff for 0009 touches only `travel.*` and `public.tb_*`.
 9. `checks/static.cjs`, `checks/smoke.sql`, `fn.test.cjs` and the M1, M1.1, M2 and M1.2 headless suites pass; a new M1.3 headless suite covers 7C.4 and 7C.5.
@@ -668,6 +675,7 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 24/10/26 7C.2, new 7C.2a, 7C.3, 7C.7 item 6a: Gary's decisions on the mockups. Capture kinds retired in the UI (no toggle, no label, journal captures no longer quoted in the thread; data kept, no migration). Journal Write button replaced by an inline field with Send at the foot of the screen.
 - 24/10/26 Status, D16, new D17, principles 7 and 9, 5, 7B intro, new section 7C: Gary's decisions. M1.3 Look and place before Bangkok: field-notebook redesign of every screen (serif headings, Plex body, terracotta and ink blue, both themes in full), editable `place_name` with own-name chips within 75 m and OpenStreetMap Nominatim chips when online, never auto-filled; editable journal prompt per person. Migration 0009. Two sessions after M1.2's build. M1.2's cut-off moves to 05/11 so its two-phone test runs on the new design; freeze moves from 01/11 to 06/11.
 - 24/10/26 7B.2, 7B.4, 4.2, 11: details settled at the M1.2 build (no change to what Gary decided). 0008 adds `tb_link_state(p_other)` (the four link states, used by `tb_whoami`, `tb_partner_add` and `tb_partner_remove`); `tb_can_read_photo` returns false rather than raising without `auth.uid()`, because it runs inside a Storage policy; `tb_photos_select` is changed with `alter policy`, not dropped. `tb_journal_turn` also returns `me` (display name and prompt key) and `own` per capture, so `tb-journal` picks the prompt and labels whose each capture is. `prompt.ts` bundles every `prompts/*.md` by file name. Eric's prompt is Gary's with Eric's name in place of Gary's, conventions line included (Gary, 24/10/26; Eric tunes it later). Client v10: the other person's captures sit in their own IndexedDB stores (`partner`, `pphotos`), so they can never be pushed. Headless: `m12.test.cjs` runs two phones on one mock.
 - 24/10/26 7B.3, 7B.5 item 13: Change password in the pill panel for both users (Gary's decision): typed twice, at least 10 characters, `updateUser` as the signed-in user, needs a connection, shows success or the server's error; no server change; a forgotten password stays a dashboard reset by Gary.
