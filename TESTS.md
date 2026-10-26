@@ -7,7 +7,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ## M1.3 Look and place (SPEC.md 7C)
 
-**Status 26/10/26: the combined two-phone run on 0.14.2 passed (26/10/26, Gary and Eric): 7C.7 items 1 to 3, 6a and 7 on the phones, items 5, 8 and 9 automated; items 4 and 6 wait on step 9 (named place, 27/10/26). Three fixes from the run are built and live as 0.14.3. Left before the 05/11/26 cut-off: step 9, and the 0.14.3 re-checks on both phones ("Re-run steps, 0.14.3" below).** Migration 0009 applied, `tb-journal` v6 deployed (unchanged since).
+**Status 26/10/26 2318 hrs: the combined two-phone run passed on 0.14.2, and the three fixes from it passed their re-run on 0.14.3 on both phones. 7C.7 items 1 to 3, 6a and 7 pass on the phones, items 5, 8 and 9 automated. Only step 9 (named place, 7C.7 items 4 and 6) is left before the 05/11/26 cut-off; Gary runs it 27/10/26.** Migration 0009 applied, `tb-journal` v6 deployed (unchanged since).
 
 ### Automated results, 26/10/26 (0.14.3)
 
@@ -63,6 +63,15 @@ Short re-checks of the three fixes. 0.14.3 must be live first (Deploy row above)
 4. **The password line clears (step 25).** Either phone: Settings, Password, Change; type `aaaaaaaaaa` and `bbbbbbbbbb`, Save password: "The two passwords differ." in red. Sign out: the red line is gone. Sign in again: no password line. (A real change shows "Password changed" instead and clears the same way; there is no need to change a password for this.)
 
 Report the times and anything that looks wrong.
+
+Results, 0.14.3 (Gary and Eric, 26/10/26, reported 2318 hrs; server rows checked):
+
+| Step | Time | Result |
+|---|---|---|
+| 1 | | PASS. Both phones updated through the "Update ready, tap to reload" bar; Version 0.14.3. |
+| 2 (step 14) | 2249 | PASS. Eric's re-add reached Gary's open Settings in about 33 s with no Sync now (server: Eric to Gary added 2249; both directions live). |
+| 3 (step 15) | 2250 | PASS. Share with, Photo and Save reachable with the keyboard up on both phones, edit sheet and dark included; the journal field above the keyboard. `Keyboard share` (Gary, 2250, shared on the server) reached Eric in about 15 s with no Sync now. |
+| 4 (step 25) | | PASS. The password line cleared at sign out and at sign in. |
 
 ### Automated results, 24/10/26 (session B, 0.14.0)
 
@@ -243,7 +252,7 @@ Report the times and anything that looks wrong. Claude then checks the names on 
 Session A's build list (items 1 to 7) is done in 0.14.0: journal page and inline field, Settings sheet, prompt editor and its tests, panels in the paper style, icon option B, the combined device steps, and `renderJournal` built off-screen.
 
 Untested
-1. Done 26/10/26 on 0.14.2 (results above), apart from step 9. The 0.14.3 re-run steps above are still to run on both phones. Cut-off 05/11/26.
+1. Done 26/10/26: the combined run on 0.14.2 and the 0.14.3 re-run, both phones (results above), apart from step 9. Cut-off 05/11/26.
 2. 7C.7 item 4 at a named place and item 6 asking about it (step 9): on 27/10/26 (Gary).
 3. Item 1 passed on both phones 26/10/26 (step 27). The new icon on the home screen: not reported yet.
 4. Change password end to end: passed 26/10/26 (Eric, step 25; no reauthentication asked). The notice that outlived the session is fixed in 0.14.3 (re-run step 4).
