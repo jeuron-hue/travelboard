@@ -5,6 +5,58 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ---
 
+## M1.4 Capture days (SPEC.md 7D)
+
+**Status 26/10/26: 0.15.0 built (Gary's decision 26/10/26); automated checks below; device steps for both phones to run by 05/11/26.** Client only, no migration; `tb-journal` unchanged. Step 9 of the M1.3 combined run (named place, 27/10/26) stays as written and can run on 0.15.0.
+
+### Automated results, 26/10/26 (0.15.0)
+
+| Check | Result | Evidence |
+|---|---|---|
+| `checks/static.cjs` | PASS, 126 of 126 | Adds 8 (M1.4): Days link beside the arrows and the list in place of the records; every day with a live capture, own or shared, plus today, newest first, soft-deleted rows not counted; the list from IndexedDB only (no RPC, no fetch in its two functions); "N captures, M photos" with singular forms and photos left out when none; places from named captures only, the first two distinct, never coordinates; a row tap stops following today, Today and a saved capture return to it; the narrow-screen day bar; m14 runs with the others. Each new check was seen to fail against a copy of `trip.html` with that rule broken. |
+| `checks/smoke.sql` | PASS, 165 of 165 | Live project `travelboard` (ref `nnnnonspfljdkrxstslw` checked first), one rolled-back transaction, through the connector. Regression run; no migration. Afterwards no smoke rows, users or journal messages left. |
+| `fn.test.cjs` | Not run | `tb-journal` unchanged. Deno is not installed in this sandbox, and running a downloaded Deno binary was refused by the session's permission check. Last pass: 62 of 62 on 26/10/26 (0.14.3), same function code. |
+| `m1`, `m2`, `m11`, `m12`, `m13` | PASS, 107, 80, 59, 64, 113 of each, two runs | Two clean runs of every suite on the final code (after a stale-render guard added to `renderCaptures`, below). Earlier in the session three checks failed once each, all timing reads in the tests: m1 A14 "offline edit queued" (the pill read before it turned to offline; also failed once on unchanged 0.14.3 code at the start of the session) and two m13 N11 checks (a failed map lookup). Three more runs each of m1 and m13 on 0.14.3 and on 0.15.0 all passed. Neither touches 7D; left as they are for the freeze. |
+| `m14.test.cjs` (new) | PASS, 34 of 34, two runs | Two clean runs on the final code (seven passing runs in the session). Groups below. |
+| Found while building | Fixed | A day-view render that started before Days was tapped could write the date into the title after the list had written "Capture days". `renderCaptures` now stops before touching the bar when a newer render has started. |
+| Visual | Checked | Headless screenshots at 412, 401 and 360 px, light and dark: day bar with Days, the list, today in the accent, hairlines. The widest date in 2026 and 2027 ("Mon 05/01/26") is 228.6 px; with Days the bar needs 402 px, so the Pixel (412) keeps one line with 10 px spare and narrower phones get the two-row bar. |
+| Deploy 0.15.0 | @@DEPLOY@@ | |
+
+Headless groups (`m14.test.cjs`, Gary's and Eric's phones on one mock, linked; seeds on the server for yesterday and the three days before):
+
+| Group | What it checks |
+|---|---|
+| L0, L1 | 0.15.0; a Days link inside the arrows group, before the earlier arrow, same font, weight and underline as the journal's Days, at least 44 px; in the day view the arrows, date and city line show |
+| L2 (**item 1**) | Days shows the list in place of the records, the link reads Today, title "Capture days", arrows and city line hidden; opening it sends no request (IndexedDB only) |
+| L3 to L5 (**items 2, 3**) | Newest first: today, then each day with a live capture; a day whose only capture is deleted is absent; the date as the day view writes it. Yesterday: Gary's 5 live plus Eric's 1 shared = "6 captures, 3 photos" (Gary's deleted capture with a photo not counted); places "Eric Cafe, Tampines Mall" (Eric's 0700 first, Gary's deleted 0800 name, the lower-case repeat, the coordinates-only row and the third name left out). "1 capture" with no photo count and no place line; Eric's unshared capture not counted; a day of Eric's shared capture alone is listed; today with none reads "No captures yet" in the accent; no coordinates and no "no GPS" anywhere |
+| L6 (**item 6**) | Light: Newsreader 600 20 px dates, today `#B4472A`, 1 px `--line` hairlines, places in ink, 20 px gutter, rows at least 44 px. Dark: night page, today `#E07A55`, dark hairline |
+| L7, L8 (**item 4**) | A tap opens that day, list closed, not following today, link Days; the day view shows 6 rows and 3 prints, matching the row; the arrows step on from it; the date tap still returns to today |
+| L9, L10 | A partner-only day opens with its read-only row; Today returns to today's view and follows today; tapping today's row keeps following; the list stays up across Journal and back |
+| L11, L12 (**item 5**) | After a sync the list shows Eric's new shared capture and its place; with the idle sync on (shortened) Eric's server-side delete leaves the counts and places by itself; Gary's soft delete in the app drops out at once ("4 captures, 1 photo", places now "tampines mall, Jewel"), the row kept with `deleted_at` |
+| L13, L14 (**item 5**) | Airplane mode: the list shows every day and a tap opens one; a capture saved from the list returns to today's view; today's row counts it with its typed place; back online and synced, unchanged |
+| L15 | At 412 and 360 px the widest date stays on one line, clear of Days, the arrows on screen |
+
+### Device steps (both phones), 0.15.0
+
+SPEC 7D.3 items 1 to 6 (item 7 is automated, above). Gary on the Pixel, Eric on his phone; steps marked **Eric** are his. Do not tap Sync now unless a step says so. Note the time of each step and anything that looks wrong; screenshots help.
+
+1. **Update both phones.** Each: open travelboard, tap "Update ready, tap to reload". Tap the stamp: Version reads 0.15.0. Close with the X.
+2. **Days opens the list (item 1).** Gary: Captures tab. Beside the arrows at the top right there is now an underlined "Days". Tap it: the title reads "Capture days", the arrows and the city line go, the link reads "Today", and a list of dates in the serif replaces the day's captures. Today's date is at the top in terracotta, then earlier days, newest first. Only days with captures are listed (plus today). Tap "Today": back to today's captures, the arrows and "Days" again. Tap the arrows and the date: they work as before.
+3. **Counts and places match a day you check by hand (items 2, 3).** Gary: Days. Pick a day with several captures, ideally some with photos and some with named places (26/10/26, the two-phone run, is a good one). Write down its row: "N captures, M photos" and the place line under it. Tap the row and count, on that day's page: the captures (Eric's shared ones, labelled ERIC, count too), and the photo prints. Both numbers should match. The place line should be the first one or two place names typed or chosen from a chip that day, earliest first; a name that appears twice is shown once; coordinates are never shown. Find a day whose captures have only coordinates or "no GPS": its row has no place line. A day with one capture reads "1 capture"; a day with no photos shows no photo count.
+4. **A shared capture of Eric's counted on Gary's list (item 2).** Gary: Days; note today's count. **Eric:** Capture, check "Share with Gary" is on, type `Days test`, Save. Gary: leave the list open and wait, without Sync now: within about 60 s today's row counts one more. **Eric:** Days: his today row counts his own captures and any Gary shared today.
+5. **Tap a day (item 4).** Gary: Days, tap an earlier day: that day's captures show, the link reads "Days", and the arrows step to the days before and after it. Tap the date: back to today.
+6. **Today returns (item 1).** Gary: Days, then "Today": today's captures, as in step 2.
+7. **Airplane mode (item 5).** Gary: airplane mode on (stamp OFFLINE). Swipe travelboard away from recent apps and reopen. Captures, Days: the list shows as before. Tap an earlier day: it opens. Days again, then Capture, type `Days offline`, Save: you are back on today's captures with the new row (QUEUED). Days: today's row counts it. Airplane mode off; the stamp reads SYNCED within about 30 s and today's row stays the same.
+8. **Light and dark, both phones (item 6).** Each phone: Settings, Dark; Captures, Days: the night page, today's date in the lighter terracotta, hairlines between days, all readable. Settings, Light (or Auto, as you like) and look again. On a phone narrower than the Pixel, the date may sit on its own line with the city line, Days and the arrows under it; it should never break over two lines.
+
+Report the times, the counts you compared in step 3, and anything that looks wrong. Claude then checks the rows on the server.
+
+### Open items (26/10/26, 0.15.0)
+
+1. Device steps 1 to 8 above, both phones, by 05/11/26.
+2. `fn.test.cjs` not run this session (no Deno here; a downloaded binary was refused). `tb-journal` is unchanged, so its 26/10/26 pass stands; run it in the next session with Deno available.
+3. Intermittent headless checks, seen once each in 13 runs: m1 A14 "offline edit queued" (also on unchanged 0.14.3 code) and m13 N11 (failed map lookup). Both read state before the app has settled; neither touches 7D. Left as they are for the freeze; worth an `until()` wait after Bangkok.
+
 ## M1.3 Look and place (SPEC.md 7C)
 
 **Status 26/10/26 2318 hrs: the combined two-phone run passed on 0.14.2, and the three fixes from it passed their re-run on 0.14.3 on both phones. 7C.7 items 1 to 3, 6a and 7 pass on the phones, items 5, 8 and 9 automated. Only step 9 (named place, 7C.7 items 4 and 6) is left before the 05/11/26 cut-off; Gary runs it 27/10/26.** Migration 0009 applied, `tb-journal` v6 deployed (unchanged since).
@@ -35,7 +87,7 @@ From Gary's report (26/10/26 2232 hrs) and the server rows. Times SGT.
 
 | Step | Time | Result |
 |---|---|---|
-| 10 | | PASS. Eric installed from the link and opened from the icon. His Gboard voice typing would not start (mic flashes, nothing happens): a phone and Gboard setting, not travelboard; no app change. |
+| 10 | | PASS. Eric installed from the link and opened from the icon. His Gboard voice typing at first would not start (mic flashes, nothing happens). Fixed 26/10/26 (Gary, 2346 hrs): the cause was Gboard's microphone permission; set to "Allow only while using the app", dictation works, in airplane mode too, on his phone. A phone setting, not travelboard; no app change. |
 | 11 to 13 (7B item 1) | 2159 | PASS. Eric signed in; `Eric before linking` and `Gary before linking` at 2159, each on its own phone only, both unshared then. |
 | 14 (7B item 2) | 2201 | PASS with a finding. Links correctly (Gary to Eric 2201), but each phone showed the other's add only after Sync now or a restart; Gary's open Settings kept "You added Eric. Waiting for Eric to add you" until a restart. Fixed in 0.14.3 (idle sync, sync on opening Settings). |
 | 15 (7B item 3) | 2203, 2205 | PASS with findings. Share with Eric on by default; the shared capture reached Eric only after he tapped Sync now (fixed by the idle sync). On both phones the keyboard covered the Share with switch (fixed in 0.14.3). Test texts: the photo capture is `Share with Eric` (2205, photo); a second `Share with Eric` at 2203 has no photo and stays shared. |
@@ -269,7 +321,7 @@ Known, by design or minor
 11. Android's home-screen icon changes when Chrome next checks the manifest, which can take up to a day and may ask first. The manifest paths are unchanged, so nothing else is needed.
 12. The journal field is hidden on the day list (nothing to write into there); tap a day or Today to write.
 13. Catalogue 26/10/26: outside 518, `493804029b51` (unchanged since 0009); travelboard's own 61 rows, `940b912f7a18`. Live: 2 people, both `journal_prompt_custom` null; links live both ways.
-16. Eric's Gboard voice typing does not start (mic flashes): his phone's Gboard settings (on-device English pack, microphone permission for Gboard). Not travelboard; worth fixing before Bangkok.
+16. Closed 26/10/26 (Gary, 2346 hrs): Eric's Gboard voice typing works, in airplane mode too. The cause was Gboard's microphone permission; set to "Allow only while using the app". Not travelboard.
 17. The idle sync costs one small sync a minute while the app is open and visible (a reachability probe and the usual pulls); nothing runs while it is in the background.
 14. Running the checks here: as M1.2 item 16 and session A; Deno 2.9.4 from the GitHub release zip; the icon generator needs the headless dev dependency (`npm install` in `checks/headless`).
 15. M1.2 open items below: 1, 3 and 4 wait on the combined run; 2, 5 and 11 are closed by session B.

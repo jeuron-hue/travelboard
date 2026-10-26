@@ -24,6 +24,9 @@
 //   prompts/<key>.md; Theme Light, Dark and Auto; the option B icon source drawn in paths only
 // - 0.14.3: 60 s idle sync, Settings syncs on open, password notices cleared at sign-in and
 //   sign-out, the capture sheet and footer follow the visual viewport (keyboard)
+// - M1.4 (0.15.0): the Captures day bar's Days link and day list, built from IndexedDB only;
+//   counts with singular forms and photos left out when none; places a person named only;
+//   a row tap stops following today, Today follows it again; the narrow-screen day bar
 'use strict';
 
 const fs = require('fs');
@@ -277,6 +280,28 @@ if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(
     '0.14.3: Sign out and sign-in clear the password notices');
   check(/interactive-widget=resizes-content/.test(trip) && /visualViewport\.addEventListener\('resize', fitViewport\)/.test(trip) && /height: var\(--vv-h, 100%\)/.test(trip) && /bottom: var\(--kb, 0px\)/.test(trip),
     '0.14.3: capture sheet sized to the visual viewport, footer lifted by the keyboard');
+}
+
+// ---------- M1.4 Capture days (SPEC.md 7D; 26/10/26) ----------
+{
+  const trip = read('trip.html');
+  const fnBody = (name) => { const i = trip.indexOf(`function ${name}(`); if (i < 0) return ''; const j = trip.indexOf('\n}\n', i); return trip.slice(i, j); };
+  const days = fnBody('renderCaptureDays'), places = fnBody('dayPlaces');
+  check(/<button class="link" id="day-days" type="button">Days<\/button>\s*<button class="arrow" id="day-prev"/.test(trip) && /<ul class="days" id="day-list" hidden><\/ul>\s*<ul class="records" id="records">/.test(trip),
+    'M1.4: Days link beside the arrows; the day list in place of the records');
+  check(/if \(capView === 'days'\) return renderCaptureDays\(seq, live, theirs, today\);/.test(trip) && /const live = \(await idb\.all\('captures'\)\)\.filter\(\(r\) => !r\.deleted_at\);/.test(trip)
+    && /theirs\.filter\(\(r\) => !r\.deleted_at\)/.test(days) && /add\(today\);/.test(days) && /\.sort\(\)\.reverse\(\)/.test(days),
+    'M1.4: the list holds every day with a live capture, own or shared, plus today, newest first; soft-deleted rows not counted');
+  check(!!days && !/\bsb\.|fetch\(/.test(days) && !!places && !/\bsb\.|fetch\(/.test(places), 'M1.4: the list is built from IndexedDB only (no RPC, no fetch)');
+  check(/`\$\{x\.c\} capture\$\{x\.c === 1 \? '' : 's'\}` \+ \(x\.p \? `, \$\{x\.p\} photo\$\{x\.p === 1 \? '' : 's'\}` : ''\)/.test(days)
+    && /if \(pics\.has\(r\.id\) \|\| r\.photo_path\) x\.p\+\+;/.test(days), 'M1.4: "N captures, M photos", singular forms, photos left out when none, photos as the day view counts them');
+  check(/if \(!hasPlaceName\(r\)\) continue;/.test(places) && /if \(out\.length === 2\) break;/.test(places) && /toLowerCase\(\)/.test(places) && !/coordsText|placeText|\.lat\b/.test(places),
+    'M1.4: places from named captures only, first two distinct in time order, never coordinates');
+  check(/capView = 'day'; viewDay = row\.dataset\.day; followToday = false;/.test(trip) && /else \{ capView = 'day'; followToday = true; \}/.test(trip)
+    && /followToday = true;\n      capView = 'day';/.test(trip), 'M1.4: a row tap stops following today; Today and a new capture saved return to today');
+  check(/@media \(max-width: 401\.98px\) \{\n    #daybar \{ display: grid;/.test(trip), 'M1.4: below 402 px the date takes the full width (never two lines)');
+  const pkg = JSON.parse(read('checks/headless/package.json'));
+  check(exists('checks/headless/m14.test.cjs') && /node m14\.test\.cjs/.test(pkg.scripts.test), 'M1.4: headless suite m14 exists and runs with the others');
 }
 
 // ---------- keep-alive workflow (SPEC.md 6.8 step 5) ----------

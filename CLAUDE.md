@@ -8,7 +8,7 @@ travelboard is Gary Chan's personal travel app: a phone PWA (`trip.html`) for ca
 
 ## Current module
 
-**M1.3 Look and place** (`SPEC.md` 7C), in two sessions (7C.6), from the approved mockup (7C.8). Gary's go 24/10/26. M1.2 Two travellers (7B) is built; its two-phone test runs on the M1.3 design. Both pass on the phones by 05/11/26; freeze 06/11/26. If either is slipping, stop and tell Gary. M0 done 04/10/26, M1 done 10/10/26, M2 done 23/10/26, the move and M1.1 done 24/10/26. The shakedown (26/10 to 06/11) is fixes only apart from finishing M1.2 and M1.3. Do not start M3 or any later module until Gary says go.
+**M1.3 Look and place** (`SPEC.md` 7C), in two sessions (7C.6), from the approved mockup (7C.8). Gary's go 24/10/26. M1.2 Two travellers (7B) is built; its two-phone test runs on the M1.3 design. Both pass on the phones by 05/11/26; freeze 06/11/26. If either is slipping, stop and tell Gary. M0 done 04/10/26, M1 done 10/10/26, M2 done 23/10/26, the move and M1.1 done 24/10/26. **M1.4 Capture days** (`SPEC.md` 7D, client 0.15.0) added 26/10/26 on Gary's decision; it passes on both phones by 05/11/26 too. The shakedown (26/10 to 06/11) is fixes only apart from finishing M1.2, M1.3 and M1.4. Do not start M3 or any later module until Gary says go.
 
 ## Hard rules
 

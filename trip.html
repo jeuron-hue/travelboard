@@ -35,8 +35,20 @@
     sheet, no kind toggle; place names typed or from chips (own names within 75 m offline, the
     OpenStreetMap name online, cached), never filled in automatically; journal as a notebook
     page with an inline field at the foot; Settings sheet; prompt editor; no browser dialogs.
+  - M1.4 Capture days (SPEC.md 7D): Days on the Captures day bar lists every day with a live
+    capture, own or shared, plus today, with its counts and named places; a tap opens the day.
 
   Change log (newest first)
+  - 26/10/26 0.15.0. M1.4 Capture days (SPEC.md 7D, Gary's decision 26/10/26). A Days link beside
+    the arrows on the Captures day bar shows the day list in place of the records and reads
+    Today; Today returns to today's day view. The list: every local day with a live capture on
+    the phone (own and partner rows, as the day view) plus today, newest first, in the journal
+    day list's look; each row "N captures, M photos" (photos left out when none), then the first
+    one or two distinct place names a person set, in time order, never coordinates. A tap opens
+    that day and stops following today, as the arrows do. Built from IndexedDB in renderCaptures,
+    so it works offline and is redrawn after every sync. Saving a new capture from the list
+    returns to today's day view. A day render overtaken by a newer one no longer writes the
+    day bar. No migration, no RPC change.
   - 26/10/26 0.14.3. Fixes from the two-phone run (Gary's approval 26/10/26). Idle sync every 60 s
     while visible, whatever the queue, so link changes and shared captures arrive without Sync
     now (SPEC.md 6.6); opening Settings syncs too and the sheet re-renders when it ends (7B.3).
@@ -302,6 +314,18 @@
     border: 0; background: transparent; cursor: pointer; color: var(--ink);
   }
   .arrow:disabled { color: var(--muted); opacity: 0.5; cursor: default; }
+  .arrow[hidden] { display: none; }
+  .dayhead .arrows { align-items: center; }
+  .dayhead .arrows .link { padding: 0 6px; }
+  /* Narrower than 402 px the widest date (228.6 px at 34 px) no longer fits beside Days and the
+     arrows: the date takes the full width, the city line and the controls sit under it (7D). */
+  @media (max-width: 401.98px) {
+    #daybar { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; row-gap: 0; }
+    #daybar .titles { display: contents; }
+    #daybar h1 { grid-column: 1 / -1; }
+    #day-sub { grid-row: 2; grid-column: 1; }
+    #daybar .arrows { grid-row: 2; grid-column: 2; }
+  }
   .arrow svg, .xbtn svg { pointer-events: none; }
 
   /* --foot-h: the footer's height, kept current by a ResizeObserver (the journal field grows). */
@@ -619,6 +643,9 @@
   .dayrow .when { display: inline; font-family: var(--serif); font-weight: 600; font-size: 20px; }
   .dayrow .when.today { color: var(--accent); }
   .dayrow .line2 { color: var(--muted); font-size: 14px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Capture days (SPEC.md 7D): the journal day list's look, inside the Captures view's own gutter. */
+  #captures-view > ul.days { padding: 0 4px 0 8px; }
+  .dayrow .places { margin-top: 2px; font-size: 15px; font-weight: 500; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .spacer { flex: 1; }
   /* The inline field at the foot (7C.2): grows with the text, Send beside it. */
   .jinput { display: flex; align-items: flex-end; gap: 8px; }
@@ -650,6 +677,7 @@
     <span id="day-sub"></span>
   </div>
   <div class="arrows">
+    <button class="link" id="day-days" type="button">Days</button>
     <button class="arrow" id="day-prev" type="button" aria-label="Earlier day with captures"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 4 6.5 10l6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     <button class="arrow" id="day-next" type="button" aria-label="Later day with captures"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
   </div>
@@ -668,6 +696,7 @@
 
 <main>
   <div class="list" id="captures-view">
+    <ul class="days" id="day-list" hidden></ul>
     <ul class="records" id="records"></ul>
     <p class="hint" id="empty" hidden></p>
   </div>
@@ -900,7 +929,7 @@
 'use strict';
 
 // Bump together with CACHE_VERSION in sw.js on every release.
-const APP_VERSION = '0.14.3';     // 0.<minor>.<patch> from 0.13.0 (was 13), Gary 24/10/26
+const APP_VERSION = '0.15.0';     // 0.<minor>.<patch> from 0.13.0 (was 13), Gary 24/10/26
 
 const PROJECT_REF = 'nnnnonspfljdkrxstslw';           // Supabase project travelboard (SPEC.md D3, 6.8)
 const SUPABASE_URL = 'https://' + PROJECT_REF + '.supabase.co';
@@ -1653,6 +1682,7 @@ async function saveCapture() {
         t.objectStore('drafts').delete('new');
       });
       followToday = true;
+      capView = 'day';                         // from the day list too (SPEC.md 7D)
       await closeCapture('saved');
       await render();
       requestGps(row.id);
@@ -1835,6 +1865,7 @@ async function exportCaptures() {
 let viewDay = null;
 let thumbUrls = [];                 // object URLs of the row thumbnails, revoked on the next render
 let followToday = true;
+let capView = 'day';                // 'day' | 'days': the day's records or the day list (SPEC.md 7D)
 
 // Renders the tab on screen, then the status pill. IndexedDB only.
 async function render() {
@@ -1850,6 +1881,8 @@ async function renderCaptures() {
   const today = todayLocal();
   if (followToday || !viewDay) viewDay = today;
   if (viewDay === today) followToday = true;
+  if (capView === 'days') return renderCaptureDays(seq, live, theirs, today);
+  if (seq !== capRenderSeq) return;   // a newer render (the list, or another day) owns the bar
 
   // Arrows step to the nearest day with captures, own or shared; today is always reachable.
   const days = [...new Set(live.concat(theirs).map((r) => r.local_date).concat([today]))].sort();
@@ -1939,6 +1972,79 @@ async function renderCaptures() {
   $('records').replaceChildren(...items);
   $('empty').textContent = viewDay === today ? 'Nothing captured today yet.' : 'No captures on this day.';
   $('empty').hidden = rows.length > 0;
+  showCaptureDays(false);
+}
+
+// The day bar and the view for the day list (true) or the day's records (false).
+function showCaptureDays(on) {
+  $('day-list').hidden = !on;
+  $('records').hidden = on;
+  if (on) $('empty').hidden = true;
+  $('day-prev').hidden = on;
+  $('day-next').hidden = on;
+  $('day-sub').hidden = on;
+  $('day-days').textContent = on ? 'Today' : 'Days';
+  $('day-days').setAttribute('aria-label', on ? "Back to today's captures" : 'List of days with captures');
+}
+
+// Capture days (SPEC.md 7D): every local day with a live capture on the phone, own or shared
+// with you, plus today; newest first. Each row: the date, the counts as the day view shows them,
+// then the first one or two distinct place names a person set, in time order (never coordinates).
+// Built off-screen and written only by the newest render, like the day view.
+async function renderCaptureDays(seq, live, theirs, today) {
+  const photoIds = new Set(await idb.keys('photos'));
+  const pphotoIds = new Set(await idb.keys('pphotos'));
+  const days = new Map();
+  const add = (d) => { if (!days.has(d)) days.set(d, { c: 0, p: 0, rows: [] }); return days.get(d); };
+  add(today);
+  for (const [rows, pics] of [[live, photoIds], [theirs.filter((r) => !r.deleted_at), pphotoIds]]) {
+    for (const r of rows) {
+      const x = add(r.local_date);
+      x.c++;
+      if (pics.has(r.id) || r.photo_path) x.p++;
+      x.rows.push(r);
+    }
+  }
+  const items = [];
+  for (const d of [...days.keys()].sort().reverse()) {
+    const x = days.get(d);
+    const li = el('li');
+    const btn = el('button', 'row dayrow');
+    btn.type = 'button';
+    btn.dataset.day = d;
+    const l1 = el('div', 'line1');
+    l1.append(el('span', 'when' + (d === today ? ' today' : ''), fmtDayLabel(d)));
+    const counts = x.c ? `${x.c} capture${x.c === 1 ? '' : 's'}` + (x.p ? `, ${x.p} photo${x.p === 1 ? '' : 's'}` : '') : 'No captures yet';
+    btn.append(l1, el('div', 'line2', counts));
+    const places = dayPlaces(x.rows);
+    if (places.length) btn.append(el('div', 'places', places.join(', ')));
+    li.append(btn);
+    items.push(li);
+  }
+  if (seq !== capRenderSeq) return;
+  for (const u of thumbUrls) URL.revokeObjectURL(u);
+  thumbUrls = [];
+  $('records').replaceChildren();
+  $('day-label').textContent = 'Capture days';
+  $('day-label').classList.remove('today');
+  $('day-list').replaceChildren(...items);
+  showCaptureDays(true);
+}
+
+// The first one or two distinct place names a person set on these captures, earliest first.
+// Names differing only in case count as one (as the chips, SPEC.md 7C.4).
+function dayPlaces(rows) {
+  const out = [], seen = new Set();
+  const byTime = rows.slice().sort((a, b) => (a.captured_at < b.captured_at ? -1 : a.captured_at > b.captured_at ? 1 : a.id < b.id ? -1 : 1));
+  for (const r of byTime) {
+    if (!hasPlaceName(r)) continue;
+    const name = r.place_name.trim(), key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+    if (out.length === 2) break;
+  }
+  return out;
 }
 
 // A photo print's tilt, steady per capture: 2, -2, 1.5 or -1.5 degrees (SPEC.md 7C.8).
@@ -3211,7 +3317,21 @@ $('day-next').addEventListener('click', () => {
   const d = $('day-next').dataset.day;
   if (d) { viewDay = d; followToday = false; render(); }
 });
-$('day-label').addEventListener('click', () => { followToday = true; render(); });
+$('day-label').addEventListener('click', () => { if (capView === 'day') { followToday = true; render(); } });
+// Days opens the day list; on the list the link reads Today and returns to today (SPEC.md 7D).
+$('day-days').addEventListener('click', () => {
+  if (capView === 'day') capView = 'days';
+  else { capView = 'day'; followToday = true; }
+  document.querySelector('main').scrollTop = 0;
+  render();
+});
+$('day-list').addEventListener('click', (ev) => {
+  const row = ev.target.closest('.dayrow');
+  if (!row || cap.open) return;
+  capView = 'day'; viewDay = row.dataset.day; followToday = false;
+  document.querySelector('main').scrollTop = 0;
+  render();
+});
 $('export').addEventListener('click', () => { exportCaptures().catch(fail('Export failed')); });
 // "Today" rolls over at 0400 while the app sits open.
 setInterval(() => {

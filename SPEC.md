@@ -1,7 +1,7 @@
 # travelboard: specification
 
 Owner: Gary Chan. Repo: `jeuron-hue/travelboard` (public). Written 04/10/26.
-Status: M0 Foundation done 04/10/26. M1 Capture done 10/10/26. M2 Journal done 23/10/26. Move to own project (6.8) done 24/10/26. M1.1 Photo capture done 24/10/26. M1.2 Two travellers built 24/10/26; its two-phone test waits for M1.3. M1.3 Look and place (7C) from 24/10/26: sessions A and B built 24/10/26, phone test to run. Both pass on the phones by 05/11/26; freeze 06/11/26.
+Status: M0 Foundation done 04/10/26. M1 Capture done 10/10/26. M2 Journal done 23/10/26. Move to own project (6.8) done 24/10/26. M1.1 Photo capture done 24/10/26. M1.2 Two travellers built 24/10/26; its two-phone test runs with M1.3's. M1.3 Look and place (7C) from 24/10/26: sessions A and B built 24/10/26; the combined M1.2 and M1.3 phone run passed 26/10/26 apart from step 9 (named place). M1.4 Capture days (7D) added 26/10/26, client 0.15.0. All pass on the phones by 05/11/26; freeze 06/11/26.
 
 This file is the source of record for what travelboard is and how it is built. M0, M1 and M2 are specified in full because they ship before Bangkok (09/11/26). M3 to M8 are skeletons, to be expanded one at a time after Bangkok using the friction log from that trip.
 
@@ -115,7 +115,8 @@ travelboard/
     smoke.sql           RPC and grant smoke tests
     catalogue.sql       catalogue snapshot; catalogue_scoped.sql lists travelboard's objects, the rest as a count and hash
     headless/           Playwright tests of trip.html against an RPC mock (dev only, never shipped):
-                        m1, m2, m11, m12 (two phones on one mock), m13 (place names, OSM mock), fn (tb-journal under Deno)
+                        m1, m2, m11, m12 (two phones on one mock), m13 (place names, OSM mock), m14 (capture days),
+                        fn (tb-journal under Deno)
   TESTS.md              manual test scripts, run on the Pixel
   SPEC.md               this file
   CLAUDE.md             standing brief for Claude Code
@@ -142,7 +143,8 @@ travelboard/
 | M1.1 Photo capture | Photo on a capture (camera or gallery), offline first, Storage bucket `tb-photos`, photos in the journal | 24/10 to 27/10 | Section 7A acceptance passes on the Pixel by 27/10, or it moves to after Bangkok |
 | M1.2 Two travellers | Eric's login, separate by default, add each other, per-capture share, private journals (7B) | built 24/10; device test with M1.3, by 05/11 | Section 7B acceptance passes on both phones by 05/11, or it moves to after Bangkok |
 | M1.3 Look and place | Field-notebook redesign of every screen, place names with chips, editable journal prompt (7C) | 24/10 to 04/11, two sessions | Section 7C acceptance passes on both phones by 05/11 |
-| Shakedown | Daily use in Singapore. Fixes only, no features (the move, M1.1, M1.2 and M1.3 are the agreed exceptions) | 26/10 to 06/11 | Freeze on 06/11 |
+| M1.4 Capture days | A day list on the Captures tab, like the journal's (7D) | 26/10 to 05/11, one release | Section 7D acceptance passes on both phones by 05/11 |
+| Shakedown | Daily use in Singapore. Fixes only, no features (the move, M1.1, M1.2, M1.3 and M1.4 are the agreed exceptions) | 26/10 to 06/11 | Freeze on 06/11 |
 | Bangkok pilot | Use it for real, keep a friction log | 09/11 to 12/11 | Friction log written |
 | M3 Trip model + planner | Trips, days, items, places, hours validation | after Bangkok | skeleton below |
 | M4 Phone day view + lookup | Morning pre-fetch, cached lookup, live query | after M3 | skeleton below |
@@ -545,6 +547,33 @@ Text pairs pass WCAG AA in both themes (checked 24/10/26). Theme choice Light, D
 
 **Shapes and sizes:** side gutter 20 px (footer 16 px); sync pill as a stamp (1.5 px border, radius 4 px, rotated -2deg, caps 12 px); primary buttons 54 px high, radius 10 px; chips 36 px high, radius 18 px (own names solid blue, map suggestion dashed accent); photo prints with a 4 to 5 px `--print` border, a small shadow and a 1.5 to 2 deg tilt; Settings as a bottom sheet with a grabber, radius 14 px; rows separated by hairlines, no cards; day rows: 52 px time column, 26 px spine column with a 9 px dot (accent own, blue partner).
 
+## 7D. M1.4 Capture days (full)
+
+Added 26/10/26 on Gary's decision, inside the shakedown and before the freeze (06/11/26). Client only, release 0.15.0: no migration, no RPC change, no `tb-journal` change. Nothing else goes into this release.
+
+### 7D.1 Purpose
+
+On the Captures tab the arrows step one day at a time. A list of days, like the journal's Days list (8.5), lets Gary jump straight to a day.
+
+### 7D.2 Client
+
+- **Day bar:** a "Days" link beside the arrows, in the style of the journal's Days link. Tapping it shows the day list in place of the day's records; the title reads "Capture days", the city line and the arrows hide while the list is up, and the link reads "Today". Tapping "Today" returns to today's day view, following today again. In the day view the arrows and "tap the date for today" work as before (7.1). On a screen narrower than 402 px, where the widest date (228.6 px in the 34 px serif) no longer fits beside Days and the arrows, the date takes the full width and the city line, Days and the arrows sit under it, so the date never breaks over two lines.
+- **Day list:** every local day with at least one live capture on the phone, own or a partner's shared capture (the rows the day view shows, 7B.3), plus today; newest first. The look of the journal day list (7C.2, 7C.8): serif date on hairlines, today's date in the accent, light and dark.
+- **Each row:** the date; then "N captures, M photos" ("1 capture", "1 photo"; ", M photos" left out when there are none; today with no captures reads "No captures yet"); then the first one or two distinct place names of the day in time order (earliest first), joined by a comma. Only names a person set count (`place_name`, typed or accepted from a chip, 7C.4); coordinates and "no GPS" never show, so a day with no named place has no place line. Names differing only in case count as one. Partner captures count, and so do their names. A photo counts as the day view shows one: a photo on the phone or a `photo_path` on the capture.
+- **Tap a row:** the day view for that day, list closed. As with the arrows, the view stops following today (unless the row is today).
+- **Source:** IndexedDB only (rule 6), so the list works offline and is redrawn after every sync, the 60 s idle sync included (6.6). Soft-deleted captures do not count.
+- Saving a new capture with the list up returns to today's day view, as a save already does from an earlier day (7.1). The list stays up across a switch to Journal and back, as the journal's own list does.
+
+### 7D.3 M1.4 acceptance
+
+1. Days on the Captures tab opens the list and the link reads Today; Today returns to today's day view; the arrows and the date tap work as before.
+2. Each row's counts match that day's view: singular forms, photos left out when none, partner captures counted, soft-deleted captures not.
+3. The place line holds the first one or two distinct named places in time order, never coordinates, and is absent on a day with no named place.
+4. Tapping a row opens that day; the arrows step on from there.
+5. In airplane mode the list shows and opens days; it updates after a sync.
+6. Light and dark, on both phones.
+7. `checks/static.cjs`, `checks/smoke.sql` (regression run), `fn.test.cjs` and every headless suite pass; a new suite `m14.test.cjs` covers items 1 to 5.
+
 ---
 
 ## 8. M2 Journal with Claude (full)
@@ -705,6 +734,7 @@ Each skeleton is expanded to full spec before its module starts.
 
 ## 12. Change log
 
+- 26/10/26 Status, 4.2, 5, new section 7D: M1.4 Capture days, Gary's decision 26/10/26. A Days link on the Captures day bar opens a list of every day with a live capture (own or shared with you) plus today, newest first, in the journal day list's look; each row has the counts of captures and photos and the first one or two place names a person set; tapping a row opens that day. IndexedDB only. Client 0.15.0; no migration. Headless suite `m14.test.cjs`. The shakedown's agreed exceptions gain M1.4.
 - 26/10/26 6.6, 7B.3, 7C.2: fixes from the two-phone run, approved by Gary 26/10/26. Client 0.14.3. 6.6: a 60 s idle sync while visible, whatever the queue, stopped when hidden; the 30 s retry unchanged. 7B.3: opening Settings starts a sync and the sheet re-renders when it ends (on the phone the sheet showed the last-synced link state; headless, Sync now with the sheet open already updated it); the password notice is cleared at sign-out and sign-in. 7C.2: with the keyboard up, the capture and edit sheet is sized to the visual viewport (works whether Chrome resizes the page or only the visual viewport), the footer is lifted by what the keyboard covers, the ruled area gives way first and a focused field scrolls into view.
 - 24/10/26 7C.8: Gary's decision. Dark `--crit` from `#e5534b` to `#EC5F86`, a crimson apart from the dark accent `#E07A55` (hue 343 against 16); 5.4:1 on the night page, 4.8:1 on the sheet and on `--crit-bg`. A darker red would fail contrast on the night page, so the change is in hue. Client 0.14.2.
 - 24/10/26 7C.4, 7C.8: Gary's decisions on the two session A questions. 7C.4 reworded: 0009 replaces `tb_capture_upsert` only; `tb_captures_upsert` is a pass-through and carries `place_name` unchanged (as built). Light `--crit` deepened from `#b42318` to `#8A1538` (crimson, 8.1:1 on the paper, 7.5:1 on `--crit-bg`), so errors stand apart from the terracotta accent; dark unchanged. Client 0.14.1.
