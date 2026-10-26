@@ -14,14 +14,14 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 | Check | Result | Evidence |
 |---|---|---|
 | `checks/static.cjs` | PASS, 118 of 118 | Adds 4: 60 s idle sync stopped when hidden; Settings syncs on open; sign-in and sign-out clear the password notices; capture sheet and footer follow the visual viewport. |
-| `checks/smoke.sql` | SMOKE_RESULT | Live project `travelboard` (ref checked first), one rolled-back transaction. Regression run; no migration. |
+| `checks/smoke.sql` | PASS, 165 of 165 | Live project `travelboard` (ref checked first), one rolled-back transaction. Regression run; no migration. |
 | `fn.test.cjs` | PASS, 62 of 62 | `tb-journal` unchanged. |
 | `m1`, `m2`, `m11` | PASS, 107, 80, 59 of each, two runs | Unchanged. The harness turns the idle sync off (`window.__tbIdleSyncMs = 0`) so request counts stay exact. |
 | `m12.test.cjs` | PASS, 64 of 64, two runs | New P7: Sign out clears "Password changed" and the error line; a notice still on the sheet goes at the next sign-in. New Q1 to Q6: opening Settings starts a sync and shows the server's link state; the other side's link changed on the server, Sync now with the sheet open updates the row in place (the sheet stays open); the idle sync is 60 s; with it on (shortened to 0.7 s) the other side's change reaches Gary's open sheet, and a capture Eric shares reaches Gary's day view, with no Sync now; hidden stops it, visible starts it. |
 | `m13.test.cjs` | PASS, 113 of 113, two runs | New N25, light and dark: a viewport cut from 860 to 420 px stands in for the keyboard when Chrome resizes the page; the new and edit sheets fit the 420 px, Save and Photo in view, Share with reached by scrolling inside the sheet, the ruled area shrinks first; the journal field and Send stay above it. A fake visual viewport of 420 px stands in for the other case (only the visible part shrinks): the sheet is sized to it, the footer is lifted by 440 px, field and Send above the keyboard; when it goes the layout returns. |
 | Server reads 26/10/26 | Consistent with the run | Ref `nnnnonspfljdkrxstslw` (travelboard). Captures, links, prompts and journal as Gary's check (below). Storage: 10 objects in `tb-photos`; the run's one photo (2205, Gary's folder, 152,167 bytes) belongs to the now-unshared capture, and as Eric `tb_can_read_photo` gives false and the select policy shows him nothing in Gary's folder (7B.5 item 7, live). Catalogue (scoped): OUTSIDE 518, `493804029b51`, unchanged since 0009; travelboard's own objects 61 rows, hash `940b912f7a18` (new baseline for the next migration). |
 | Gary's `auth.users.updated_at` 26/10 2158:53 | Token refresh | The same second a refresh token was issued for Gary and his session row was updated; `last_sign_in_at` is still 23/10 2340; no email, phone, recovery or reauthentication change; the auth audit log holds no entries for the evening. Not a password change. |
-| Deploy 0.14.3 | DEPLOY_RESULT | |
+| Deploy 0.14.3 | PASS | `main` at `8c2440e`; Pages build succeeded. Live `sw.js` reads `const CACHE_VERSION = '0.14.3';` (Last-Modified 26/10/26 2239 hrs SGT), fetched through Apify. |
 
 How the fixes were made:
 - Idle sync: its own 60 s interval beside the 30 s retry, started at boot and on becoming visible, stopped when hidden; `sync()` keeps one run at a time.
