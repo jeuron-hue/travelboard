@@ -20,7 +20,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 | `m14.test.cjs` (new) | PASS, 34 of 34, two runs | Two clean runs on the final code (seven passing runs in the session). Groups below. |
 | Found while building | Fixed | A day-view render that started before Days was tapped could write the date into the title after the list had written "Capture days". `renderCaptures` now stops before touching the bar when a newer render has started. |
 | Visual | Checked | Headless screenshots at 412, 401 and 360 px, light and dark: day bar with Days, the list, today in the accent, hairlines. The widest date in 2026 and 2027 ("Mon 05/01/26") is 228.6 px; with Days the bar needs 402 px, so the Pixel (412) keeps one line with 10 px spare and narrower phones get the two-row bar. |
-| Deploy 0.15.0 | @@DEPLOY@@ | |
+| Deploy 0.15.0 | PASS | `main` at `e429c6b`; Pages build and deploy succeeded. Live `sw.js` reads `const CACHE_VERSION = '0.15.0';` (Last-Modified 27/10/26 0006 hrs SGT), fetched through Apify. |
 
 Headless groups (`m14.test.cjs`, Gary's and Eric's phones on one mock, linked; seeds on the server for yesterday and the three days before):
 
