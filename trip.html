@@ -37,6 +37,13 @@
     page with an inline field at the foot; Settings sheet; prompt editor; no browser dialogs.
 
   Change log (newest first)
+  - 26/10/26 0.14.3. Fixes from the two-phone run (Gary's approval 26/10/26). Idle sync every 60 s
+    while visible, whatever the queue, so link changes and shared captures arrive without Sync
+    now (SPEC.md 6.6); opening Settings syncs too and the sheet re-renders when it ends (7B.3).
+    Keyboard: the capture and edit sheet is sized to the visual viewport, the footer is lifted
+    by what the keyboard covers, the ruled area shrinks first and a focused field scrolls into
+    view, so Share with, Photo and Save stay in view or a scroll away (7C). Sign-in and sign-out
+    clear the password notices (7B.3).
   - 24/10/26 0.14.2. Dark --crit from #e5534b to #EC5F86, a crimson (Gary's decision), apart from
     the dark accent #E07A55; still AA on the night page, the sheet and the error tint. No other change.
   - 24/10/26 0.14.1. Light --crit from #b42318 to #8A1538, a deep crimson (Gary's decision), so
@@ -346,10 +353,12 @@
   .print img.thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
   span.thumb { font-size: 11px; color: var(--print); }
 
-  /* Capture and edit: a fixed layer over the whole app, a paper sheet. With
-     interactive-widget=resizes-content it shrinks above the keyboard. */
+  /* Capture and edit: a fixed layer over the whole app, a paper sheet. It is sized to the
+     visible viewport (--vv-top, --vv-h from fitViewport), so it ends above the keyboard whether
+     Chrome resizes the page for the keyboard (interactive-widget=resizes-content) or only the
+     visual viewport; the sheet scrolls and the bar with Photo and Save stays in view (0.14.3). */
   #cap {
-    position: fixed; inset: 0; z-index: 5;
+    position: fixed; left: 0; right: 0; top: var(--vv-top, 0px); height: var(--vv-h, 100%); z-index: 5;
     display: flex; flex-direction: column;
     background: var(--ground);
   }
@@ -402,12 +411,14 @@
   #cap-photo .side { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   #cap-photo-info { font-size: 13px; color: var(--muted); }
   #cap-photo-remove { text-decoration: none; color: var(--muted); font-weight: 400; text-align: left; }
+  /* With the keyboard up the ruled area gives way first, so the switches stay in view. */
   #cap-body {
     flex: 1; min-height: 160px; width: 100%; resize: none; border: 0; outline: none;
     padding: 4px 2px 0; font-size: 17px; line-height: 32px; color: var(--ink);
     background: repeating-linear-gradient(to bottom, transparent 0, transparent 31px, var(--ruled) 31px, var(--ruled) 32px);
     background-attachment: local;
   }
+  .kbd #cap-body { min-height: 96px; }
   .switches { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
   .switches[hidden] { display: none; }
   .sw {
@@ -467,7 +478,7 @@
 
   /* Foot: section tabs, then the main button in thumb reach */
   footer {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 2;
+    position: fixed; left: 0; right: 0; bottom: var(--kb, 0px); z-index: 2;
     display: flex; flex-direction: column; gap: 10px;
     padding: 10px 16px calc(env(safe-area-inset-bottom) + 22px);
     border-top: 1px solid var(--line); background: var(--ground);
@@ -889,7 +900,7 @@
 'use strict';
 
 // Bump together with CACHE_VERSION in sw.js on every release.
-const APP_VERSION = '0.14.2';     // 0.<minor>.<patch> from 0.13.0 (was 13), Gary 24/10/26
+const APP_VERSION = '0.14.3';     // 0.<minor>.<patch> from 0.13.0 (was 13), Gary 24/10/26
 
 const PROJECT_REF = 'nnnnonspfljdkrxstslw';           // Supabase project travelboard (SPEC.md D3, 6.8)
 const SUPABASE_URL = 'https://' + PROJECT_REF + '.supabase.co';
@@ -2346,6 +2357,22 @@ function setRetry(wanted) {
   }
 }
 
+// Idle sync (0.14.3): every 60 s while the app is visible, whatever the queue, so the other
+// traveller's link changes and shared captures arrive without Sync now. Stops when hidden,
+// like the retry. One sync at a time still holds (sync() itself). window.__tbIdleSyncMs is a
+// test hook: the headless harness sets 0 (off) so the suites' request counts stay exact.
+const IDLE_SYNC_MS = 60000;
+let idleTimer = null;
+function setIdleSync(on) {
+  const ms = typeof window.__tbIdleSyncMs === 'number' ? window.__tbIdleSyncMs : IDLE_SYNC_MS;
+  if (on && ms > 0 && document.visibilityState === 'visible' && !idleTimer) {
+    idleTimer = setInterval(() => { if (document.visibilityState === 'visible') sync(); }, ms);
+  } else if ((!on || document.visibilityState !== 'visible') && idleTimer) {
+    clearInterval(idleTimer);
+    idleTimer = null;
+  }
+}
+
 let syncing = false, syncAgain = false;
 
 async function session() {
@@ -2928,6 +2955,8 @@ $('signin').addEventListener('submit', async (ev) => {
 });
 
 $('signout').addEventListener('click', async () => {
+  $('pw-ok').textContent = '';
+  $('pw-err').textContent = '';
   if (sb) await sb.auth.signOut({ scope: 'local' }).catch(() => {});
   syncState.phase = 'signin';
   await renderAuth();
@@ -3191,10 +3220,13 @@ setInterval(() => {
     render().then(updateDraftNote);
   }
 }, 60000);
+// Opening Settings also syncs, so TRAVELLING WITH shows the link as it is now; the sheet
+// re-renders when the sync ends (renderAuth in sync's finally) (0.14.3).
 $('status').addEventListener('click', () => {
   for (const id of ['pw-ok', 'pw-err', 'prompt-row-err', 'prompt-row-ok']) $(id).textContent = '';
   renderAuth();
   $('settings').showModal();
+  sync();
 });
 $('close').addEventListener('click', () => $('settings').close());
 // A tap on the dimmed backdrop closes a sheet, as the X does (not the confirm or the editor).
@@ -3214,10 +3246,50 @@ $('sync-now').addEventListener('click', () => sync());
 window.addEventListener('online', () => { syncState.phase = 'checking'; renderStatus(); sync(); });
 window.addEventListener('offline', () => { syncState.phase = 'offline'; renderStatus(); });
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') sync();
-  else setRetry(false);
+  if (document.visibilityState === 'visible') { sync(); setIdleSync(true); }
+  else { setRetry(false); setIdleSync(false); }
 });
-if (sb) sb.auth.onAuthStateChange(() => { renderAuth(); });
+// Sign-in and sign-out clear the password notices, so "Password changed" never outlives the
+// session it was about (0.14.3).
+if (sb) sb.auth.onAuthStateChange((event) => {
+  if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') { $('pw-ok').textContent = ''; $('pw-err').textContent = ''; }
+  renderAuth();
+});
+
+// ---------- the keyboard (0.14.3) ----------
+
+// Chrome for Android either resizes the page for the keyboard (interactive-widget=
+// resizes-content, asked for in the viewport meta) or only shrinks the visual viewport. Both
+// are handled from visualViewport: --vv-top and --vv-h size the capture sheet to what is
+// visible, --kb lifts the footer by whatever the keyboard still covers, and html.kbd marks the
+// keyboard as up (the visible height is well under the tallest seen at this width). A field
+// that takes focus is scrolled into view inside its sheet.
+let vvMax = 0, vvWidth = 0;
+function fitViewport() {
+  const vv = window.visualViewport;
+  const h = vv ? vv.height : window.innerHeight;
+  const top = vv ? vv.offsetTop : 0;
+  const w = vv ? vv.width : window.innerWidth;
+  if (w !== vvWidth) { vvWidth = w; vvMax = 0; }
+  vvMax = Math.max(vvMax, h);
+  const root = document.documentElement.style;
+  root.setProperty('--vv-top', Math.round(top) + 'px');
+  root.setProperty('--vv-h', Math.round(h) + 'px');
+  root.setProperty('--kb', Math.max(0, Math.round(window.innerHeight - h - top)) + 'px');
+  document.documentElement.classList.toggle('kbd', vvMax - h > 120);
+  const f = document.activeElement;
+  if (f && f.closest && f.closest('#cap .sheetpage')) setTimeout(() => f.scrollIntoView({ block: 'nearest' }), 60);
+}
+if (window.visualViewport) {
+  visualViewport.addEventListener('resize', fitViewport);
+  visualViewport.addEventListener('scroll', fitViewport);
+}
+window.addEventListener('resize', fitViewport);
+document.addEventListener('focusin', (ev) => {
+  const t = ev.target;
+  if (t && t.closest && t.closest('#cap .sheetpage')) setTimeout(() => t.scrollIntoView({ block: 'nearest' }), 300);
+});
+fitViewport();
 
 (async function boot() {
   $('s-version').textContent = APP_VERSION;
@@ -3236,6 +3308,7 @@ if (sb) sb.auth.onAuthStateChange(() => { renderAuth(); });
   renderAuth();
   initPersistence().catch(() => { $('s-persist').textContent = 'unknown'; });
   sync();
+  setIdleSync(true);
 })().catch((e) => {
   console.error('boot failed', e);
   $('status-text').textContent = 'storage error';

@@ -436,6 +436,9 @@ const GEO_INIT = `
 async function newContext(browser, { tz, session, swBlock = true, uid = UID }) {
   const ctx = await browser.newContext({ timezoneId: tz, locale: 'en-GB', serviceWorkers: swBlock ? 'block' : 'allow', viewport: { width: 412, height: 860 }, acceptDownloads: true });
   await ctx.addInitScript(GEO_INIT);
+  // The app's 60 s idle sync (0.14.3) is off in the suites so request counts stay exact; a test
+  // turns it on with window.__tbIdleSyncMs and setIdleSync(true).
+  await ctx.addInitScript('window.__tbIdleSyncMs = 0;');
   if (session) await ctx.addInitScript(`try { if (!localStorage.getItem('tb-auth')) localStorage.setItem('tb-auth', ${JSON.stringify(sessionJson(uid))}); } catch (e) {}`);
   return ctx;
 }

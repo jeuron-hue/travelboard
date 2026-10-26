@@ -7,7 +7,62 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ## M1.3 Look and place (SPEC.md 7C)
 
-**Status 24/10/26: sessions A and B built. Client 0.14.2 (0.14.0 plus the crimson error red, light 0.14.1, dark 0.14.2); 0.14.0 (session B): journal page with the inline field, Settings sheet, prompt editor, in-app confirm (no browser dialogs), option B icon. Every automated check passes (below). Next: the combined two-phone run, "Device steps (both phones), 0.14.0" below, which also closes M1.2. Session A's Pixel results on 0.13.0 stand; its step 8 at a named place is step 9 of the combined run.** Migration 0009 applied, `tb-journal` v6 deployed (unchanged in session B).
+**Status 26/10/26: the combined two-phone run on 0.14.2 passed (26/10/26, Gary and Eric): 7C.7 items 1 to 3, 6a and 7 on the phones, items 5, 8 and 9 automated; items 4 and 6 wait on step 9 (named place, 27/10/26). Three fixes from the run are built and live as 0.14.3. Left before the 05/11/26 cut-off: step 9, and the 0.14.3 re-checks on both phones ("Re-run steps, 0.14.3" below).** Migration 0009 applied, `tb-journal` v6 deployed (unchanged since).
+
+### Automated results, 26/10/26 (0.14.3)
+
+| Check | Result | Evidence |
+|---|---|---|
+| `checks/static.cjs` | PASS, 118 of 118 | Adds 4: 60 s idle sync stopped when hidden; Settings syncs on open; sign-in and sign-out clear the password notices; capture sheet and footer follow the visual viewport. |
+| `checks/smoke.sql` | SMOKE_RESULT | Live project `travelboard` (ref checked first), one rolled-back transaction. Regression run; no migration. |
+| `fn.test.cjs` | PASS, 62 of 62 | `tb-journal` unchanged. |
+| `m1`, `m2`, `m11` | PASS, 107, 80, 59 of each, two runs | Unchanged. The harness turns the idle sync off (`window.__tbIdleSyncMs = 0`) so request counts stay exact. |
+| `m12.test.cjs` | PASS, 64 of 64, two runs | New P7: Sign out clears "Password changed" and the error line; a notice still on the sheet goes at the next sign-in. New Q1 to Q6: opening Settings starts a sync and shows the server's link state; the other side's link changed on the server, Sync now with the sheet open updates the row in place (the sheet stays open); the idle sync is 60 s; with it on (shortened to 0.7 s) the other side's change reaches Gary's open sheet, and a capture Eric shares reaches Gary's day view, with no Sync now; hidden stops it, visible starts it. |
+| `m13.test.cjs` | PASS, 113 of 113, two runs | New N25, light and dark: a viewport cut from 860 to 420 px stands in for the keyboard when Chrome resizes the page; the new and edit sheets fit the 420 px, Save and Photo in view, Share with reached by scrolling inside the sheet, the ruled area shrinks first; the journal field and Send stay above it. A fake visual viewport of 420 px stands in for the other case (only the visible part shrinks): the sheet is sized to it, the footer is lifted by 440 px, field and Send above the keyboard; when it goes the layout returns. |
+| Server reads 26/10/26 | Consistent with the run | Ref `nnnnonspfljdkrxstslw` (travelboard). Captures, links, prompts and journal as Gary's check (below). Storage: 10 objects in `tb-photos`; the run's one photo (2205, Gary's folder, 152,167 bytes) belongs to the now-unshared capture, and as Eric `tb_can_read_photo` gives false and the select policy shows him nothing in Gary's folder (7B.5 item 7, live). Catalogue (scoped): OUTSIDE 518, `493804029b51`, unchanged since 0009; travelboard's own objects 61 rows, hash `940b912f7a18` (new baseline for the next migration). |
+| Gary's `auth.users.updated_at` 26/10 2158:53 | Token refresh | The same second a refresh token was issued for Gary and his session row was updated; `last_sign_in_at` is still 23/10 2340; no email, phone, recovery or reauthentication change; the auth audit log holds no entries for the evening. Not a password change. |
+| Deploy 0.14.3 | DEPLOY_RESULT | |
+
+How the fixes were made:
+- Idle sync: its own 60 s interval beside the 30 s retry, started at boot and on becoming visible, stopped when hidden; `sync()` keeps one run at a time.
+- Settings: the stamp's click also calls `sync()`; the sheet already re-renders from `sync()`'s `finally`. Headless, Sync now with the sheet open did update the row before the change (checked against 0.14.2 first), so the phone's stale "Waiting" was the absence of any sync while the queue was empty, which the idle sync and the sync on open now cover.
+- Keyboard: a `visualViewport` listener, kept beside `interactive-widget=resizes-content`. The meta works only where Chrome honours it; the listener sizes the capture sheet to what is visible and lifts the footer by what the keyboard covers in either case, so the fix does not depend on how the installed app treats the meta. With the keyboard up the ruled area's minimum drops from 160 to 96 px, and a focused field in the sheet is scrolled into view.
+- Password notice: cleared on Sign out and on `SIGNED_IN` or `SIGNED_OUT` from `onAuthStateChange`.
+
+### Device results, 0.14.2 (both phones), 26/10/26
+
+From Gary's report (26/10/26 2232 hrs) and the server rows. Times SGT.
+
+| Step | Time | Result |
+|---|---|---|
+| 10 | | PASS. Eric installed from the link and opened from the icon. His Gboard voice typing would not start (mic flashes, nothing happens): a phone and Gboard setting, not travelboard; no app change. |
+| 11 to 13 (7B item 1) | 2159 | PASS. Eric signed in; `Eric before linking` and `Gary before linking` at 2159, each on its own phone only, both unshared then. |
+| 14 (7B item 2) | 2201 | PASS with a finding. Links correctly (Gary to Eric 2201), but each phone showed the other's add only after Sync now or a restart; Gary's open Settings kept "You added Eric. Waiting for Eric to add you" until a restart. Fixed in 0.14.3 (idle sync, sync on opening Settings). |
+| 15 (7B item 3) | 2203, 2205 | PASS with findings. Share with Eric on by default; the shared capture reached Eric only after he tapped Sync now (fixed by the idle sync). On both phones the keyboard covered the Share with switch (fixed in 0.14.3). Test texts: the photo capture is `Share with Eric` (2205, photo); a second `Share with Eric` at 2203 has no photo and stays shared. |
+| 16 (7B items 3, 11) | 2208 | PASS. `Eric airplane` saved offline, synced, shown on Gary's phone; shared. |
+| 17 (7C item 2) | 2210 | PASS. Fields swapped by an input slip, not a defect: text `Stall 12`, place `Named offline`; named offline, synced, shown on Eric's phone with the place; shared. |
+| 18 (7B item 4) | 2212 | PASS. `Not for Eric` never shared; the 2205 photo capture switched off and gone from Eric's phone (server: shared false). |
+| 19 (7B item 5) | | PASS. `Gary before linking` switched on in edit (server: shared true). |
+| 20 (7B item 6) | | PASS. Read-only sheets both ways. |
+| 21 (7B items 9, 10; 7C 6a) | 2214, 2215 | PASS. Threads private; Eric's 2215 reply cites only Gary's shared captures. Gary's 2217 reply treats `Eric airplane` as Eric's shared capture. |
+| 22 (7C item 7, Eric) | 2216, 2217 | PASS. Eric's first test turn came in as `Prompt teat` (2216); its reply ended "Teh". His prompt was reset before `Prompt test` (2217), whose reply has no "Teh". Both `journal_prompt_custom` null afterwards. |
+| 23, 24 (7B item 8) | 2220 | PASS. Remove asked in the app's sheet; unlinked, cleared; relinked (Eric to Gary 2220); both directions live. |
+| 25 (7B item 13; covers step 8) | 2222 | PASS with a finding. Eric changed his password and signed in with the new one (auth updated and signed in 2222). "Password changed. Use the new one next time you sign in." stayed on the sheet after Sign out and the new sign-in: fixed in 0.14.3. Step 8 (Gary's Change password) counts as passed with it (Gary's decision 24/10/26). |
+| 26 | | PASS. No browser dialogs. |
+| 27 (7C item 1) | | PASS. Both phones, light and dark. |
+
+**Acceptance after the run:** SPEC 7B.5 items 1 to 11 and 13 pass on both phones; item 12 automated. SPEC 7C.7 items 1 to 3, 6a and 7 pass on the phones; 5, 8 and 9 automated; 4 and 6 wait on step 9.
+
+### Re-run steps, 0.14.3 (both phones)
+
+Short re-checks of the three fixes. 0.14.3 must be live first (Deploy row above). Do not tap Sync now unless a step says so.
+
+1. **Update both phones.** Each: open travelboard, tap "Update ready, tap to reload". Stamp: Version reads 0.14.3.
+2. **Link changes arrive by themselves (step 14).** **Eric:** Settings, Remove, then Remove in the sheet. Gary: open Settings at once (no Sync now): within a few seconds it reads "You added Eric. Waiting for Eric to add you". Leave Gary's sheet open. **Eric:** Add Gary. Gary: without touching anything, within 60 s the open sheet changes to "Linked with Eric". Note how long it took.
+3. **Share with and the keyboard (step 15).** Gary: Capture, tap in the text so the keyboard is up. Without closing the keyboard: Photo and Save show above it; scroll inside the sheet (not the keyboard) and "Share with Eric" comes into view. Type `Keyboard share`, Save. **Eric:** without Sync now, within 60 s `Keyboard share` appears, labelled GARY. Repeat the keyboard check on Eric's phone with a capture of his, and on an edit sheet (tap an older capture of your own, tap its text). Then Settings, Dark, and look at the same sheet with the keyboard up. Journal tab: tap the field; it and the arrow sit above the keyboard.
+4. **The password line clears (step 25).** Either phone: Settings, Password, Change; type `aaaaaaaaaa` and `bbbbbbbbbb`, Save password: "The two passwords differ." in red. Sign out: the red line is gone. Sign in again: no password line. (A real change shows "Password changed" instead and clears the same way; there is no need to change a password for this.)
+
+Report the times and anything that looks wrong.
 
 ### Automated results, 24/10/26 (session B, 0.14.0)
 
@@ -188,10 +243,10 @@ Report the times and anything that looks wrong. Claude then checks the names on 
 Session A's build list (items 1 to 7) is done in 0.14.0: journal page and inline field, Settings sheet, prompt editor and its tests, panels in the paper style, icon option B, the combined device steps, and `renderJournal` built off-screen.
 
 Untested
-1. The combined two-phone run above (steps 1 to 27): 7B.5 items 1 to 11 and 13, 7C.7 items 1 to 4, 6, 6a and 7 on the phones. Cut-off 05/11/26.
-2. 7C.7 item 4 at a named place and item 6 asking about it (step 9): carried from session A.
-3. Item 1 (every screen to the mockup) is checked headless only; the phones decide it, including Newsreader's weight at 34 px (session A item 10) and the new icon once Chrome updates it.
-4. Change password end to end (step 25). Gary reports "Secure password change" and "Require current password" both off (24/10/26), so `updateUser` should succeed with no reauthentication. The client path is proven against the mock (m12 P1 to P6); the real Auth server is proven only by Eric's run.
+1. Done 26/10/26 on 0.14.2 (results above), apart from step 9. The 0.14.3 re-run steps above are still to run on both phones. Cut-off 05/11/26.
+2. 7C.7 item 4 at a named place and item 6 asking about it (step 9): on 27/10/26 (Gary).
+3. Item 1 passed on both phones 26/10/26 (step 27). The new icon on the home screen: not reported yet.
+4. Change password end to end: passed 26/10/26 (Eric, step 25; no reauthentication asked). The notice that outlived the session is fixed in 0.14.3 (re-run step 4).
 
 Decisions for Gary (asked in the session B report; answers to be recorded here)
 5. Answered 24/10/26: Gary said yes. SPEC 7C.4 reworded (0009 replaces `tb_capture_upsert` only; `tb_captures_upsert` is a pass-through).
@@ -204,7 +259,9 @@ Known, by design or minor
 10. Saving the default text unchanged stores no custom text, so a later edit of `prompts/<key>.md` reaches that person; once someone saves their own text, file edits no longer reach them until Reset to default.
 11. Android's home-screen icon changes when Chrome next checks the manifest, which can take up to a day and may ask first. The manifest paths are unchanged, so nothing else is needed.
 12. The journal field is hidden on the day list (nothing to write into there); tap a day or Today to write.
-13. Catalogue baseline after 0009 unchanged (no migration in session B): outside 518, `493804029b51`. Live: 2 people, both `journal_prompt_custom` null before the device run.
+13. Catalogue 26/10/26: outside 518, `493804029b51` (unchanged since 0009); travelboard's own 61 rows, `940b912f7a18`. Live: 2 people, both `journal_prompt_custom` null; links live both ways.
+16. Eric's Gboard voice typing does not start (mic flashes): his phone's Gboard settings (on-device English pack, microphone permission for Gboard). Not travelboard; worth fixing before Bangkok.
+17. The idle sync costs one small sync a minute while the app is open and visible (a reachability probe and the usual pulls); nothing runs while it is in the background.
 14. Running the checks here: as M1.2 item 16 and session A; Deno 2.9.4 from the GitHub release zip; the icon generator needs the headless dev dependency (`npm install` in `checks/headless`).
 15. M1.2 open items below: 1, 3 and 4 wait on the combined run; 2, 5 and 11 are closed by session B.
 
@@ -212,14 +269,14 @@ Known, by design or minor
 
 ## M1.2 Two travellers (SPEC.md 7B)
 
-**Status 24/10/26: built and passing every automated check (re-run on 0.14.0, M1.3 section); not yet run on the phones. Its device steps are now part of the combined run in the M1.3 section ("Device steps (both phones), 0.14.0").** Migration 0008 applied, `tb-journal` v5 deployed, client v10 live. Item 13 (Change password) added on Gary's decision 24/10/26. Build session retired 24/10/26; M1.2 stays as built.
+**Status 26/10/26: every SPEC 7B.5 item passes. Items 1 to 11 and 13 on both phones in the combined run on 0.14.2 (26/10/26, M1.3 section); item 12 automated. Three findings from the run (link changes and shared captures waiting for Sync now, the keyboard over Share with, the password notice outliving the session) are fixed in 0.14.3; their re-checks are in the M1.3 section.** Migration 0008 applied, `tb-journal` v5 deployed, client v10 live. Item 13 (Change password) added on Gary's decision 24/10/26. Build session retired 24/10/26; M1.2 stays as built.
 
 **Gary's decisions 24/10/26:** the two-phone test waits until after the UI redesign, so Eric's first look is the final UI. M1.2 cut-off moves from 31/10/26 to 05/11/26; the freeze from 01/11/26 to 06/11/26. The redesign, place names and editable journal prompts are M1.3 (SPEC 7C, D17, from Gary's planning chat, commit `5efd5d3`), built in two new sessions; SPEC and CLAUDE.md carry the new dates. The build session did not edit either for this.
 
 ### Open items for the next session
 
 Untested
-1. Every 7B.5 item on the phones (1 to 11 and 13). Item 12 passes. Eric has not installed the app or signed in yet (dashboard: "Last signed in" empty).
+1. Done 26/10/26: items 1 to 11 and 13 pass on both phones (M1.3 section).
 2. Closed 24/10/26 (M1.3 session B): the steps are rewritten for 0.14.0 and merged with M1.3's into one run (M1.3 section). The hooks were kept; m12 passes 56 of 56.
 3. Item 10 on a real call: Eric's reply referring to one of Gary's shared captures by its content. So far shown only in `fn.test.cjs` (G2) and `m12` (M10) against fakes.
 4. Item 7 REST part: no check from outside with a partner's JWT. The refusals are proven at the policy level (smoke T8, T12, T13); the admitted read is the Storage download on Eric's phone (device steps 6 and 8).

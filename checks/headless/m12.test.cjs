@@ -13,6 +13,9 @@
 // sheet (#confirm-dlg) instead of the browser's confirm, so any browser dialog now fails the
 // run; partnerButton answers the sheet. Journal turns go through the inline field. The panel's
 // hooks (#partners, .partner-state, #pw-*, #signin, #s-user) are kept.
+// 0.14.3 (26/10/26): P7 the password notice cleared at sign-out and sign-in; Q1 to Q6 Settings
+// syncs on open, Sync now updates the open sheet, the 60 s idle sync (shortened here) brings
+// link changes and shared captures with no tap, and stops when hidden.
 // Exit code 0 only when every check passes.
 'use strict';
 const APP = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'trip.html'), 'utf8').match(/const APP_VERSION = '([0-9.]+)';/)[1];
@@ -387,6 +390,9 @@ async function journalTurn(page, msg) {
       && (await E.$eval('#pw-form', (f) => f.hidden)) && (await E.inputValue('#pw-new')) === '', await text(E, '#pw-ok'));
     await E.click('#signout');
     await E.waitForFunction(() => !document.getElementById('signin').hidden);
+    check('P7 (0.14.3) Sign out clears "Password changed" from the sheet', (await text(E, '#pw-ok')) === '' && (await text(E, '#pw-err')) === '', await text(E, '#pw-ok'));
+    // A notice left over from before (set by hand here) goes at the next sign-in too (onAuthStateChange).
+    await E.evaluate(() => { document.getElementById('pw-ok').textContent = 'Password changed. Use the new one next time you sign in.'; });
     await E.fill('#email', 'eric@travelboard.local'); await E.fill('#password', 'eric-password-1');
     await E.click('#signin button[type="submit"]');
     await E.waitForFunction(() => document.getElementById('signin-err').textContent, null, { timeout: 8000 }).catch(() => {});
@@ -394,6 +400,8 @@ async function journalTurn(page, msg) {
     await E.fill('#password', 'eric-new-password-2');
     await E.click('#signin button[type="submit"]');
     await E.waitForFunction(() => document.getElementById('signin').hidden, null, { timeout: 8000 }).catch(() => {});
+    await E.waitForFunction(() => document.getElementById('pw-ok').textContent === '', null, { timeout: 3000 }).catch(() => {});
+    check('P7 (0.14.3) signing in clears a password notice still on the sheet', (await text(E, '#pw-ok')) === '', await text(E, '#pw-ok'));
     await closeSettings(E);
     await syncIdle(E);
     check('P5 the new password signs Eric in and he syncs', (await text(E, '#s-user')) === 'eric@travelboard.local' && (await pill(E)) === 'synced', await pill(E));
@@ -404,6 +412,50 @@ async function journalTurn(page, msg) {
     await E.waitForFunction(() => document.getElementById('pw-err').textContent, null, { timeout: 8000 }).catch(() => {});
     check('P6 the same password again: the server\'s own error is shown', /different from the old password/.test(await text(E, '#pw-err')), await text(E, '#pw-err'));
     await closeSettings(E);
+
+    // ---------- 0.14.3: Settings syncs on open, Sync now in the open sheet, idle sync (6.6, 7B.3) ----------
+    await syncIdle(G); await syncIdle(E);
+    const whoamis = () => mock.calls.filter((x) => x === '/rest/v1/rpc/tb_whoami').length;
+    const linkText = (uid, other) => ({ none: 'Not linked with Eric.', added_by_me: 'You added Eric. Waiting for Eric to add you',
+      added_me: 'Eric added you. Add him to link', live: 'Linked with Eric' })[mock.linkState(uid, other)];
+    const w0 = whoamis();
+    await openSettings(G);
+    await G.waitForFunction(() => !syncing, null, { timeout: 10000 }).catch(() => {});
+    await G.waitForTimeout(200);
+    check('Q1 opening Settings starts a sync (tb_whoami asked) and the sheet shows the link as the server has it', whoamis() > w0
+      && (await panelText(G)) === linkText(UID, ERIC_UID), `${whoamis() - w0} ${await panelText(G)}`);
+    // The other side changes on the server while Gary's sheet is open: Sync now updates the row in place.
+    if (mock.linkState(ERIC_UID, UID) === 'added_by_me' || mock.linkState(ERIC_UID, UID) === 'live') mock.partnerRemove(UID, ERIC_UID);
+    else mock.partnerAdd(UID, ERIC_UID);
+    const want = linkText(UID, ERIC_UID);
+    await G.click('#sync-now');
+    await G.waitForFunction((w) => document.querySelector('#partners .partner-state').textContent === w, want, { timeout: 8000 }).catch(() => {});
+    check('Q2 link changed on the server, Sync now with the sheet open: the row reads the new state without closing the sheet',
+      (await panelText(G)) === want && await G.evaluate(() => document.getElementById('settings').open), `${await panelText(G)} / want ${want}`);
+    check('Q3 the idle sync is 60 s; the harness turns it off so request counts stay exact', await G.evaluate(() => IDLE_SYNC_MS === 60000 && idleTimer === null));
+    // Idle sync on (shortened): the other side's change reaches the open sheet with no tap.
+    await G.evaluate(() => { window.__tbIdleSyncMs = 700; setIdleSync(true); });
+    if (mock.linkState(ERIC_UID, UID) === 'added_by_me' || mock.linkState(ERIC_UID, UID) === 'live') mock.partnerRemove(UID, ERIC_UID);
+    else mock.partnerAdd(UID, ERIC_UID);
+    const want2 = linkText(UID, ERIC_UID);
+    const tq = Date.now();
+    await G.waitForFunction((w) => document.querySelector('#partners .partner-state').textContent === w, want2, { timeout: 5000 }).catch(() => {});
+    check('Q4 idle sync: the other side\'s link change reaches Gary\'s open sheet with no Sync now', (await panelText(G)) === want2, `${await panelText(G)} / want ${want2} after ${Date.now() - tq} ms`);
+    // Link both ways, then a capture Eric shares reaches Gary's day view with no tap.
+    if (mock.linkState(UID, ERIC_UID) !== 'live') { mock.partnerAdd(UID, ERIC_UID); mock.partnerAdd(ERIC_UID, UID); }
+    await G.waitForFunction(() => document.querySelector('#partners .partner-state').textContent === 'Linked with Eric', null, { timeout: 5000 }).catch(() => {});
+    await closeSettings(G);
+    await syncIdle(E);
+    const eIdle = await newCapture(E, 'Eric idle-sync share', { share: true });
+    await syncIdle(E);
+    await G.waitForFunction((id) => !!document.querySelector(`#records .row[data-id="${id}"]`), eIdle.id, { timeout: 5000 }).catch(() => {});
+    check('Q5 idle sync: a capture Eric shares appears on Gary\'s phone with no Sync now', mock.rows.get(eIdle.id).shared === true
+      && (await rowsOnScreen(G)).some((r) => r.id === eIdle.id && r.who === 'Eric'), JSON.stringify((await rowsOnScreen(G)).map((r) => r.text.slice(0, 30))));
+    await G.evaluate(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); });
+    const hiddenOff = await G.evaluate(() => idleTimer === null && retryTimer === null);
+    await G.evaluate(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' }); document.dispatchEvent(new Event('visibilitychange')); });
+    check('Q6 hidden: the idle sync stops (with the retry); visible again: it starts', hiddenOff && await G.evaluate(() => idleTimer !== null));
+    await G.evaluate(() => { window.__tbIdleSyncMs = 0; setIdleSync(false); });
   } catch (e) {
     console.error(e);
     check('suite ran to the end', false, e.message);

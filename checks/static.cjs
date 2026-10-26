@@ -22,6 +22,8 @@
 //   inline field with Send and per-day drafts, no journal mode on the capture screen; the prompt
 //   editor on tb_prompt_get and tb_prompt_set with the 4,000 count and the default from
 //   prompts/<key>.md; Theme Light, Dark and Auto; the option B icon source drawn in paths only
+// - 0.14.3: 60 s idle sync, Settings syncs on open, password notices cleared at sign-in and
+//   sign-out, the capture sheet and footer follow the visual viewport (keyboard)
 'use strict';
 
 const fs = require('fs');
@@ -263,6 +265,18 @@ if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(
   const icon = exists('design/m1.3/icon-b.svg') ? read('design/m1.3/icon-b.svg') : '';
   check(!!icon && !/<text\b|font-family/.test(icon) && /#1F2A36/.test(icon) && /#B4472A/.test(icon) && /rotate\(-6 50 52\)/.test(icon),
     'M1.3 B: icon source (option B) in paths only, no font; icons regenerated from it by design/m1.3/make-icons.cjs');
+}
+
+// ---------- 0.14.3 (SPEC.md 6.6, 7B.3, 7C; 26/10/26) ----------
+{
+  const trip = read('trip.html');
+  check(/const IDLE_SYNC_MS = 60000;/.test(trip) && /function setIdleSync\(on\)/.test(trip) && /else \{ setRetry\(false\); setIdleSync\(false\); \}/.test(trip),
+    '0.14.3: idle sync every 60 s while visible, stopped when hidden');
+  check(/\$\('settings'\)\.showModal\(\);\n  sync\(\);/.test(trip), '0.14.3: opening Settings starts a sync');
+  check(/event === 'SIGNED_IN' \|\| event === 'SIGNED_OUT'\) \{ \$\('pw-ok'\)\.textContent = ''/.test(trip) && /addEventListener\('click', async \(\) => \{\n  \$\('pw-ok'\)\.textContent = '';/.test(trip),
+    '0.14.3: Sign out and sign-in clear the password notices');
+  check(/interactive-widget=resizes-content/.test(trip) && /visualViewport\.addEventListener\('resize', fitViewport\)/.test(trip) && /height: var\(--vv-h, 100%\)/.test(trip) && /bottom: var\(--kb, 0px\)/.test(trip),
+    '0.14.3: capture sheet sized to the visual viewport, footer lifted by the keyboard');
 }
 
 // ---------- keep-alive workflow (SPEC.md 6.8 step 5) ----------

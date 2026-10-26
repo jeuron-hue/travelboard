@@ -15,7 +15,8 @@
 // against 4,000, a connection needed, each person's own text only), the journal's inline field
 // (one tap sends one turn and gets one reply, the page look), the app's own confirm and notice
 // sheets in place of browser dialogs (any browser dialog fails the run), and the option B icons.
-// N15's composer check moved to the inline field.
+// N15's composer check moved to the inline field. 0.14.3 (26/10/26): N25 the keyboard, by a shorter
+// viewport and by a fake visual viewport.
 // Exit code 0 only when every check passes.
 'use strict';
 const fs = require('fs');
@@ -733,6 +734,78 @@ async function chipsSettled(page) {
       && icons.aCorner[3] === 0 && icons.sCorner[3] === 0 && icons.aEdge.slice(0, 3).join() === '31,42,54' && icons.aCentre.slice(0, 3).join() === '180,71,42', JSON.stringify(icons));
     check('N24 manifest paths unchanged; the shortcut icon is icon-192', icons.icons === 'icons/icon-192.png,icons/icon-512.png,icons/icon-maskable-512.png'
       && icons.sc === 'icons/icon-192.png');
+
+    // ---------- N25 (0.14.3): the keyboard (7C) ----------
+    // A shorter viewport stands in for the keyboard (Chrome resizing the page, interactive-widget=
+    // resizes-content); a fake visualViewport stands in for the other case (only the visible part
+    // shrinks). Share with, Photo and Save must be in view or a scroll away, in light and dark, on
+    // the new and edit sheets; the journal field stays above the keyboard.
+    if (mock.linkState(UID, ERIC_UID) !== 'live') { mock.partnerAdd(UID, ERIC_UID); mock.partnerAdd(ERIC_UID, UID); }
+    await syncIdle(G);
+    const FULL = 860, KB = 420;
+    const inView = (page, h) => page.evaluate((h) => {
+      const r = (sel) => document.querySelector(sel).getBoundingClientRect();
+      const bar = r('.capbar');
+      const pg = document.querySelector('#cap .sheetpage');
+      pg.scrollTop = pg.scrollHeight;                     // a scroll inside the sheet
+      const sw = r('#cap-share');
+      return { save: r('#cap-save').bottom <= h + 0.5 && r('#cap-save').top >= 0, photo: r('#cap-photo-btn').bottom <= h + 0.5,
+        share: !!document.getElementById('cap-share').offsetParent && sw.top >= r('#cap .sheetpage').top - 0.5 && sw.bottom <= bar.top + 0.5,
+        cap: Math.round(document.getElementById('cap').getBoundingClientRect().height), kbd: document.documentElement.classList.contains('kbd') };
+    }, h);
+    for (const theme of ['light', 'dark']) {
+      await G.evaluate((t) => applyTheme(t), theme);
+      await G.setViewportSize({ width: 412, height: FULL });
+      await G.waitForTimeout(100);
+      await openNew(G);
+      await G.focus('#cap-body');
+      await G.setViewportSize({ width: 412, height: KB });
+      await G.waitForTimeout(250);
+      let v = await inView(G, KB);
+      check(`N25 ${theme}, page resized for the keyboard: new capture sheet fits the ${KB} px left; Save and Photo in view; Share with a scroll away; ruled area gives way`,
+        v.save && v.photo && v.share && v.cap === KB && v.kbd, JSON.stringify(v));
+      await G.click('#cap-close'); await waitCap(G, false);
+      await G.evaluate(() => idb.del('drafts', 'new'));
+      await G.setViewportSize({ width: 412, height: FULL });
+      await G.waitForTimeout(100);
+      await openEdit(G, noGps.id);
+      await G.focus('#cap-body');
+      await G.setViewportSize({ width: 412, height: KB });
+      await G.waitForTimeout(250);
+      v = await inView(G, KB);
+      check(`N25 ${theme}: the edit sheet the same`, v.save && v.photo && v.share && v.cap === KB, JSON.stringify(v));
+      await G.click('#cap-close'); await waitCap(G, false);
+      await G.click('#tab-journal');
+      await G.focus('#j-input');
+      await G.waitForTimeout(150);
+      const jf = await G.evaluate(() => ({ field: document.getElementById('j-input').getBoundingClientRect().bottom, send: document.getElementById('j-send').getBoundingClientRect().bottom, h: innerHeight }));
+      check(`N25 ${theme}: the journal field and Send sit above the keyboard`, jf.field <= KB && jf.send <= KB, JSON.stringify(jf));
+      await G.click('#tab-captures');
+    }
+    // Only the visual viewport shrinks (the page keeps its full height under the keyboard).
+    await G.setViewportSize({ width: 412, height: FULL });
+    await G.evaluate(() => applyTheme('light'));
+    await G.waitForTimeout(150);
+    await openNew(G);
+    await G.evaluate((h) => {
+      const fake = new EventTarget();
+      Object.assign(fake, { height: h, width: innerWidth, offsetTop: 0, offsetLeft: 0, pageTop: 0, pageLeft: 0, scale: 1 });
+      Object.defineProperty(window, 'visualViewport', { configurable: true, get: () => fake });
+      fitViewport();
+    }, KB);
+    await G.waitForTimeout(200);
+    let vv = await inView(G, KB);
+    check(`N25 visual viewport only: the sheet is sized to the ${KB} px visible, Save and Photo above the keyboard, Share with a scroll away`,
+      vv.save && vv.photo && vv.share && vv.cap === KB && vv.kbd, JSON.stringify(vv));
+    await G.click('#cap-close'); await waitCap(G, false);
+    await G.evaluate(() => idb.del('drafts', 'new'));
+    await G.click('#tab-journal');
+    const jv = await G.evaluate(() => ({ send: document.getElementById('j-send').getBoundingClientRect().bottom, kb: getComputedStyle(document.documentElement).getPropertyValue('--kb') }));
+    check('N25 visual viewport only: the footer is lifted by the keyboard, journal field and Send above it', jv.send <= KB && jv.kb.trim() === (FULL - KB) + 'px', JSON.stringify(jv));
+    await G.evaluate(() => { delete window.visualViewport; fitViewport(); });
+    await G.click('#tab-captures');
+    check('N25 keyboard gone: full height again, no kbd mark', await G.evaluate((f) => getComputedStyle(document.documentElement).getPropertyValue('--vv-h').trim() === f + 'px'
+      && !document.documentElement.classList.contains('kbd'), FULL));
   } finally {
     await browser.close();
     srv.close();
