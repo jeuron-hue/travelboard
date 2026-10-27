@@ -39,6 +39,15 @@
     capture, own or shared, plus today, with its counts and named places; a tap opens the day.
 
   Change log (newest first)
+  - 27/10/26 0.16.0. Place chips inside buildings, and Locate (SPEC.md 7.2, 7C.4; Gary's decisions
+    27/10/26 after step 9 inside Tampines 1 offered the shop "Atrix"). A chip for the place the
+    phone is in: the smallest named mall, building, station, park, market, hotel or attraction,
+    or retail area containing it, from Overpass is_in on overpass-api.de (POST), cached in
+    geocache under "e:" by the same 50 m cell, one request at a time, 10 s timeout, failures not
+    cached. Chips: own names, then the place you are in, then the nearest name, at most three,
+    no two alike. Locate on a new capture: a fresh high-accuracy fix (maximumAge 0, 15 s), shown
+    with its accuracy, chips reloaded, kept in the draft and saved as the capture's coordinates
+    instead of the fix at Save; denied or timed out, one line says so. Not on the edit screen.
   - 26/10/26 0.15.0. M1.4 Capture days (SPEC.md 7D, Gary's decision 26/10/26). A Days link beside
     the arrows on the Captures day bar shows the day list in place of the records and reads
     Today; Today returns to today's day view. The list: every local day with a live capture on
@@ -415,6 +424,17 @@
   }
   #cap-place::placeholder { color: var(--muted); opacity: 1; }
   #cap-place-clear { width: 36px; height: 36px; flex: none; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 20px; }
+  /* Locate (0.16.0): beside the place field, new captures only. */
+  #cap-locate {
+    width: 44px; height: 44px; flex: none; margin-right: -8px; display: flex; align-items: center; justify-content: center;
+    border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--blue); cursor: pointer;
+  }
+  #cap-locate[hidden] { display: none; }
+  #cap-locate:disabled { color: var(--muted); cursor: default; }
+  #cap-locate[aria-busy="true"] svg { animation: tb-pulse 1s ease-in-out infinite; }
+  @keyframes tb-pulse { 50% { opacity: 0.35; } }
+  #cap-locate-msg { font-size: 13px; color: var(--muted); margin-top: -4px; }
+  #cap-locate-msg:empty { display: none; }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; }
   .pchip {
     min-height: 36px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px;
@@ -737,7 +757,9 @@
         <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M9 16s5-5 5-8.6A5 5 0 0 0 4 7.4C4 11 9 16 9 16z" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="9" cy="7.4" r="1.8" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
         <input id="cap-place" type="text" maxlength="120" autocomplete="off" spellcheck="false" enterkeyhint="done" placeholder="no GPS">
         <button id="cap-place-clear" type="button" aria-label="Clear the place name" hidden>&times;</button>
+        <button id="cap-locate" type="button" aria-label="Locate: take a fresh position" hidden><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="5.2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="10" cy="10" r="1.7" fill="currentColor"/><path d="M10 1.5v3M10 15.5v3M1.5 10h3M15.5 10h3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
       </div>
+      <span id="cap-locate-msg" role="status"></span>
       <div class="chips" id="cap-chips" hidden></div>
       <span id="cap-osm" hidden>Map suggestion &copy; OpenStreetMap contributors</span>
     </div>
@@ -929,7 +951,7 @@
 'use strict';
 
 // Bump together with CACHE_VERSION in sw.js on every release.
-const APP_VERSION = '0.15.0';     // 0.<minor>.<patch> from 0.13.0 (was 13), Gary 24/10/26
+const APP_VERSION = '0.16.0';     // 0.<minor>.<patch> from 0.13.0 (was 13), Gary 24/10/26
 
 const PROJECT_REF = 'nnnnonspfljdkrxstslw';           // Supabase project travelboard (SPEC.md D3, 6.8)
 const SUPABASE_URL = 'https://' + PROJECT_REF + '.supabase.co';
@@ -955,6 +977,12 @@ const PLACE_CHIPS = 3;              // at most three chips, own names first
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/reverse';
 const NOMINATIM_GAP_MS = 1000;      // at most one request a second (OSM usage policy)
 const NOMINATIM_TIMEOUT_MS = 8000;
+// The place the phone is in (0.16.0, SPEC.md 7C.4): Overpass is_in on the main instance, POST
+// as documented. One request at a time; a 10 s timeout here and 8 s for the query itself.
+const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+const OVERPASS_TIMEOUT_MS = 10000;
+// Locate (0.16.0, SPEC.md 7.2): a fresh fix only, never a cached one.
+const LOCATE_OPTS = { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 };
 const GEO_CELL_DEG = 0.00045;       // cache cell: about 50 m of latitude
 // Chips need a position at open. Indoors in airplane mode a first satellite fix takes longer
 // than the 5 s a Save allows, so the open-time request waits longer and accepts a fix up to
@@ -1335,6 +1363,60 @@ async function osmName(lat, lng) {
   return run;
 }
 
+// The smallest named area the position is inside, from Overpass is_in (0.16.0, SPEC.md 7C.4):
+// a mall, a named building, a station, a park, a market, a hotel or attraction, or a retail
+// area. Nominatim's reverse lookup gives the nearest feature instead (step 9, 27/10/26: inside
+// Tampines 1 it offered the shop "Atrix"). Cached like the Nominatim name, in the same 50 m cell
+// under "e:" (an empty answer too); one request at a time; a failure is not cached.
+const areaKey = (lat, lng) => 'e' + geoKey(lat, lng).slice(1);
+const AREA_FILTERS = ['[shop=mall]', '[building]', '[railway=station]', '[public_transport=station]',
+  '[leisure=park]', '[amenity=marketplace]', '[tourism]', '[landuse=retail]'];
+function areaQuery(lat, lng) {
+  const at = `${Number(lat).toFixed(6)},${Number(lng).toFixed(6)}`;
+  return `[out:json][timeout:8];is_in(${at})->.a;(${AREA_FILTERS.map((f) => `wr(pivot.a)[name]${f};`).join('')});out tags bb;`;
+}
+// The chip's text from an Overpass answer: the English name, else the name, of the element
+// with the smallest bounding box; null when nothing encloses the point.
+function areaLabel(j) {
+  const els = j && Array.isArray(j.elements) ? j.elements : [];
+  let best = null;
+  for (const e of els) {
+    const t = e && e.tags, b = e && e.bounds;
+    const name = t && (typeof t['name:en'] === 'string' && t['name:en'].trim() ? t['name:en'] : t.name);
+    if (typeof name !== 'string' || !name.trim() || !b) continue;
+    const size = Math.abs(b.maxlat - b.minlat) * Math.abs(b.maxlon - b.minlon) * Math.cos(((b.maxlat + b.minlat) / 2) * Math.PI / 180);
+    if (!Number.isFinite(size)) continue;
+    if (!best || size < best.size) best = { size, name: name.trim().slice(0, PLACE_MAX) };
+  }
+  return best ? best.name : null;
+}
+let areaChain = Promise.resolve();
+async function areaName(lat, lng) {
+  const key = areaKey(lat, lng);
+  const hit = await idb.get('geocache', key);
+  if (hit) return hit.name || null;
+  if (!navigator.onLine) return null;
+  const run = areaChain.then(async () => {
+    const again = await idb.get('geocache', key);    // filled by a lookup queued ahead of this one
+    if (again) return again.name || null;
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), OVERPASS_TIMEOUT_MS);
+    try {
+      const res = await fetch(OVERPASS_URL, { method: 'POST', cache: 'no-store', signal: ctl.signal,
+        headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'data=' + encodeURIComponent(areaQuery(lat, lng)) });
+      if (!res.ok) throw new Error('Overpass HTTP ' + res.status);
+      const name = areaLabel(await res.json());
+      await idb.put('geocache', { key, name, at: new Date().toISOString() });
+      return name;
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+  areaChain = run.catch(() => {});
+  return run;
+}
+
 // The capture screen's position for chips: the saved capture's coordinates in an edit, or the
 // fix taken at open for a new capture (only when location is already granted, see fixAtOpen).
 function capPos() {
@@ -1344,16 +1426,18 @@ function capPos() {
 }
 function updatePlaceField() {
   const pos = capPos();
-  $('cap-place').placeholder = pos ? coordsText(pos.lat, pos.lng) : 'no GPS';
+  $('cap-place').placeholder = pos ? coordsText(pos.lat, pos.lng) + (pos.located && pos.acc != null ? ` \u00b1${Math.round(pos.acc)} m` : '') : 'no GPS';
   $('cap-place-clear').hidden = !$('cap-place').value;
 }
 
-// Up to PLACE_CHIPS chips: own names within PLACE_NEAR_M first, then the OpenStreetMap name.
-// A chip equal to what the field already says is left out. Nothing is filled in without a tap.
+// Up to PLACE_CHIPS chips: own names within PLACE_NEAR_M first, then the place the position is
+// in, then the nearest OpenStreetMap name (0.16.0). No two chips alike (case-insensitive), and a
+// chip equal to what the field already says is left out. Nothing is filled in without a tap.
 let chipSeq = 0;
 const PIN_SVG = '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7.5 5.8 10 11 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const MAP_SVG = '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 3.5l3.3-1.3 3.4 1.3 3.3-1.3v8.3l-3.3 1.3-3.4-1.3L2 11.8z M5.3 2.2v8.3 M8.7 3.5v8.3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>';
-function drawChips(own, mapName) {
+// maps: [{ name, source }] with source 'area' (the place you are in) or 'osm' (the nearest name).
+function drawChips(own, maps) {
   const box = $('cap-chips');
   box.replaceChildren();
   for (const o of own) {
@@ -1365,40 +1449,60 @@ function drawChips(own, mapName) {
     b.append(el('span', 'nm', o.name), el('span', 'dist', `${Math.round(o.d)} m`));
     box.append(b);
   }
-  if (mapName) {
+  for (const m of maps) {
     const b = el('button', 'pchip map');
     b.type = 'button';
-    b.dataset.place = mapName;
-    b.dataset.source = 'osm';
+    b.dataset.place = m.name;
+    b.dataset.source = m.source;
     b.insertAdjacentHTML('afterbegin', MAP_SVG);
-    b.append(el('span', 'nm', mapName));
+    b.append(el('span', 'nm', m.name));
     box.append(b);
   }
   box.hidden = !box.children.length;
-  $('cap-osm').hidden = !mapName;
+  $('cap-osm').hidden = !maps.length;
+}
+// Starts (or reuses) this screen's lookup of one kind for a position: one per position for as
+// long as the screen is up, so typing never asks again.
+function capLookup(slot, key, fn, lat, lng) {
+  if (!cap[slot] || cap[slot].key !== key) {
+    const o = { key, done: false };
+    o.p = fn(lat, lng).catch((e) => { console.warn('place lookup failed', e); return null; })
+      .then((n) => { o.done = true; return n; });
+    cap[slot] = o;
+  }
+  return cap[slot];
 }
 async function refreshPlaceChips() {
   const seq = ++chipSeq;
   const pos = capPos();
-  if (!pos) { drawChips([], null); return; }
+  if (!pos) { drawChips([], []); return; }
   const cur = $('cap-place').value.trim().toLowerCase();
   const own = (await ownNamesNear(pos.lat, pos.lng)).filter((o) => o.name.toLowerCase() !== cur).slice(0, PLACE_CHIPS);
   if (seq !== chipSeq) return;
-  drawChips(own, null);
-  // A stand-in position (the last fix, see fixAtOpen) feeds own names only: the map lookup waits
-  // for a fresh fix, so it never asks OpenStreetMap about where the phone used to be.
+  drawChips(own, []);
+  // A stand-in position (the last fix, see fixAtOpen) feeds own names only: the map lookups wait
+  // for a fresh fix, so they never ask OpenStreetMap about where the phone used to be.
   if (own.length >= PLACE_CHIPS || pos.standIn) return;
-  // One lookup per position for as long as the screen is up, so typing never asks again.
-  const key = geoKey(pos.lat, pos.lng);
-  if (!cap.osm || cap.osm.key !== key) {
-    const o = { key, done: false };
-    o.p = osmName(pos.lat, pos.lng).catch((e) => { console.warn('place lookup failed', e); return null; })
-      .then((n) => { o.done = true; return n; });
-    cap.osm = o;
-  }
-  const name = await cap.osm.p;
-  if (seq !== chipSeq || !cap.open) return;
-  if (name && name.toLowerCase() !== cur && !own.some((o) => o.name.toLowerCase() === name.toLowerCase())) drawChips(own, name);
+  // The two lookups go to different services and run side by side; the chips are redrawn as
+  // each answers, always in the same order.
+  const area = capLookup('area', areaKey(pos.lat, pos.lng), areaName, pos.lat, pos.lng);
+  const near = capLookup('osm', geoKey(pos.lat, pos.lng), osmName, pos.lat, pos.lng);
+  const found = { area: undefined, osm: undefined };
+  let shown = '';
+  const redraw = () => {
+    if (seq !== chipSeq || !cap.open) return;
+    const taken = new Set(own.map((o) => o.name.toLowerCase()).concat(cur ? [cur] : []));
+    const maps = [];
+    for (const source of ['area', 'osm']) {
+      const n = found[source];
+      if (!n || taken.has(n.toLowerCase()) || own.length + maps.length >= PLACE_CHIPS) continue;
+      taken.add(n.toLowerCase());
+      maps.push({ name: n, source });
+    }
+    const sig = maps.map((m) => m.source + ':' + m.name).join('|');
+    if (sig !== shown) { shown = sig; drawChips(own, maps); }
+  };
+  await Promise.all([area.p.then((n) => { found.area = n; redraw(); }), near.p.then((n) => { found.osm = n; redraw(); })]);
 }
 
 // The last position the app saw (at a Save or at an opening), for chips only.
@@ -1417,7 +1521,7 @@ async function fixAtOpen(seq) {
   try {
     if ((await navigator.permissions.query({ name: 'geolocation' })).state !== 'granted') return;
     const use = (lat, lng, standIn) => {
-      if (!cap.open || cap.seq !== seq || cap.mode !== 'new') return;
+      if (!cap.open || cap.seq !== seq || cap.mode !== 'new' || cap.located) return;   // Locate wins
       cap.fix = { lat, lng, standIn };
       updatePlaceField();
       refreshPlaceChips();
@@ -1431,13 +1535,51 @@ async function fixAtOpen(seq) {
   } catch (e) { /* no permission API or no position: no chips */ }
 }
 
+// Locate (0.16.0, SPEC.md 7.2): a fresh high-accuracy fix on a new capture. It shows with its
+// accuracy, the chips reload for it, and it becomes the capture's coordinates at Save. Asks for
+// permission if needed. Denied, unavailable or timed out: one line says so and the earlier
+// position stays. The fix works offline; no lookup is made then, so the chips are own names plus
+// any map names already cached for that 50 m cell.
+function locateNow() {
+  if (!cap.open || cap.mode !== 'new') return;
+  const seq = cap.seq, btn = $('cap-locate'), msg = $('cap-locate-msg');
+  const done = (text) => {
+    if (!cap.open || cap.seq !== seq) return;
+    btn.disabled = false;
+    btn.removeAttribute('aria-busy');
+    msg.textContent = text;
+  };
+  if (!navigator.geolocation) { done('This phone gives no position. The earlier one stays.'); return; }
+  btn.disabled = true;
+  btn.setAttribute('aria-busy', 'true');
+  msg.textContent = 'Locating';
+  try {
+    navigator.geolocation.getCurrentPosition((p) => {
+      if (!cap.open || cap.seq !== seq) return;
+      const c = p.coords;
+      rememberFix(p);
+      cap.located = { lat: c.latitude, lng: c.longitude, acc: Number.isFinite(c.accuracy) ? c.accuracy : null };
+      cap.fix = { lat: c.latitude, lng: c.longitude, acc: cap.located.acc, located: true };
+      done('');
+      updatePlaceField();
+      writeDraft();
+      refreshPlaceChips().catch((e) => console.warn('place chips failed', e));
+    }, (e) => {
+      done(e && e.code === 1 ? 'Location is blocked for travelboard. Allow it in Chrome\u2019s site settings. The earlier position stays.'
+        : e && e.code === 3 ? `No fix within ${LOCATE_OPTS.timeout / 1000} s. The earlier position stays.`
+        : 'No position available. The earlier position stays.');
+    }, LOCATE_OPTS);
+  } catch (e) { done('No position available. The earlier position stays.'); }
+}
+
 // ---------- capture screen ----------
 
 // mode 'new' (draft key "new") or 'edit' (draft key = capture id). The journal no longer uses
 // this screen: it writes in the inline field at the foot of the Journal tab (SPEC.md 7C.2).
-// fix: a new capture's position at open (chips only); seq counts openings; osm: this opening's
-// OpenStreetMap lookup.
-const cap = { open: false, mode: null, row: null, busy: false, photo: null, toClaude: true, share: false, fix: null, seq: 0, osm: null };
+// fix: a new capture's position at open (chips only); seq counts openings; osm and area: this
+// opening's OpenStreetMap lookups; located: a fix taken with Locate { lat, lng, acc }, saved as
+// the capture's coordinates (0.16.0).
+const cap = { open: false, mode: null, row: null, busy: false, photo: null, toClaude: true, share: false, fix: null, seq: 0, osm: null, area: null, located: null };
 const draftKey = () => (cap.mode === 'new' ? 'new' : cap.row.id);
 const capBody = () => $('cap-body').value.trim().slice(0, BODY_MAX);
 const capPlace = () => $('cap-place').value.trim().slice(0, PLACE_MAX) || null;
@@ -1507,6 +1649,7 @@ function draftRecord(open) {
   if (hasPhoto()) d.photo_to_claude = cap.toClaude;
   d.shared = cap.share;
   d.place_name = $('cap-place').value;
+  if (cap.mode === 'new' && cap.located) d.located = cap.located;
   return d;
 }
 
@@ -1558,7 +1701,16 @@ async function openCapture(mode, row, draft) {
   cap.busy = false;
   cap.fix = null;
   cap.osm = null;
+  cap.area = null;
   cap.seq++;
+  // Locate (0.16.0): new captures only; a located fix kept in the draft comes back with it.
+  const loc = mode === 'new' && draft && draft.located;
+  cap.located = loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lng) ? { lat: loc.lat, lng: loc.lng, acc: Number.isFinite(loc.acc) ? loc.acc : null } : null;
+  if (cap.located) cap.fix = { lat: cap.located.lat, lng: cap.located.lng, acc: cap.located.acc, located: true };
+  $('cap-locate').hidden = mode !== 'new';
+  $('cap-locate').disabled = false;
+  $('cap-locate').removeAttribute('aria-busy');
+  $('cap-locate-msg').textContent = '';
   const ta = $('cap-body');
   ta.value = draft ? draft.body : row ? row.body : '';
   // Place: the draft's text, else the saved name (SPEC.md 7C.4).
@@ -1601,7 +1753,7 @@ async function openCapture(mode, row, draft) {
   cap.open = true;
   history.pushState({ tbCap: true }, '');
   updatePlaceField();
-  drawChips([], null);
+  drawChips([], []);
   refreshPlaceChips().catch((e) => console.warn('place chips failed', e));
   if (mode === 'new') fixAtOpen(cap.seq);
   updateSaveEnabled();
@@ -1645,7 +1797,7 @@ async function closeCapture(how) {
   }
   setPhoto(null);
   chipSeq++;
-  drawChips([], null);
+  drawChips([], []);
   await updateDraftNote();
 }
 
@@ -1669,6 +1821,8 @@ async function saveCapture() {
   try {
     if (cap.mode === 'new') {
       const row = newCaptureRow(body, capPlace());
+      const located = cap.located;
+      if (located) Object.assign(row, { lat: located.lat, lng: located.lng, accuracy_m: located.acc });   // Locate (0.16.0)
       if (ph.state === 'new') row.photo_to_claude = cap.toClaude;
       // Made while not linked: unshared, and stays so unless switched on later in edit.
       row.shared = linkedNow() ? cap.share : false;
@@ -1685,7 +1839,7 @@ async function saveCapture() {
       capView = 'day';                         // from the day list too (SPEC.md 7D)
       await closeCapture('saved');
       await render();
-      requestGps(row.id);
+      if (!located) requestGps(row.id);
     } else {
       const id = cap.row.id, place = capPlace();
       const toClaude = hasPhoto() ? cap.toClaude : true;
@@ -3257,6 +3411,7 @@ $('cap-delete').addEventListener('click', () => { deleteCapture(); });
 $('cap-body').addEventListener('input', () => { updateSaveEnabled(); writeDraft(); });
 $('cap-place').addEventListener('input', () => { updatePlaceField(); writeDraft(); refreshPlaceChips().catch(() => {}); });
 $('cap-place').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); $('cap-place').blur(); } });
+$('cap-locate').addEventListener('click', () => { locateNow(); });
 $('cap-place-clear').addEventListener('click', () => {
   $('cap-place').value = '';                  // back to the coordinates (SPEC.md 7C.4)
   updatePlaceField(); writeDraft(); refreshPlaceChips().catch(() => {});

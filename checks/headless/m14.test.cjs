@@ -100,7 +100,7 @@ async function openList(page) {
     await G.evaluate(() => { followToday = true; return render(); });
 
     // ---------- the day bar (7D.2, item 1) ----------
-    check(`L0 v${APP}`, APP === '0.15.0' && (await G.evaluate(() => APP_VERSION)) === '0.15.0', APP);
+    check(`L0 v${APP}`, (await G.evaluate(() => APP_VERSION)) === APP, APP);
     const bar = await G.evaluate(() => {
       const d = document.getElementById('day-days'), j = document.getElementById('j-days');
       const cs = getComputedStyle(d), js = getComputedStyle(j);

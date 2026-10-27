@@ -27,6 +27,10 @@
 // - M1.4 (0.15.0): the Captures day bar's Days link and day list, built from IndexedDB only;
 //   counts with singular forms and photos left out when none; places a person named only;
 //   a row tap stops following today, Today follows it again; the narrow-screen day bar
+// - 0.16.0: the place-you-are-in chip from Overpass is_in (POST, the 7C.4 kinds, tags and
+//   bounding boxes, smallest wins, "e:" cache, one at a time, timeout, failures not cached);
+//   chip order own, area, nearest, at most three; Locate on new captures only, a fresh fix,
+//   accuracy in the hint, saved as the capture's coordinates instead of the fix at Save
 'use strict';
 
 const fs = require('fs');
@@ -302,6 +306,34 @@ if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(
   check(/@media \(max-width: 401\.98px\) \{\n    #daybar \{ display: grid;/.test(trip), 'M1.4: below 402 px the date takes the full width (never two lines)');
   const pkg = JSON.parse(read('checks/headless/package.json'));
   check(exists('checks/headless/m14.test.cjs') && /node m14\.test\.cjs/.test(pkg.scripts.test), 'M1.4: headless suite m14 exists and runs with the others');
+}
+
+// ---------- 0.16.0 place you are in, Locate (SPEC.md 7.2, 7C.4; 27/10/26) ----------
+{
+  const trip = read('trip.html');
+  const fnBody = (name) => { const i = trip.indexOf(`function ${name}(`); if (i < 0) return ''; const j = trip.indexOf('\n}\n', i); return trip.slice(i, j); };
+  const area = fnBody('areaName'), label = fnBody('areaLabel'), query = fnBody('areaQuery'), refresh = fnBody('refreshPlaceChips'), locate = fnBody('locateNow');
+  check(/const OVERPASS_URL = 'https:\/\/overpass-api\.de\/api\/interpreter';/.test(trip) && /method: 'POST'/.test(area) && /application\/x-www-form-urlencoded/.test(area)
+    && /body: 'data=' \+ encodeURIComponent\(areaQuery\(lat, lng\)\)/.test(area), '0.16.0: place-you-are-in lookup is a form POST to overpass-api.de');
+  check(/is_in\(\$\{at\}\)->\.a;/.test(query) && /wr\(pivot\.a\)\[name\]\$\{f\};/.test(query) && /out tags bb;/.test(query) && /\[out:json\]\[timeout:8\];/.test(query)
+    && ['[shop=mall]', '[building]', '[railway=station]', '[public_transport=station]', '[leisure=park]', '[amenity=marketplace]', '[tourism]', '[landuse=retail]'].every((f) => trip.includes(`'${f}'`)),
+    '0.16.0: is_in query asks only for the 7C.4 kinds, named, with tags and bounding boxes');
+  check(/if \(!best \|\| size < best\.size\)/.test(label) && /'name:en'/.test(label), '0.16.0: the smallest enclosing area wins; name:en before name');
+  check(/const areaKey = \(lat, lng\) => 'e' \+ geoKey\(lat, lng\)\.slice\(1\);/.test(trip) && /idb\.put\('geocache', \{ key, name,/.test(area) && /areaChain = run\.catch/.test(area)
+    && /const OVERPASS_TIMEOUT_MS = 10000;/.test(trip) && /ctl\.abort\(\), OVERPASS_TIMEOUT_MS/.test(area) && /if \(!navigator\.onLine\) return null;/.test(area)
+    && /if \(!res\.ok\) throw/.test(area), '0.16.0: cached under "e:" in the same cell, online only, one at a time, 10 s timeout, a failure not cached');
+  check(/for \(const source of \['area', 'osm'\]\)/.test(refresh) && /own\.length \+ maps\.length >= PLACE_CHIPS/.test(refresh) && /taken\.has\(n\.toLowerCase\(\)\)/.test(refresh),
+    '0.16.0: chips own names, then the place you are in, then the nearest name; at most three, no two alike');
+  check(/const LOCATE_OPTS = \{ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 \};/.test(trip) && /getCurrentPosition\([\s\S]*LOCATE_OPTS\)/.test(locate)
+    && /if \(!cap\.open \|\| cap\.mode !== 'new'\) return;/.test(locate) && /\$\('cap-locate'\)\.hidden = mode !== 'new';/.test(trip),
+    '0.16.0: Locate takes a fresh high-accuracy fix, on new captures only');
+  check(/\\u00b1\$\{Math\.round\(pos\.acc\)\} m/.test(trip) && /if \(located\) Object\.assign\(row, \{ lat: located\.lat, lng: located\.lng, accuracy_m: located\.acc \}\);/.test(trip)
+    && /if \(!located\) requestGps\(row\.id\);/.test(trip) && /cap\.mode === 'new' \&\& cap\.located\) d\.located = cap\.located;/.test(trip),
+    '0.16.0: the located fix shows its accuracy, is kept in the draft and saved instead of the fix at Save');
+  check(/e && e\.code === 1 \?/.test(locate) && /e && e\.code === 3 \?/.test(locate) && /msg\.textContent = 'Locating';/.test(locate), '0.16.0: Locate says Locating, and says so when denied or timed out');
+  const pkg = JSON.parse(read('checks/headless/package.json'));
+  check(exists('checks/headless/m13b.test.cjs') && /node m13b\.test\.cjs/.test(pkg.scripts.test) && /overpass-api\.de/.test(read('checks/headless/harness.cjs')),
+    '0.16.0: headless suite m13b runs with the others; the harness mocks Overpass');
 }
 
 // ---------- keep-alive workflow (SPEC.md 6.8 step 5) ----------

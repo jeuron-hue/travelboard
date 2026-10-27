@@ -16,6 +16,8 @@
 //   tb_prompt_set (own row only), carried to the simulated tb-journal through me
 // - OpenStreetMap Nominatim reverse geocoding mock (7C.4): counts requests, switchable to fail
 //   or return nothing
+// - Overpass is_in mock (0.16.0, 7C.4): reads the point from the POSTed query, answers with the
+//   areas m.overpass.areas(lat, lng) gives (none by default), counts requests, switchable to fail
 // - browser context setup: timezone, fake session (Gary's or Eric's), controllable geolocation stub
 // Needs the dev dependency in package.json (npm install here) or NODE_PATH pointing at
 // an existing playwright install. Chromium: npx playwright install chromium.
@@ -150,6 +152,9 @@ function makeMock() {
   // of lat, lng, or a string; '' means nothing there), and a failure switch.
   // address (v13): a Nominatim address object, or a function of lat, lng returning one.
   m.osm = { calls: [], name: '', address: null, fail: null };   // fail: null | 'network' | 'http'
+  // Overpass (0.16.0): areas is a function of lat, lng returning [{ id, name, tags, bounds }] or
+  // an array; fail: null | 'network' | 'http'; delayMs holds the answer back.
+  m.overpass = { calls: [], areas: () => [], fail: null, delayMs: 0 };
   return m;
 }
 
@@ -311,6 +316,24 @@ async function attachMock(ctx, m, phone) {
     return route.fulfill({ status: 200, headers: Object.assign({ 'content-type': 'application/json' }, cors),
       body: JSON.stringify({ place_id: 1, lat: String(lat), lon: String(lng), category: 'shop', type: 'mall', name: name || '', display_name: (name ? name + ', ' : '') + 'Singapore', address }) });
   });
+  // No suite ever reaches the real Overpass API (0.16.0).
+  await ctx.route('https://overpass-api.de/**', async (route) => {
+    const req = route.request();
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+    const form = new URLSearchParams(req.postData() || '');
+    const q = form.get('data') || new URL(req.url()).searchParams.get('data') || '';
+    const at = /is_in\(([-0-9.]+),([-0-9.]+)\)/.exec(q);
+    const lat = at ? Number(at[1]) : null, lng = at ? Number(at[2]) : null;
+    m.overpass.calls.push({ method: req.method(), url: req.url(), query: q, lat, lng, contentType: req.headers()['content-type'] || '', at: Date.now(), phone: phone ? phone.name || null : null });
+    if (m.overpass.delayMs) await new Promise((r) => setTimeout(r, m.overpass.delayMs));
+    if (m.offline || (phone && phone.offline) || m.overpass.fail === 'network') return route.abort('internetdisconnected');
+    if (m.overpass.fail === 'http') return route.fulfill({ status: 504, headers: cors, body: 'Gateway timeout' });
+    const list = typeof m.overpass.areas === 'function' ? m.overpass.areas(lat, lng) : m.overpass.areas || [];
+    const elements = list.map((a, i) => ({ type: a.type || 'way', id: a.id || 900 + i, bounds: a.bounds,
+      tags: Object.assign({ name: a.name }, a.tags || {}) }));
+    return route.fulfill({ status: 200, headers: Object.assign({ 'content-type': 'application/json' }, cors),
+      body: JSON.stringify({ version: 0.6, generator: 'mock', elements }) });
+  });
   await ctx.route(SUPA + '/**', async (route) => {
     const req = route.request();
     if (m.offline || (phone && phone.offline)) return route.abort('internetdisconnected');
@@ -417,15 +440,17 @@ function callerOf(req) {
   try { return JSON.parse(Buffer.from(t[2], 'base64url').toString('utf8')).sub || null; } catch (e) { return null; }
 }
 
-// Geolocation stub so the test controls timing: mode deny | grant | hold; fix { lat, lng } moves it.
+// Geolocation stub so the test controls timing: mode deny | grant | hold | timeout (0.16.0); fix
+// { lat, lng } moves it; acc sets the accuracy (12.5 m by default).
 const GEO_INIT = `
   window.__geo = { mode: 'deny', pending: [], calls: 0, lastOpts: null };
   Object.defineProperty(navigator, 'geolocation', { configurable: true, value: {
     getCurrentPosition(ok, err, opts) {
       const g = window.__geo; g.calls++; g.lastOpts = opts;
       // g.fix (M1.3) moves the phone; read when the fix is delivered, so a held one gets the latest.
-      const fix = () => { const at = g.fix || { lat: 13.7466, lng: 100.5393 }; return { coords: { latitude: at.lat, longitude: at.lng, accuracy: 12.5 }, timestamp: Date.now() }; };
+      const fix = () => { const at = g.fix || { lat: 13.7466, lng: 100.5393 }; return { coords: { latitude: at.lat, longitude: at.lng, accuracy: g.acc || 12.5 }, timestamp: Date.now() }; };
       if (g.mode === 'deny') setTimeout(() => err && err({ code: 1, message: 'User denied Geolocation' }), 10);
+      else if (g.mode === 'timeout') setTimeout(() => err && err({ code: 3, message: 'Timeout expired' }), 10);
       else if (g.mode === 'hold') g.pending.push(() => ok(fix()));
       else setTimeout(() => ok(fix()), 10);
     },

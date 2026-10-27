@@ -5,6 +5,68 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ---
 
+## 0.16.0 Place you are in, and Locate (SPEC.md 7.2, 7C.4; 7C.7 items 4a, 4b)
+
+**Status 27/10/26: 0.16.0 built (Gary's decisions 27/10/26, after step 9 inside Tampines 1 offered the shop "Atrix"); automated checks below; device steps for both phones to run by 05/11/26.** Client only, no migration; `tb-journal` unchanged. The 0.15.0 device steps (M1.4, below) are unchanged and can run on 0.16.0.
+
+Service for the place you are in: the Overpass API's `is_in` on the main instance `overpass-api.de`, a form POST to `/api/interpreter`. Why: Nominatim's reverse lookup returns the nearest feature, never the enclosing one, and has no containment query; Overpass answers "which named areas contain this point" directly, needs no key, and sends CORS headers so the phone can call it. Use stays far inside the main instance's guideline (under 10,000 requests and 1 GB a day): two phones, at most one request per 50 m cell ever, one at a time.
+
+### Automated results, 27/10/26 (0.16.0)
+
+| Check | Result | Evidence |
+|---|---|---|
+| `checks/static.cjs` | PASS, 135 of 135 | Adds 9: a form POST to overpass-api.de; the `is_in` query asks only for the 7C.4 kinds, named, with tags and bounding boxes, 8 s server timeout; smallest area wins, `name:en` first; cached under `e:` in the same 50 m cell, online only, one at a time, 10 s timeout, a failure not cached; chip order own, area, nearest, at most three, no two alike; Locate a fresh high-accuracy fix on new captures only; the located fix shows its accuracy, is kept in the draft and saved instead of the fix at Save; Locating, denied and timed-out lines; m13b runs with the others and the harness mocks Overpass. Each was seen to fail against a copy of `trip.html` with that rule broken. |
+| `checks/smoke.sql` | PASS, 165 of 165 | Live project `travelboard` (ref `nnnnonspfljdkrxstslw` checked first), one rolled-back transaction, through the connector; the test body as in the file, only the final SELECT shortened to a pass count. Regression run; no migration. No smoke rows, users or messages left afterwards. |
+| `fn.test.cjs` | Not run | `tb-journal` unchanged; no Deno in this sandbox (as 26/10/26). Last pass 62 of 62 on 26/10/26. |
+| `m1`, `m2`, `m11`, `m12`, `m13` | PASS, 107, 80, 59, 64, 113 of each, two runs | Unchanged suites; the harness now answers Overpass with no areas by default, so their chips are as before. |
+| `m13b.test.cjs` (new) | PASS, 43 of 43, two runs (four in all) | Below. |
+| `m14.test.cjs` | PASS, 34 of 34, two runs | L0 compared the version with a fixed '0.15.0' and failed on 0.16.0; it now compares with `trip.html`'s APP_VERSION, as the other suites do (m13b's A0 the same). |
+| Live Overpass from here | Could not check | Through Apify every `/api/interpreter` request to overpass-api.de came back 406 Not Acceptable (the step 9 query, a one-node query, with a phone User-Agent, and from Apify's headless browser), while `/api/status` answered 200 with CORS `*`. The interpreter seems to turn away automated clients; whether the phone's Chrome is let through is the first thing device step 2 shows. Two other public instances (private.coffee, kumi.systems) did not answer within 120 s. If the phone gets no mall chip, the nearest-name chip still shows as in 0.15.0. |
+| Visual | Checked | Headless screenshots of the capture sheet at 412 and 360 px, light and dark: the Locate button at the right of the place field in ink blue, the hint with "±12 m", the chips "Tampines 1" and "Atrix", the credit. |
+| Deploy 0.16.0 | @@DEPLOY@@ | |
+
+Headless groups (`m13b.test.cjs`, Nominatim and Overpass mocked; Tampines 1 drawn as way 166194476 around the step 9 point 1.35417, 103.94492):
+
+| Group | What it checks |
+|---|---|
+| A1 to A4 | At the step 9 point the chips read "Tampines 1" (area) then "Atrix" (nearest), with the credit, nothing filled; one Overpass request, a form POST to `https://overpass-api.de/api/interpreter` with `is_in(1.354170,103.944920)`, only the 7C.4 kinds, `out tags bb`, server timeout 8 s; Nominatim asked once as before; the answer cached under `e:` in the same cell as the Nominatim key; a tap fills "Tampines 1", saved as `place_name` |
+| A5 | A second capture at the same spot asks neither service; "Tampines 1" now comes first as an own name and is not repeated as an area chip |
+| A6 | Three nested areas (retail area, park, building): the smallest, "Small Hall", wins; a Thai mall offers its `name:en` "Siam Paragon" |
+| A7 | Overpass failing (HTTP 504, then network): the nearest name alone with the credit, no error shown, nothing cached under `e:`; the next opening asks again and gets the mall |
+| A8, A9 | An area and a nearest name differing only in case give one chip; three own names in range: three own chips, no map chip; two own names, one equal to the area: own, own, then the nearest name |
+| A10, A11 | Two lookups queued together go one after the other; offline no Overpass or Nominatim request |
+| B1 to B3 | A 44 px Locate button inside the place field on a new capture; Locate asks for high accuracy, `maximumAge` 0, 15 s; "Locating", busy and off while it waits; then the hint "1.3450, 103.9530 ±8 m", the chips reloaded for the new place (one new Overpass request there) |
+| B4, B5 | An open-time fix arriving after Locate does not replace it; the located fix is kept in the draft and comes back on reopening |
+| B6 | Saved with the located coordinates and accuracy; no fix fired after Save; the row shows those coordinates |
+| B7 | Denied: "Location is blocked for travelboard. Allow it in Chrome's site settings. The earlier position stays."; timed out: "No fix within 15 s. The earlier position stays."; in both the old hint and chips stay |
+| B8 | Offline in a cell never looked up: Locate gives a fix with "±20 m", the chips are own names only, no request |
+| B9, B10 | No Locate on the edit screen; back on a new capture it is there and idle; the button in the theme's ink blue, light and dark |
+
+### Device steps (both phones), 0.16.0
+
+SPEC 7C.7 items 4a and 4b, and step 9 of the combined run again. Gary on the Pixel; steps marked **Eric** are his. Note the time of each step, the ± figures, and anything that looks wrong; screenshots help.
+
+1. **Update both phones.** Each: open travelboard, tap "Update ready, tap to reload". Tap the stamp: Version reads 0.16.0. Close with the X.
+2. **Inside a mall (item 4a; step 9 again).** Gary, inside Tampines 1 (or any mall), with signal: Capture. Within a few seconds two dashed terracotta chips show: the mall's name first ("Tampines 1"), then a nearby shop (for example "Atrix"), with "Map suggestion © OpenStreetMap contributors" under them. Nothing is filled in. Tap the mall chip: the field reads the mall's name. Type `0.16.0 mall`, Save. If only the shop chip shows, note it and take a screenshot: it would mean the map service turned the phone away (see the Live Overpass row above).
+3. **The journal names it (step 9, item 6).** Later, Journal: send `Where was I at lunch today?`. The reply names the mall.
+4. **Locate indoors (item 4b).** Still indoors: Capture. Note the grey hint in Place (coordinates, no ± yet). Tap the target button at the right of the Place field: "Locating" shows under the field, then the hint changes to new coordinates with "±N m". Note N. The chips may change for the new position. Type `Locate indoors`, Save.
+5. **Locate outdoors (item 4b).** Outdoors with open sky: Capture, tap Locate, note the ± figure (usually smaller than indoors). Type `Locate outdoors`, Save. Claude checks that each row's coordinates and accuracy are the ones Locate showed, not a later fix.
+6. **Not on an edit (item 4b).** Tap any older capture of your own: the edit sheet has no Locate button. Close.
+7. **Airplane mode.** Airplane mode on. Capture, tap Locate: a fix with ± comes (indoors it can take longer; if it says "No fix within 15 s. The earlier position stays.", note it and try once more near a window). The chips show only your own names (or a map name this phone already looked up for that spot). Type `Locate offline`, Save. Airplane mode off; the stamp reads SYNCED within about 30 s.
+8. **Eric (item 4b).** **Eric:** update (step 1), then Capture, tap Locate, note the ± figure, type `Eric locate`, Save.
+9. **Days still work.** Either phone: Captures, Days: today's row counts the captures above with their places; tap it, then Days and Today. (The full 0.15.0 steps below can run on 0.16.0.)
+10. **Light and dark, both phones.** Each: Settings, Dark; Capture: the Locate button in light blue at the right of the place field, the chips and the credit readable; Close. Settings, Light (or Auto) and look again.
+
+Report the times, the ± figures from steps 4, 5, 7 and 8, and anything that looks wrong. Claude then checks the rows on the server.
+
+### Open items (27/10/26, 0.16.0)
+
+1. Device steps 1 to 10 above, by 05/11/26.
+2. Overpass from the phone: unconfirmed until step 2 (the Live Overpass row). If the phone is turned away too, the fallback is to point `OVERPASS_URL` at another public instance; that is a one-line change, but a second service's policy and reliability would need checking first, so it waits for Gary's call.
+3. `fn.test.cjs` not run (no Deno here); `tb-journal` unchanged.
+
+---
+
 ## M1.4 Capture days (SPEC.md 7D)
 
 **Status 26/10/26: 0.15.0 built (Gary's decision 26/10/26); automated checks below; device steps for both phones to run by 05/11/26.** Client only, no migration; `tb-journal` unchanged. Step 9 of the M1.3 combined run (named place, 27/10/26) stays as written and can run on 0.15.0.
@@ -59,7 +121,7 @@ Report the times, the counts you compared in step 3, and anything that looks wro
 
 ## M1.3 Look and place (SPEC.md 7C)
 
-**Status 26/10/26 2318 hrs: the combined two-phone run passed on 0.14.2, and the three fixes from it passed their re-run on 0.14.3 on both phones. 7C.7 items 1 to 3, 6a and 7 pass on the phones, items 5, 8 and 9 automated. Only step 9 (named place, 7C.7 items 4 and 6) is left before the 05/11/26 cut-off; Gary runs it 27/10/26.** Migration 0009 applied, `tb-journal` v6 deployed (unchanged since).
+**Status 27/10/26: the combined two-phone run passed on 0.14.2, the three fixes from it on 0.14.3, and step 9 on 0.15.0 (27/10/26, result below). 7C.7 items 1 to 4, 6, 6a and 7 pass on the phones, items 5, 8 and 9 automated. Step 9 showed the map chip offers the nearest feature, not the place you are in; 0.16.0 adds that chip and Locate (items 4a and 4b, section above), with step 9 to run again on it.** (Status 26/10/26 2318 hrs: the combined two-phone run passed on 0.14.2, and the three fixes from it passed their re-run on 0.14.3 on both phones.) Migration 0009 applied, `tb-journal` v6 deployed (unchanged since).
 
 ### Automated results, 26/10/26 (0.14.3)
 
@@ -80,6 +142,15 @@ How the fixes were made:
 - Settings: the stamp's click also calls `sync()`; the sheet already re-renders from `sync()`'s `finally`. Headless, Sync now with the sheet open did update the row before the change (checked against 0.14.2 first), so the phone's stale "Waiting" was the absence of any sync while the queue was empty, which the idle sync and the sync on open now cover.
 - Keyboard: a `visualViewport` listener, kept beside `interactive-widget=resizes-content`. The meta works only where Chrome honours it; the listener sizes the capture sheet to what is visible and lifts the footer by what the keyboard covers in either case, so the fix does not depend on how the installed app treats the meta. With the keyboard up the ruled area's minimum drops from 160 to 96 px, and a focused field in the sheet is scrolled into view.
 - Password notice: cleared on Sign out and on `SIGNED_IN` or `SIGNED_OUT` from `onAuthStateChange`.
+
+### Step 9 result, 0.15.0 (Pixel, Gary), 27/10/26
+
+Gary inside Tampines 1 mall at 1.35417, 103.94492, 1312 hrs.
+
+| Item | Result |
+|---|---|
+| 7C.7 item 6 (journal names the place) | PASS, with a name Gary typed. |
+| 7C.7 item 4 (map chip) | PASS as built: a map chip showed with the credit and nothing was filled in without a tap. But it offered "Atrix", a shop, not the mall he was in. Claude checked Nominatim at that point: reverse `zoom=18` returns node 12565999281 "Atrix" (`shop=electronics`); `zoom=17` returns the road "Tampines Central 1". Tampines 1 is in OSM as way 166194476, `shop=mall`, and the point is inside its bounding box. Reverse geocoding gives the nearest feature, never the one the phone is inside. Fixed in 0.16.0 (place you are in chip, item 4a); step 9 runs again on 0.16.0 (0.16.0 device step 2). |
 
 ### Device results, 0.14.2 (both phones), 26/10/26
 
@@ -305,7 +376,7 @@ Session A's build list (items 1 to 7) is done in 0.14.0: journal page and inline
 
 Untested
 1. Done 26/10/26: the combined run on 0.14.2 and the 0.14.3 re-run, both phones (results above), apart from step 9. Cut-off 05/11/26.
-2. 7C.7 item 4 at a named place and item 6 asking about it (step 9): on 27/10/26 (Gary).
+2. Done 27/10/26: step 9 on 0.15.0 (result above); items 4 and 6 pass; the chip offered the nearest shop, so 0.16.0 adds the place you are in and Locate, and step 9 runs again on 0.16.0.
 3. Item 1 passed on both phones 26/10/26 (step 27). The new icon on the home screen: not reported yet.
 4. Change password end to end: passed 26/10/26 (Eric, step 25; no reauthentication asked). The notice that outlived the session is fixed in 0.14.3 (re-run step 4).
 
