@@ -23,7 +23,7 @@ Service for the place you are in: the Overpass API's `is_in` on the main instanc
 | `m14.test.cjs` | PASS, 34 of 34, two runs | L0 compared the version with a fixed '0.15.0' and failed on 0.16.0; it now compares with `trip.html`'s APP_VERSION, as the other suites do (m13b's A0 the same). |
 | Live Overpass from here | Could not check | Through Apify every `/api/interpreter` request to overpass-api.de came back 406 Not Acceptable (the step 9 query, a one-node query, with a phone User-Agent, and from Apify's headless browser), while `/api/status` answered 200 with CORS `*`. The interpreter seems to turn away automated clients; whether the phone's Chrome is let through is the first thing device step 2 shows. Two other public instances (private.coffee, kumi.systems) did not answer within 120 s. If the phone gets no mall chip, the nearest-name chip still shows as in 0.15.0. |
 | Visual | Checked | Headless screenshots of the capture sheet at 412 and 360 px, light and dark: the Locate button at the right of the place field in ink blue, the hint with "±12 m", the chips "Tampines 1" and "Atrix", the credit. |
-| Deploy 0.16.0 | @@DEPLOY@@ | |
+| Deploy 0.16.0 | PASS | `main` at `b0c111c`; Pages build succeeded. Live `sw.js` reads `const CACHE_VERSION = '0.16.0';` (Last-Modified 27/10/26 1518 hrs SGT), fetched through Apify. |
 
 Headless groups (`m13b.test.cjs`, Nominatim and Overpass mocked; Tampines 1 drawn as way 166194476 around the step 9 point 1.35417, 103.94492):
 
