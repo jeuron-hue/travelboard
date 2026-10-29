@@ -39,6 +39,13 @@
     capture, own or shared, plus today, with its counts and named places; a tap opens the day.
 
   Change log (newest first)
+  - 30/10/26 0.16.1. The place-you-are-in chip comes from Nominatim search, not Overpass
+    (overpass-api.de answers the phone's Chrome with 406, so 0.16.0's chip never showed). For
+    the position, one search per kind (mall, station, hotel; Gary's scope 30/10/26) bounded to
+    about 150 m each side; a result counts only if its kind matches and its bounding box holds
+    the point; the smallest box wins. Reverse and search share one line: one request at a time,
+    a second apart. Cached by the same 50 m cell under "p:"; a failure is not cached. The
+    Overpass code is gone. Chip order and limits unchanged.
   - 27/10/26 0.16.0. Place chips inside buildings, and Locate (SPEC.md 7.2, 7C.4; Gary's decisions
     27/10/26 after step 9 inside Tampines 1 offered the shop "Atrix"). A chip for the place the
     phone is in: the smallest named mall, building, station, park, market, hotel or attraction,
@@ -951,7 +958,7 @@
 'use strict';
 
 // Bump together with CACHE_VERSION in sw.js on every release.
-const APP_VERSION = '0.16.0';     // 0.<minor>.<patch> from 0.13.0 (was 13), Gary 24/10/26
+const APP_VERSION = '0.16.1';     // 0.<minor>.<patch> from 0.13.0 (was 13), Gary 24/10/26
 
 const PROJECT_REF = 'nnnnonspfljdkrxstslw';           // Supabase project travelboard (SPEC.md D3, 6.8)
 const SUPABASE_URL = 'https://' + PROJECT_REF + '.supabase.co';
@@ -977,10 +984,10 @@ const PLACE_CHIPS = 3;              // at most three chips, own names first
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/reverse';
 const NOMINATIM_GAP_MS = 1000;      // at most one request a second (OSM usage policy)
 const NOMINATIM_TIMEOUT_MS = 8000;
-// The place the phone is in (0.16.0, SPEC.md 7C.4): Overpass is_in on the main instance, POST
-// as documented. One request at a time; a 10 s timeout here and 8 s for the query itself.
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
-const OVERPASS_TIMEOUT_MS = 10000;
+// The place the phone is in (0.16.1, SPEC.md 7C.4): Nominatim search within about 150 m, one
+// query per kind, on the same one-request-a-second line as the reverse lookup.
+const NOMINATIM_SEARCH_URL = 'https://nominatim.openstreetmap.org/search';
+const AREA_VIEW_M = 150;
 // Locate (0.16.0, SPEC.md 7.2): a fresh fix only, never a cached one.
 const LOCATE_OPTS = { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 };
 const GEO_CELL_DEG = 0.00045;       // cache cell: about 50 m of latitude
@@ -1333,88 +1340,88 @@ function osmLabel(j) {
   }
   return label ? label.slice(0, PLACE_MAX) : null;
 }
+// Nominatim, reverse and search alike: one request at a time, at least a second apart (OSM usage
+// policy). nominatimGet is called only from inside a run queued on osmChain.
 let osmLast = 0, osmChain = Promise.resolve();
-async function osmName(lat, lng) {
-  const key = geoKey(lat, lng);
+async function nominatimGet(url) {
+  const wait = osmLast + NOMINATIM_GAP_MS - Date.now();
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  osmLast = Date.now();
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), NOMINATIM_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { cache: 'no-store', signal: ctl.signal, headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error('Nominatim HTTP ' + res.status);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+// A cached answer (an empty one too) for a key, else ask() queued on the Nominatim line, its
+// answer cached. Offline asks nothing. A failure is not cached and gives no chip.
+async function nominatimCached(key, ask) {
   const hit = await idb.get('geocache', key);
   if (hit) return hit.name || null;
   if (!navigator.onLine) return null;
   const run = osmChain.then(async () => {
     const again = await idb.get('geocache', key);    // filled by a lookup queued ahead of this one
     if (again) return again.name || null;
-    const wait = osmLast + NOMINATIM_GAP_MS - Date.now();
-    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-    osmLast = Date.now();
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), NOMINATIM_TIMEOUT_MS);
-    try {
-      const url = `${NOMINATIM_URL}?format=jsonv2&lat=${Number(lat).toFixed(6)}&lon=${Number(lng).toFixed(6)}&zoom=18&accept-language=en`;
-      const res = await fetch(url, { cache: 'no-store', signal: ctl.signal, headers: { Accept: 'application/json' } });
-      if (!res.ok) throw new Error('Nominatim HTTP ' + res.status);
-      const j = await res.json();
-      const name = osmLabel(j);
-      await idb.put('geocache', { key, name, at: new Date().toISOString() });
-      return name;
-    } finally {
-      clearTimeout(timer);
-    }
+    const name = await ask();
+    await idb.put('geocache', { key, name, at: new Date().toISOString() });
+    return name;
   });
   osmChain = run.catch(() => {});
   return run;
 }
-
-// The smallest named area the position is inside, from Overpass is_in (0.16.0, SPEC.md 7C.4):
-// a mall, a named building, a station, a park, a market, a hotel or attraction, or a retail
-// area. Nominatim's reverse lookup gives the nearest feature instead (step 9, 27/10/26: inside
-// Tampines 1 it offered the shop "Atrix"). Cached like the Nominatim name, in the same 50 m cell
-// under "e:" (an empty answer too); one request at a time; a failure is not cached.
-const areaKey = (lat, lng) => 'e' + geoKey(lat, lng).slice(1);
-const AREA_FILTERS = ['[shop=mall]', '[building]', '[railway=station]', '[public_transport=station]',
-  '[leisure=park]', '[amenity=marketplace]', '[tourism]', '[landuse=retail]'];
-function areaQuery(lat, lng) {
-  const at = `${Number(lat).toFixed(6)},${Number(lng).toFixed(6)}`;
-  return `[out:json][timeout:8];is_in(${at})->.a;(${AREA_FILTERS.map((f) => `wr(pivot.a)[name]${f};`).join('')});out tags bb;`;
+function osmName(lat, lng) {
+  return nominatimCached(geoKey(lat, lng), async () => {
+    const url = `${NOMINATIM_URL}?format=jsonv2&lat=${Number(lat).toFixed(6)}&lon=${Number(lng).toFixed(6)}&zoom=18&accept-language=en`;
+    const j = await nominatimGet(url);
+    const name = osmLabel(j);
+    return name;
+  });
 }
-// The chip's text from an Overpass answer: the English name, else the name, of the element
-// with the smallest bounding box; null when nothing encloses the point.
-function areaLabel(j) {
-  const els = j && Array.isArray(j.elements) ? j.elements : [];
+
+// The place the phone is in (0.16.1, SPEC.md 7C.4; Gary's scope 30/10/26): Nominatim search
+// within about 150 m each side, one query per kind (mall, station, hotel), keeping results of
+// that kind whose bounding box contains the position; the smallest box wins. Reverse geocoding
+// gives the nearest feature instead (step 9, 27/10/26: inside Tampines 1 it offered the shop
+// "Atrix"), and Overpass, tried in 0.16.0, answers the phone with 406. Cached by the same 50 m
+// cell under "p:" (an empty answer too); a failure of any query is not cached.
+const areaKey = (lat, lng) => 'p' + geoKey(lat, lng).slice(1);
+const AREA_KINDS = [
+  { q: 'mall', is: (c, t) => c === 'shop' && t === 'mall' },
+  { q: 'station', is: (c, t) => (c === 'railway' || c === 'public_transport') && t === 'station' },
+  { q: 'hotel', is: (c, t) => c === 'tourism' && t === 'hotel' }
+];
+function areaSearchUrl(q, lat, lng) {
+  const dLat = AREA_VIEW_M / 111320, dLng = AREA_VIEW_M / (111320 * Math.max(0.2, Math.cos(lat * Math.PI / 180)));
+  const vb = [lng - dLng, lat + dLat, lng + dLng, lat - dLat].map((x) => x.toFixed(6)).join(',');
+  return `${NOMINATIM_SEARCH_URL}?format=jsonv2&q=${q}&viewbox=${vb}&bounded=1&limit=10&accept-language=en`;
+}
+// answers: [{ kind, list }] from the searches. The name (English, by accept-language=en) of the
+// result of its kind whose box holds the point and is smallest; null when none does.
+function areaLabel(answers, lat, lng) {
   let best = null;
-  for (const e of els) {
-    const t = e && e.tags, b = e && e.bounds;
-    const name = t && (typeof t['name:en'] === 'string' && t['name:en'].trim() ? t['name:en'] : t.name);
-    if (typeof name !== 'string' || !name.trim() || !b) continue;
-    const size = Math.abs(b.maxlat - b.minlat) * Math.abs(b.maxlon - b.minlon) * Math.cos(((b.maxlat + b.minlat) / 2) * Math.PI / 180);
-    if (!Number.isFinite(size)) continue;
-    if (!best || size < best.size) best = { size, name: name.trim().slice(0, PLACE_MAX) };
+  for (const { kind, list } of answers) {
+    for (const r of Array.isArray(list) ? list : []) {
+      const name = r && typeof r.name === 'string' ? r.name.trim() : '';
+      const b = r && Array.isArray(r.boundingbox) ? r.boundingbox.map(Number) : [];
+      if (!name || !kind.is(r.category, r.type) || b.length !== 4 || !b.every(Number.isFinite)) continue;
+      const [s, n, w, e] = b;
+      if (lat < s || lat > n || lng < w || lng > e) continue;
+      const size = (n - s) * (e - w) * Math.cos(((n + s) / 2) * Math.PI / 180);
+      if (!best || size < best.size) best = { size, name: name.slice(0, PLACE_MAX) };
+    }
   }
   return best ? best.name : null;
 }
-let areaChain = Promise.resolve();
-async function areaName(lat, lng) {
-  const key = areaKey(lat, lng);
-  const hit = await idb.get('geocache', key);
-  if (hit) return hit.name || null;
-  if (!navigator.onLine) return null;
-  const run = areaChain.then(async () => {
-    const again = await idb.get('geocache', key);    // filled by a lookup queued ahead of this one
-    if (again) return again.name || null;
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), OVERPASS_TIMEOUT_MS);
-    try {
-      const res = await fetch(OVERPASS_URL, { method: 'POST', cache: 'no-store', signal: ctl.signal,
-        headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'data=' + encodeURIComponent(areaQuery(lat, lng)) });
-      if (!res.ok) throw new Error('Overpass HTTP ' + res.status);
-      const name = areaLabel(await res.json());
-      await idb.put('geocache', { key, name, at: new Date().toISOString() });
-      return name;
-    } finally {
-      clearTimeout(timer);
-    }
+function areaName(lat, lng) {
+  return nominatimCached(areaKey(lat, lng), async () => {
+    const answers = [];
+    for (const kind of AREA_KINDS) answers.push({ kind, list: await nominatimGet(areaSearchUrl(kind.q, lat, lng)) });
+    return areaLabel(answers, lat, lng);
   });
-  areaChain = run.catch(() => {});
-  return run;
 }
 
 // The capture screen's position for chips: the saved capture's coordinates in an edit, or the
@@ -1483,10 +1490,10 @@ async function refreshPlaceChips() {
   // A stand-in position (the last fix, see fixAtOpen) feeds own names only: the map lookups wait
   // for a fresh fix, so they never ask OpenStreetMap about where the phone used to be.
   if (own.length >= PLACE_CHIPS || pos.standIn) return;
-  // The two lookups go to different services and run side by side; the chips are redrawn as
-  // each answers, always in the same order.
-  const area = capLookup('area', areaKey(pos.lat, pos.lng), areaName, pos.lat, pos.lng);
+  // Both lookups queue on the one Nominatim line, the nearest name first so its chip comes at
+  // once; the chips are redrawn as each answers, always in the same order.
   const near = capLookup('osm', geoKey(pos.lat, pos.lng), osmName, pos.lat, pos.lng);
+  const area = capLookup('area', areaKey(pos.lat, pos.lng), areaName, pos.lat, pos.lng);
   const found = { area: undefined, osm: undefined };
   let shown = '';
   const redraw = () => {

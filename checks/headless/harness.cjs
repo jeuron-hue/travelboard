@@ -16,8 +16,9 @@
 //   tb_prompt_set (own row only), carried to the simulated tb-journal through me
 // - OpenStreetMap Nominatim reverse geocoding mock (7C.4): counts requests, switchable to fail
 //   or return nothing
-// - Overpass is_in mock (0.16.0, 7C.4): reads the point from the POSTed query, answers with the
-//   areas m.overpass.areas(lat, lng) gives (none by default), counts requests, switchable to fail
+// - Nominatim search mock (0.16.1, 7C.4): answers /search with m.osm.search(q, viewbox) (nothing
+//   by default), logged apart from reverse requests (m.osm.searches; m.osm.all holds both in
+//   order), switchable to fail on its own
 // - browser context setup: timezone, fake session (Gary's or Eric's), controllable geolocation stub
 // Needs the dev dependency in package.json (npm install here) or NODE_PATH pointing at
 // an existing playwright install. Chromium: npx playwright install chromium.
@@ -152,9 +153,12 @@ function makeMock() {
   // of lat, lng, or a string; '' means nothing there), and a failure switch.
   // address (v13): a Nominatim address object, or a function of lat, lng returning one.
   m.osm = { calls: [], name: '', address: null, fail: null };   // fail: null | 'network' | 'http'
-  // Overpass (0.16.0): areas is a function of lat, lng returning [{ id, name, tags, bounds }] or
-  // an array; fail: null | 'network' | 'http'; delayMs holds the answer back.
-  m.overpass = { calls: [], areas: () => [], fail: null, delayMs: 0 };
+  // Nominatim search (0.16.1): search(q, { w, n, e, s }) returns jsonv2 results; searchFail:
+  // null | 'network' | 'http' fails searches only (fail above fails both kinds).
+  m.osm.search = () => [];
+  m.osm.searchFail = null;
+  m.osm.searches = [];
+  m.osm.all = [];
   return m;
 }
 
@@ -307,7 +311,18 @@ async function attachMock(ctx, m, phone) {
   // No suite ever reaches the real Nominatim (SPEC.md 7C.4).
   await ctx.route('https://nominatim.openstreetmap.org/**', async (route) => {
     const u = new URL(route.request().url());
-    m.osm.calls.push({ path: u.pathname, q: Object.fromEntries(u.searchParams), at: Date.now(), phone: phone ? phone.name || null : null });
+    const call = { path: u.pathname, q: Object.fromEntries(u.searchParams), at: Date.now(), phone: phone ? phone.name || null : null };
+    m.osm.all.push(call);
+    if (u.pathname === '/search') {
+      m.osm.searches.push(call);
+      const fail = m.osm.fail || m.osm.searchFail;
+      if (m.offline || (phone && phone.offline) || fail === 'network') return route.abort('internetdisconnected');
+      if (fail === 'http') return route.fulfill({ status: 503, headers: cors, body: 'busy' });
+      const [w, n, e, s] = (u.searchParams.get('viewbox') || '').split(',').map(Number);
+      const list = m.osm.search(u.searchParams.get('q'), { w, n, e, s }) || [];
+      return route.fulfill({ status: 200, headers: Object.assign({ 'content-type': 'application/json' }, cors), body: JSON.stringify(list) });
+    }
+    m.osm.calls.push(call);
     if (m.offline || (phone && phone.offline) || m.osm.fail === 'network') return route.abort('internetdisconnected');
     if (m.osm.fail === 'http') return route.fulfill({ status: 503, headers: cors, body: 'busy' });
     const lat = Number(u.searchParams.get('lat')), lng = Number(u.searchParams.get('lon'));
@@ -315,24 +330,6 @@ async function attachMock(ctx, m, phone) {
     const address = (typeof m.osm.address === 'function' ? m.osm.address(lat, lng) : m.osm.address) || { city: 'Singapore', country: 'Singapore', country_code: 'sg' };
     return route.fulfill({ status: 200, headers: Object.assign({ 'content-type': 'application/json' }, cors),
       body: JSON.stringify({ place_id: 1, lat: String(lat), lon: String(lng), category: 'shop', type: 'mall', name: name || '', display_name: (name ? name + ', ' : '') + 'Singapore', address }) });
-  });
-  // No suite ever reaches the real Overpass API (0.16.0).
-  await ctx.route('https://overpass-api.de/**', async (route) => {
-    const req = route.request();
-    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
-    const form = new URLSearchParams(req.postData() || '');
-    const q = form.get('data') || new URL(req.url()).searchParams.get('data') || '';
-    const at = /is_in\(([-0-9.]+),([-0-9.]+)\)/.exec(q);
-    const lat = at ? Number(at[1]) : null, lng = at ? Number(at[2]) : null;
-    m.overpass.calls.push({ method: req.method(), url: req.url(), query: q, lat, lng, contentType: req.headers()['content-type'] || '', at: Date.now(), phone: phone ? phone.name || null : null });
-    if (m.overpass.delayMs) await new Promise((r) => setTimeout(r, m.overpass.delayMs));
-    if (m.offline || (phone && phone.offline) || m.overpass.fail === 'network') return route.abort('internetdisconnected');
-    if (m.overpass.fail === 'http') return route.fulfill({ status: 504, headers: cors, body: 'Gateway timeout' });
-    const list = typeof m.overpass.areas === 'function' ? m.overpass.areas(lat, lng) : m.overpass.areas || [];
-    const elements = list.map((a, i) => ({ type: a.type || 'way', id: a.id || 900 + i, bounds: a.bounds,
-      tags: Object.assign({ name: a.name }, a.tags || {}) }));
-    return route.fulfill({ status: 200, headers: Object.assign({ 'content-type': 'application/json' }, cors),
-      body: JSON.stringify({ version: 0.6, generator: 'mock', elements }) });
   });
   await ctx.route(SUPA + '/**', async (route) => {
     const req = route.request();

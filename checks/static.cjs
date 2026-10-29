@@ -27,8 +27,9 @@
 // - M1.4 (0.15.0): the Captures day bar's Days link and day list, built from IndexedDB only;
 //   counts with singular forms and photos left out when none; places a person named only;
 //   a row tap stops following today, Today follows it again; the narrow-screen day bar
-// - 0.16.0: the place-you-are-in chip from Overpass is_in (POST, the 7C.4 kinds, tags and
-//   bounding boxes, smallest wins, "e:" cache, one at a time, timeout, failures not cached);
+// - 0.16.0 and 0.16.1: the place-you-are-in chip from Nominatim search (mall, station, hotel,
+//   bounded viewbox, the box must hold the point, smallest wins, "p:" cache, one Nominatim
+//   request a second with the reverse lookup, timeout, failures not cached; no Overpass left);
 //   chip order own, area, nearest, at most three; Locate on new captures only, a fresh fix,
 //   accuracy in the hint, saved as the capture's coordinates instead of the fix at Save
 'use strict';
@@ -312,16 +313,25 @@ if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(
 {
   const trip = read('trip.html');
   const fnBody = (name) => { const i = trip.indexOf(`function ${name}(`); if (i < 0) return ''; const j = trip.indexOf('\n}\n', i); return trip.slice(i, j); };
-  const area = fnBody('areaName'), label = fnBody('areaLabel'), query = fnBody('areaQuery'), refresh = fnBody('refreshPlaceChips'), locate = fnBody('locateNow');
-  check(/const OVERPASS_URL = 'https:\/\/overpass-api\.de\/api\/interpreter';/.test(trip) && /method: 'POST'/.test(area) && /application\/x-www-form-urlencoded/.test(area)
-    && /body: 'data=' \+ encodeURIComponent\(areaQuery\(lat, lng\)\)/.test(area), '0.16.0: place-you-are-in lookup is a form POST to overpass-api.de');
-  check(/is_in\(\$\{at\}\)->\.a;/.test(query) && /wr\(pivot\.a\)\[name\]\$\{f\};/.test(query) && /out tags bb;/.test(query) && /\[out:json\]\[timeout:8\];/.test(query)
-    && ['[shop=mall]', '[building]', '[railway=station]', '[public_transport=station]', '[leisure=park]', '[amenity=marketplace]', '[tourism]', '[landuse=retail]'].every((f) => trip.includes(`'${f}'`)),
-    '0.16.0: is_in query asks only for the 7C.4 kinds, named, with tags and bounding boxes');
-  check(/if \(!best \|\| size < best\.size\)/.test(label) && /'name:en'/.test(label), '0.16.0: the smallest enclosing area wins; name:en before name');
-  check(/const areaKey = \(lat, lng\) => 'e' \+ geoKey\(lat, lng\)\.slice\(1\);/.test(trip) && /idb\.put\('geocache', \{ key, name,/.test(area) && /areaChain = run\.catch/.test(area)
-    && /const OVERPASS_TIMEOUT_MS = 10000;/.test(trip) && /ctl\.abort\(\), OVERPASS_TIMEOUT_MS/.test(area) && /if \(!navigator\.onLine\) return null;/.test(area)
-    && /if \(!res\.ok\) throw/.test(area), '0.16.0: cached under "e:" in the same cell, online only, one at a time, 10 s timeout, a failure not cached');
+  const area = fnBody('areaName'), label = fnBody('areaLabel'), url = fnBody('areaSearchUrl'), refresh = fnBody('refreshPlaceChips'), locate = fnBody('locateNow');
+  const get = fnBody('nominatimGet'), cached = fnBody('nominatimCached');
+  const code = [...trip.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]).join('\n').replace(/^\s*\/\/.*$/gm, '');
+  check(!/overpass|OVERPASS|is_in\(|\/api\/interpreter/.test(code) && !/function areaQuery\(/.test(trip) && !/areaChain/.test(trip),
+    '0.16.1: no Overpass left in the app code (Overpass answers the phone with 406)');
+  check(/const NOMINATIM_SEARCH_URL = 'https:\/\/nominatim\.openstreetmap\.org\/search';/.test(trip) && /const AREA_VIEW_M = 150;/.test(trip)
+    && /format=jsonv2&q=\$\{q\}&viewbox=\$\{vb\}&bounded=1&limit=10&accept-language=en/.test(url),
+    '0.16.1: place you are in from Nominatim search, bounded to a viewbox about 150 m each side, English names');
+  check(/\{ q: 'mall', is: \(c, t\) => c === 'shop' && t === 'mall' \}/.test(trip) && /\{ q: 'station', is: \(c, t\) => \(c === 'railway' \|\| c === 'public_transport'\) && t === 'station' \}/.test(trip)
+    && /\{ q: 'hotel', is: \(c, t\) => c === 'tourism' && t === 'hotel' \}/.test(trip) && !/q: 'park'|q: 'market'/.test(trip),
+    '0.16.1: one search per kind, mall, station, hotel, in that order; the result must be of that kind');
+  check(/kind\.is\(r\.category, r\.type\)/.test(label) && /if \(lat < s \|\| lat > n \|\| lng < w \|\| lng > e\) continue;/.test(label) && /if \(!best \|\| size < best\.size\)/.test(label),
+    '0.16.1: only results whose bounding box holds the point count; the smallest box wins');
+  check(/const areaKey = \(lat, lng\) => 'p' \+ geoKey\(lat, lng\)\.slice\(1\);/.test(trip) && /nominatimCached\(areaKey\(lat, lng\)/.test(area) && /nominatimCached\(geoKey\(lat, lng\)/.test(trip)
+    && /idb\.put\('geocache', \{ key, name,/.test(cached) && /if \(!navigator\.onLine\) return null;/.test(cached) && /osmChain = run\.catch/.test(cached),
+    '0.16.1: cached under "p:" in the same cell, online only, a failure not cached, both lookups on the one Nominatim line');
+  check(/const wait = osmLast \+ NOMINATIM_GAP_MS - Date\.now\(\);\n  if \(wait > 0\) await new Promise\(\(r\) => setTimeout\(r, wait\)\);\n  osmLast = Date\.now\(\);/.test(get) && /ctl\.abort\(\), NOMINATIM_TIMEOUT_MS/.test(get) && /if \(!res\.ok\) throw/.test(get)
+    && /const near = capLookup\('osm'[^\n]*\n  const area = capLookup\('area'/.test(refresh),
+    '0.16.1: every Nominatim request (reverse and search) a second apart with a timeout; the reverse lookup queued first');
   check(/for \(const source of \['area', 'osm'\]\)/.test(refresh) && /own\.length \+ maps\.length >= PLACE_CHIPS/.test(refresh) && /taken\.has\(n\.toLowerCase\(\)\)/.test(refresh),
     '0.16.0: chips own names, then the place you are in, then the nearest name; at most three, no two alike');
   check(/const LOCATE_OPTS = \{ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 \};/.test(trip) && /getCurrentPosition\([\s\S]*LOCATE_OPTS\)/.test(locate)
@@ -332,8 +342,8 @@ if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(
     '0.16.0: the located fix shows its accuracy, is kept in the draft and saved instead of the fix at Save');
   check(/e && e\.code === 1 \?/.test(locate) && /e && e\.code === 3 \?/.test(locate) && /msg\.textContent = 'Locating';/.test(locate), '0.16.0: Locate says Locating, and says so when denied or timed out');
   const pkg = JSON.parse(read('checks/headless/package.json'));
-  check(exists('checks/headless/m13b.test.cjs') && /node m13b\.test\.cjs/.test(pkg.scripts.test) && /overpass-api\.de/.test(read('checks/headless/harness.cjs')),
-    '0.16.0: headless suite m13b runs with the others; the harness mocks Overpass');
+  check(exists('checks/headless/m13b.test.cjs') && /node m13b\.test\.cjs/.test(pkg.scripts.test) && /u\.pathname === '\/search'/.test(read('checks/headless/harness.cjs'))
+    && !/overpass/i.test(read('checks/headless/harness.cjs')), '0.16.1: headless suite m13b runs with the others; the harness mocks Nominatim search, no Overpass');
 }
 
 // ---------- keep-alive workflow (SPEC.md 6.8 step 5) ----------

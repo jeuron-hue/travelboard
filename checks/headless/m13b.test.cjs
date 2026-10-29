@@ -1,17 +1,20 @@
-// travelboard 0.16.0 headless tests (TESTS.md, M1.3, 0.16.0). Run from the repo root:
+// travelboard 0.16.x headless tests (TESTS.md, 0.16.1). Run from the repo root:
 //   node checks/headless/m13b.test.cjs
-// Drives trip.html in Chromium against harness.cjs, with Nominatim and Overpass both mocked (no
-// request ever leaves for the real ones).
-// SPEC.md 7C.4 (27/10/26): the chip for the place the phone is in, from Overpass is_in. At the
-// Tampines 1 point (step 9, 27/10/26) the chips read "Tampines 1" then "Atrix"; the smallest
-// enclosing area wins; name:en before name; the request is a POST of an is_in query asking only
-// for the named kinds 7C.4 lists, with tags and bounding boxes; the answer is cached under "e:"
-// in the same 50 m cell (a second capture there asks neither service); an empty answer is
-// cached too; a failed lookup (HTTP or network) gives no area chip, leaves the nearest-name chip
-// alone and is not cached; no two chips alike and at most three, own names first; offline no
-// request; one Overpass request at a time.
-// SPEC.md 7.2 (27/10/26): Locate on a new capture. A fresh fix (maximumAge 0, high accuracy,
-// 15 s), "Locating" while it waits, the hint with the accuracy, the chips reloaded for the new
+// Drives trip.html in Chromium against harness.cjs, with Nominatim mocked, reverse and search (no
+// request ever leaves for the real one).
+// SPEC.md 7C.4 (0.16.1, 30/10/26): the chip for the place the phone is in, from Nominatim search.
+// Fixtures are the live answers of 30/10/26 at the step 9 point (1.35417, 103.94492): "mall" gives
+// Tampines 1 (way 166194476) and Eastlink Mall, "station" gives Tampines (way 397901195, a box
+// round the whole interchange), "hotel" nothing. There the chips read "Tampines 1" then "Atrix"
+// (Tampines 1 is the smallest box that holds the point; the station's holds it too); a point
+// inside Eastlink only gives Eastlink Mall; results whose box does not hold the point, or whose
+// kind does not match, give no chip; the four requests (reverse first, then mall, station,
+// hotel) go one at a time, a second apart; the search URL is bounded to a viewbox about 150 m
+// each side; the answer is cached under "p:" in the same 50 m cell (a second capture there asks
+// nothing), an empty answer too; a failed search gives no area chip, leaves the nearest name
+// and is not cached; no two chips alike, at most three, own names first; offline no request.
+// SPEC.md 7.2 (0.16.0): Locate on a new capture. A fresh fix (maximumAge 0, high accuracy, 15 s),
+// "Locating" while it waits, the hint with the accuracy, the chips reloaded for the new
 // position, the fix saved as the capture's coordinates with no fix fired after Save, kept in the
 // draft, an open-time fix arriving later never overrides it; denied and timed out each say so
 // in one line and keep the old position; works offline (no lookup; in a cell never looked up the
@@ -33,33 +36,34 @@ const text = (page, sel) => page.$eval(sel, (e) => e.textContent);
 const chips = (page) => page.$$eval('#cap-chips .pchip', (els) => els.map((e) => ({ name: e.dataset.place, src: e.dataset.source })));
 const names = async (page) => (await chips(page)).map((c) => c.name);
 
-// Tampines 1 (way 166194476, shop=mall) around the step 9 point, and other fixtures.
-const TAMP = { lat: 1.35417, lng: 103.94492 };
-const box = (lat, lng, dLat, dLng) => ({ minlat: lat - dLat, minlon: lng - dLng, maxlat: lat + dLat, maxlon: lng + dLng });
-const inBox = (b, lat, lng) => lat >= b.minlat && lat <= b.maxlat && lng >= b.minlon && lng <= b.maxlon;
-const T1 = { id: 166194476, name: 'Tampines 1', tags: { shop: 'mall' }, bounds: { minlat: 1.3534, minlon: 103.9442, maxlat: 1.3550, maxlon: 103.9458 } };
-const NEST = { lat: 1.3600, lng: 103.9600 };                     // three areas, one inside another
-const NESTED = [
-  { id: 1, name: 'Big Retail Area', tags: { landuse: 'retail' }, bounds: box(NEST.lat, NEST.lng, 0.005, 0.005) },
-  { id: 2, name: 'Small Hall', tags: { building: 'yes' }, bounds: box(NEST.lat, NEST.lng, 0.0002, 0.0002) },
-  { id: 3, name: 'Middle Park', tags: { leisure: 'park' }, bounds: box(NEST.lat, NEST.lng, 0.001, 0.001) }
-];
-const BKK = { lat: 13.7462, lng: 100.5347 };                     // a Thai name with name:en
-const SIAM = { id: 4, name: 'สยามพารากอน', tags: { shop: 'mall', 'name:en': 'Siam Paragon' }, bounds: box(BKK.lat, BKK.lng, 0.001, 0.001) };
-const FAIL = { lat: 1.3700, lng: 103.9700 };                     // enclosing lookup fails here first
-const SAME = { lat: 1.3800, lng: 103.9800 };                     // area and nearest share a name
-const OWNS = { lat: 1.3900, lng: 103.9900 };                     // two own names in range
-const LOC = { lat: 1.3450, lng: 103.9530 };                      // where Locate finds the phone
-const AREAS = [
-  [T1, (lat, lng) => inBox(T1.bounds, lat, lng)],
-  ...NESTED.map((a) => [a, (lat, lng) => inBox(a.bounds, lat, lng)]),
-  [SIAM, (lat, lng) => inBox(SIAM.bounds, lat, lng)],
-  [{ id: 5, name: 'Fail Plaza', tags: { shop: 'mall' }, bounds: box(FAIL.lat, FAIL.lng, 0.001, 0.001) }, (lat, lng) => inBox(box(FAIL.lat, FAIL.lng, 0.001, 0.001), lat, lng)],
-  [{ id: 6, name: 'Same Name Mall', tags: { shop: 'mall' }, bounds: box(SAME.lat, SAME.lng, 0.001, 0.001) }, (lat, lng) => inBox(box(SAME.lat, SAME.lng, 0.001, 0.001), lat, lng)],
-  [{ id: 7, name: 'Owns Mall', tags: { shop: 'mall' }, bounds: box(OWNS.lat, OWNS.lng, 0.001, 0.001) }, (lat, lng) => inBox(box(OWNS.lat, OWNS.lng, 0.001, 0.001), lat, lng)],
-  [{ id: 8, name: 'Locate Centre', tags: { building: 'yes' }, bounds: box(LOC.lat, LOC.lng, 0.001, 0.001) }, (lat, lng) => inBox(box(LOC.lat, LOC.lng, 0.001, 0.001), lat, lng)]
-];
+// Live Nominatim answers, 30/10/26, for q=mall and q=station around the step 9 point (q=hotel: []).
+const nom = (osm_id, category, type, name, bb, lat, lon) => ({ place_id: osm_id, osm_type: 'way', osm_id, lat, lon, category, type, name,
+  display_name: name + ', Singapore', boundingbox: bb });
+const T1 = nom(166194476, 'shop', 'mall', 'Tampines 1', ['1.3536385', '1.3547970', '103.9445343', '103.9454900'], '1.3542200', '103.9451247');
+const EASTLINK = nom(1167087012, 'shop', 'mall', 'Eastlink Mall', ['1.3540190', '1.3547032', '103.9439447', '103.9446259'], '1.3543254', '103.9443553');
+const STATION = nom(397901195, 'railway', 'station', 'Tampines', ['1.3526267', '1.3558318', '103.9424512', '103.9457151'], '1.3542858', '103.9446184');
+const TAMP = { lat: 1.35417, lng: 103.94492 };                   // step 9: inside Tampines 1 (and the station's box)
+const EAST = { lat: 1.35430, lng: 103.94440 };                   // inside Eastlink (and the station's box) only
+const OUT = { lat: 1.35330, lng: 103.94620 };                    // Tampines 1 found nearby, but no box holds it
+// Made-up places elsewhere, as Nominatim would answer them.
 const near = (a, b) => Math.abs(a.lat - b.lat) < 0.003 && Math.abs(a.lng - b.lng) < 0.003;
+const box = (p, d) => [String(p.lat - d), String(p.lat + d), String(p.lng - d), String(p.lng + d)];
+const at4 = (p) => [String(p.lat), String(p.lng)];
+const BKK = { lat: 13.7462, lng: 100.5347 };
+const SIAM = nom(4, 'shop', 'mall', 'Siam Paragon', box(BKK, 0.001), ...at4(BKK));            // accept-language=en gives the English name
+const BKK_HOTEL = nom(5, 'tourism', 'hotel', 'Siam Kempinski', box(BKK, 0.0003), ...at4(BKK)); // smaller than the mall: wins
+const FAIL = { lat: 1.3700, lng: 103.9700 };
+const FAIL_MALL = nom(6, 'shop', 'mall', 'Fail Plaza', box(FAIL, 0.001), ...at4(FAIL));
+const SAME = { lat: 1.3800, lng: 103.9800 };
+const SAME_MALL = nom(7, 'shop', 'mall', 'Same Name Mall', box(SAME, 0.001), ...at4(SAME));
+const OWNS = { lat: 1.3900, lng: 103.9900 };
+const OWNS_MALL = nom(8, 'shop', 'mall', 'Owns Mall', box(OWNS, 0.001), ...at4(OWNS));
+const LOC = { lat: 1.3450, lng: 103.9530 };                      // where Locate finds the phone
+const LOC_HOTEL = nom(9, 'tourism', 'hotel', 'Locate Hotel', box(LOC, 0.001), ...at4(LOC));
+const KOPI = nom(10, 'amenity', 'food_court', 'Kopitiam', box(OUT, 0.0005), ...at4(OUT));      // holds OUT, but not a mall
+const ANSWERS = { mall: [T1, EASTLINK, SIAM, FAIL_MALL, SAME_MALL, OWNS_MALL, KOPI], station: [STATION], hotel: [BKK_HOTEL, LOC_HOTEL] };
+// Like Nominatim with bounded=1: the results of that query whose centre lies inside the viewbox.
+const search = (q, v) => (ANSWERS[q] || []).filter((r) => +r.lat <= v.n && +r.lat >= v.s && +r.lon >= v.w && +r.lon <= v.e);
 
 async function openNew(page) {
   await page.click('#tab-captures');
@@ -76,10 +80,11 @@ async function save(page) {
   await waitCap(page, false);
   await page.waitForFunction(() => !popWait);
 }
-// Wait until a fresh fix is in and both map lookups, if started, have answered.
+// Wait until a fresh fix is in and both map lookups, if started, have answered (the four requests
+// take three seconds or more: one a second).
 async function settled(page) {
   await page.waitForFunction(() => !cap.open || (cap.fix && !cap.fix.standIn), null, { timeout: 5000 }).catch(() => {});
-  await page.waitForFunction(() => !cap.open || ((!cap.osm || cap.osm.done) && (!cap.area || cap.area.done)), null, { timeout: 8000 }).catch(() => {});
+  await page.waitForFunction(() => !cap.open || ((!cap.osm || cap.osm.done) && (!cap.area || cap.area.done)), null, { timeout: 15000 }).catch(() => {});
   await page.waitForTimeout(80);
 }
 async function at(page, pos) { await page.evaluate((p) => { __geo.mode = 'grant'; __geo.fix = p; __geo.acc = 0; }, pos); }
@@ -88,10 +93,10 @@ async function at(page, pos) { await page.evaluate((p) => { __geo.mode = 'grant'
   const srv = await startServer(PORT);
   const browser = await launch();
   const mock = makeMock();
-  mock.osm.name = (lat, lng) => (near({ lat, lng }, TAMP) ? 'Atrix' : near({ lat, lng }, NEST) ? 'Corner Shop'
-    : near({ lat, lng }, BKK) ? 'Gourmet Market' : near({ lat, lng }, FAIL) ? 'Fail Street Stall'
+  mock.osm.name = (lat, lng) => (near({ lat, lng }, OUT) && Math.abs(lat - OUT.lat) < 0.0002 ? 'Bus Stop 75009' : near({ lat, lng }, EAST) && Math.abs(lng - EAST.lng) < 0.0002 ? 'Eastlink Food Hall'
+    : near({ lat, lng }, TAMP) ? 'Atrix' : near({ lat, lng }, BKK) ? 'Gourmet Market' : near({ lat, lng }, FAIL) ? 'Fail Street Stall'
     : near({ lat, lng }, SAME) ? 'same name mall' : near({ lat, lng }, OWNS) ? 'Owns Kiosk' : near({ lat, lng }, LOC) ? 'Locate Kopitiam' : '');
-  mock.overpass.areas = (lat, lng) => AREAS.filter(([, inside]) => inside(lat, lng)).map(([a]) => a);
+  mock.osm.search = search;
   const ctx = await newContext(browser, { tz: 'Asia/Singapore', session: true, uid: UID });
   const net = { offline: false, name: 'gary' };
   await attachMock(ctx, mock, net);
@@ -102,33 +107,35 @@ async function at(page, pos) { await page.evaluate((p) => { __geo.mode = 'grant'
   await G.goto(BASE + 'trip.html');
   await G.waitForFunction(() => document.getElementById('day-label').textContent !== '-');
   const offline = async (on) => { net.offline = on; await ctx.setOffline(on); await G.evaluate((o) => window.dispatchEvent(new Event(o ? 'offline' : 'online')), on); };
-  const geocache = () => G.evaluate(() => idb.all('geocache'));
+  const counts = () => ({ rev: mock.osm.calls.length, srch: mock.osm.searches.length, all: mock.osm.all.length });
 
   try {
     check(`A0 v${APP}`, (await G.evaluate(() => APP_VERSION)) === APP, APP);
+    check('A0 no Overpass left: no OVERPASS_URL, no areaQuery', await G.evaluate(() => typeof OVERPASS_URL === 'undefined' && typeof areaQuery === 'undefined'));
 
-    // ---------- the Tampines 1 point (step 9, 27/10/26) ----------
+    // ---------- the step 9 point, inside Tampines 1 ----------
     await at(G, TAMP);
-    let o0 = mock.overpass.calls.length, n0 = mock.osm.calls.length;
+    let c0 = counts();
     await openNew(G);
     await settled(G);
     let cs = await chips(G);
     check('A1 inside Tampines 1: the chips read "Tampines 1" then "Atrix" (place you are in, then nearest)',
       JSON.stringify(cs) === JSON.stringify([{ name: 'Tampines 1', src: 'area' }, { name: 'Atrix', src: 'osm' }]), JSON.stringify(cs));
+    check('A1 the station\'s box holds the point too, and the smaller box (Tampines 1) wins',
+      TAMP.lat >= +STATION.boundingbox[0] && TAMP.lat <= +STATION.boundingbox[1] && TAMP.lng >= +STATION.boundingbox[2] && TAMP.lng <= +STATION.boundingbox[3]);
     check('A1 the OSM credit shows with the map chips; nothing filled in', await shown(G, '#cap-osm')
       && (await text(G, '#cap-osm')).includes('OpenStreetMap contributors') && (await G.inputValue('#cap-place')) === '');
-    const call = mock.overpass.calls[o0];
-    check('A2 one Overpass request: a form POST to overpass-api.de with an is_in query at the phone\'s position',
-      mock.overpass.calls.length === o0 + 1 && call.method === 'POST' && /application\/x-www-form-urlencoded/.test(call.contentType)
-      && call.url === 'https://overpass-api.de/api/interpreter' && /is_in\(1\.354170,103\.944920\)->\.a;/.test(call.query), JSON.stringify(call));
-    check('A2 the query asks only for the named kinds 7C.4 lists, with tags and bounding boxes, under an 8 s server timeout',
-      ['[shop=mall]', '[building]', '[railway=station]', '[public_transport=station]', '[leisure=park]', '[amenity=marketplace]', '[tourism]', '[landuse=retail]']
-        .every((f) => call.query.includes(`wr(pivot.a)[name]${f};`)) && /out tags bb;$/.test(call.query) && /^\[out:json\]\[timeout:8\];/.test(call.query), call.query);
-    check('A2 the nearest-name lookup still goes to Nominatim once', mock.osm.calls.length === n0 + 1);
-    let cache = await geocache();
-    check('A3 the answer is cached under "e:" in the same 50 m cell as the Nominatim name',
-      await G.evaluate((p) => idb.get('geocache', areaKey(p.lat, p.lng)).then((x) => !!x && x.name === 'Tampines 1' && x.key.startsWith('e:') && x.key.slice(1) === geoKey(p.lat, p.lng).slice(1)), TAMP),
-      JSON.stringify(cache.map((c) => c.key)));
+    const four = mock.osm.all.slice(c0.all);
+    const qs = four.map((c) => (c.path === '/reverse' ? 'reverse' : c.q.q));
+    check('A2 four Nominatim requests: reverse first, then search mall, station, hotel', JSON.stringify(qs) === JSON.stringify(['reverse', 'mall', 'station', 'hotel']), JSON.stringify(qs));
+    const sq = four[1] ? four[1].q : {};
+    check('A2 each search: jsonv2, bounded, limit 10, English, a viewbox about 150 m each side of the point',
+      four.slice(1).every((c) => c.q.format === 'jsonv2' && c.q.bounded === '1' && c.q.limit === '10' && c.q['accept-language'] === 'en'
+        && c.q.viewbox === '103.943572,1.355517,103.946268,1.352823'), JSON.stringify(sq));
+    const gaps = four.slice(1).map((c, i) => c.at - four[i].at);
+    check('A2 one request at a time, at least a second apart, across the reverse and the three searches', four.length === 4 && gaps.every((g) => g >= 950), JSON.stringify(gaps));
+    check('A3 the answer is cached under "p:" in the same 50 m cell as the reverse answer',
+      await G.evaluate((p) => idb.get('geocache', areaKey(p.lat, p.lng)).then((x) => !!x && x.name === 'Tampines 1' && x.key.startsWith('p:') && x.key.slice(1) === geoKey(p.lat, p.lng).slice(1)), TAMP));
     await G.click('#cap-chips .pchip[data-source="area"]');
     await G.fill('#cap-body', 'In the mall');
     check('A4 a tap on the mall chip fills the field with "Tampines 1"', (await G.inputValue('#cap-place')) === 'Tampines 1');
@@ -137,50 +144,63 @@ async function at(page, pos) { await page.evaluate((p) => { __geo.mode = 'grant'
     let row = (await G.evaluate(() => idb.all('captures'))).find((r) => r.body === 'In the mall');
     check('A4 saved with place_name "Tampines 1"', row && row.place_name === 'Tampines 1', JSON.stringify(row && row.place_name));
 
-    // A second capture at the same spot: the cache answers, neither service is asked.
-    o0 = mock.overpass.calls.length; n0 = mock.osm.calls.length;
+    // A second capture at the same spot: the cache answers, nothing is asked.
+    c0 = counts();
     await openNew(G);
     await settled(G);
     cs = await names(G);
-    check('A5 a second capture at the same spot asks neither service (cache hit)', mock.overpass.calls.length === o0 && mock.osm.calls.length === n0, `${mock.overpass.calls.length - o0} ${mock.osm.calls.length - n0}`);
-    check('A5 and offers "Tampines 1" as an own name first (saved), then "Atrix"; the area chip is not repeated',
+    check('A5 a second capture at the same spot makes no request (cache hit)', mock.osm.all.length === c0.all, String(mock.osm.all.length - c0.all));
+    check('A5 and offers "Tampines 1" as an own name first, then "Atrix"; the area chip is not repeated',
       JSON.stringify(cs) === JSON.stringify(['Tampines 1', 'Atrix']) && (await chips(G))[0].src === 'own', JSON.stringify(await chips(G)));
     await close(G);
 
-    // ---------- the smallest enclosing area wins; name:en first ----------
-    await at(G, NEST);
+    // ---------- inside Eastlink only; nothing holding the point ----------
+    await at(G, EAST);
     await openNew(G);
     await settled(G);
     cs = await chips(G);
-    check('A6 three areas enclose the point: the smallest ("Small Hall") is the chip, then the nearest name',
-      JSON.stringify(cs) === JSON.stringify([{ name: 'Small Hall', src: 'area' }, { name: 'Corner Shop', src: 'osm' }]), JSON.stringify(cs));
+    check('A6 a point inside Eastlink Mall (and the station\'s box, not Tampines 1\'s): the saved "Tampines 1" nearby as an own name, then "Eastlink Mall", then its nearest name',
+      JSON.stringify(cs) === JSON.stringify([{ name: 'Tampines 1', src: 'own' }, { name: 'Eastlink Mall', src: 'area' }, { name: 'Eastlink Food Hall', src: 'osm' }]), JSON.stringify(cs));
     await close(G);
+    c0 = counts();
+    await at(G, OUT);
+    await openNew(G);
+    await settled(G);
+    cs = await chips(G);
+    const got = mock.osm.searches.slice(c0.srch).map((c) => search(c.q.q, (([w, n, e, s]) => ({ w, n, e, s }))(c.q.viewbox.split(',').map(Number))).map((r) => r.name));
+    check('A7 Tampines 1 and a food court come back, but no mall, station or hotel box holds the point: no area chip, the nearest name alone',
+      JSON.stringify(cs) === JSON.stringify([{ name: 'Bus Stop 75009', src: 'osm' }]) && got.flat().includes('Tampines 1') && got.flat().includes('Kopitiam'), JSON.stringify([cs, got]));
+    check('A7 the empty answer is cached under "p:"', await G.evaluate((p) => idb.get('geocache', areaKey(p.lat, p.lng)).then((x) => !!x && x.name === null), OUT));
+    await close(G);
+
+    // ---------- smallest across kinds; the English name ----------
     await at(G, BKK);
     await openNew(G);
     await settled(G);
     cs = await names(G);
-    check('A6 a Thai mall with name:en offers "Siam Paragon"', JSON.stringify(cs) === JSON.stringify(['Siam Paragon', 'Gourmet Market']), JSON.stringify(cs));
+    check('A8 a hotel inside a mall: the smaller box (the hotel) wins, then the nearest name', JSON.stringify(cs) === JSON.stringify(['Siam Kempinski', 'Gourmet Market']), JSON.stringify(cs));
     await close(G);
 
-    // ---------- the enclosing lookup fails: the nearest name stays, nothing cached ----------
+    // ---------- a failed search: the nearest name stays, nothing cached ----------
     for (const mode of ['http', 'network']) {
-      await G.evaluate(() => idb.all('geocache').then((a) => Promise.all(a.filter((x) => x.key.startsWith('e:')).map((x) => idb.del('geocache', x.key)))));
-      mock.overpass.fail = mode;
+      await G.evaluate(() => idb.all('geocache').then((a) => Promise.all(a.filter((x) => x.key.startsWith('p:')).map((x) => idb.del('geocache', x.key)))));
+      mock.osm.searchFail = mode;
       await at(G, FAIL);
-      o0 = mock.overpass.calls.length;
+      c0 = counts();
       await openNew(G);
       await settled(G);
       cs = await chips(G);
-      check(`A7 Overpass fails (${mode}): "Fail Street Stall" (nearest) alone, the credit shown, no error on screen`,
+      check(`A9 a search fails (${mode}): "Fail Street Stall" (nearest) alone, the credit shown, no error on screen`,
         JSON.stringify(cs) === JSON.stringify([{ name: 'Fail Street Stall', src: 'osm' }]) && await shown(G, '#cap-osm') && (await text(G, '#cap-locate-msg')) === ''
-        && mock.overpass.calls.length === o0 + 1, JSON.stringify(cs));
-      check(`A7 after the failure (${mode}) nothing is cached under "e:" for that cell`,
+        && mock.osm.searches.length === c0.srch + 1, JSON.stringify([cs, mock.osm.searches.length - c0.srch]));
+      check(`A9 after the failure (${mode}) nothing is cached under "p:" for that cell`,
         await G.evaluate((p) => idb.get('geocache', areaKey(p.lat, p.lng)).then((x) => !x), FAIL));
       await close(G);
-      mock.overpass.fail = null;
+      mock.osm.searchFail = null;
+      c0 = counts();
       await openNew(G);
       await settled(G);
-      check(`A7 the next opening (${mode}) asks again and gets the mall`, mock.overpass.calls.length === o0 + 2
+      check(`A9 the next opening (${mode}) asks again (three searches, no second reverse) and gets the mall`, mock.osm.searches.length === c0.srch + 3 && mock.osm.calls.length === c0.rev
         && JSON.stringify(await names(G)) === JSON.stringify(['Fail Plaza', 'Fail Street Stall']), JSON.stringify(await names(G)));
       await close(G);
     }
@@ -190,7 +210,7 @@ async function at(page, pos) { await page.evaluate((p) => { __geo.mode = 'grant'
     await openNew(G);
     await settled(G);
     cs = await chips(G);
-    check('A8 the area and the nearest name differ only in case: one chip', JSON.stringify(cs) === JSON.stringify([{ name: 'Same Name Mall', src: 'area' }]), JSON.stringify(cs));
+    check('A10 the area and the nearest name differ only in case: one chip', JSON.stringify(cs) === JSON.stringify([{ name: 'Same Name Mall', src: 'area' }]), JSON.stringify(cs));
     await close(G);
     await G.evaluate((p) => {
       const mk = (n, name) => ({ id: crypto.randomUUID(), body: 'own ' + n, kind: 'note', captured_at: new Date(Date.now() - n * 60000).toISOString(), tz: 'Asia/Singapore',
@@ -198,35 +218,28 @@ async function at(page, pos) { await page.evaluate((p) => { __geo.mode = 'grant'
       return Promise.all([idb.put('captures', mk(1, 'Owns Mall')), idb.put('captures', mk(2, 'Kopi Corner')), idb.put('captures', mk(3, 'Bus Stop B'))]);
     }, OWNS);
     await at(G, OWNS);
+    c0 = counts();
     await openNew(G);
     await settled(G);
     cs = await chips(G);
-    check('A9 three own names in range: three own chips, no lookup, no map chip (the area equals an own name anyway)',
-      cs.length === 3 && cs.every((c) => c.src === 'own') && !(await shown(G, '#cap-osm')), JSON.stringify(cs));
+    check('A11 three own names in range: three own chips, no request, no map chip',
+      cs.length === 3 && cs.every((c) => c.src === 'own') && !(await shown(G, '#cap-osm')) && mock.osm.all.length === c0.all, JSON.stringify(cs));
     await close(G);
     await G.evaluate(() => idb.all('captures').then((a) => { const r = a.find((x) => x.place_name === 'Bus Stop B'); return idb.put('captures', Object.assign({}, r, { deleted_at: new Date().toISOString() })); }));
     await openNew(G);
     await settled(G);
     cs = await chips(G);
-    check('A9 two own names, one of them the area\'s: own, own, then the nearest name (three at most, no repeat)',
+    check('A11 two own names, one of them the area\'s: own, own, then the nearest name (three at most, no repeat)',
       JSON.stringify(cs.map((c) => c.src)) === JSON.stringify(['own', 'own', 'osm']) && cs[2].name === 'Owns Kiosk' && !cs.some((c) => c.src === 'area'), JSON.stringify(cs));
     await close(G);
 
-    // ---------- one Overpass request at a time ----------
-    mock.overpass.delayMs = 300;
-    o0 = mock.overpass.calls.length;
-    await G.evaluate(() => Promise.all([areaName(1.2001, 103.8001), areaName(1.2101, 103.8101)]));
-    mock.overpass.delayMs = 0;
-    const two = mock.overpass.calls.slice(o0);
-    check('A10 two lookups queued together go one after the other', two.length === 2 && two[1].at - two[0].at >= 280, JSON.stringify(two.map((c) => c.at - two[0].at)));
-
-    // ---------- offline: no request, own names only ----------
+    // ---------- offline: no request ----------
     await offline(true);
     await at(G, { lat: 1.2201, lng: 103.8201 });
-    o0 = mock.overpass.calls.length; n0 = mock.osm.calls.length;
+    c0 = counts();
     await openNew(G);
     await settled(G);
-    check('A11 offline: no Overpass and no Nominatim request, no map chip', mock.overpass.calls.length === o0 && mock.osm.calls.length === n0 && !(await shown(G, '#cap-osm')));
+    check('A12 offline: no Nominatim request of either kind, no map chip', mock.osm.all.length === c0.all && !(await shown(G, '#cap-osm')));
     await close(G);
     await offline(false);
 
@@ -240,7 +253,7 @@ async function at(page, pos) { await page.evaluate((p) => { __geo.mode = 'grant'
       && await G.evaluate(() => document.getElementById('cap-locate').closest('.placefield') !== null), JSON.stringify(lb));
     check('B1 before Locate the hint is the open-time position, no accuracy', (await G.getAttribute('#cap-place', 'placeholder')) === '1.3542, 103.9449');
     await G.evaluate((p) => { __geo.mode = 'hold'; __geo.fix = p; __geo.acc = 8.4; __geo.pending = []; }, LOC);
-    o0 = mock.overpass.calls.length;
+    let c1 = counts();
     await G.click('#cap-locate');
     const opts = await G.evaluate(() => __geo.lastOpts);
     check('B2 Locate asks for a fresh fix: high accuracy, maximumAge 0, 15 s', opts && opts.enableHighAccuracy === true && opts.maximumAge === 0 && opts.timeout === 15000, JSON.stringify(opts));
@@ -253,8 +266,8 @@ async function at(page, pos) { await page.evaluate((p) => { __geo.mode = 'grant'
       (await G.getAttribute('#cap-place', 'placeholder')) === '1.3450, 103.9530 ±8 m' && (await text(G, '#cap-locate-msg')) === '' && !(await G.isDisabled('#cap-locate')),
       await G.getAttribute('#cap-place', 'placeholder'));
     cs = await names(G);
-    check('B3 the chips reload for the new position (its area and nearest name; Tampines gone)', JSON.stringify(cs) === JSON.stringify(['Locate Centre', 'Locate Kopitiam'])
-      && mock.overpass.calls.length === o0 + 1 && mock.overpass.calls[o0].lat === 1.345, JSON.stringify(cs));
+    check('B3 the chips reload for the new position (its hotel and nearest name; Tampines gone)', JSON.stringify(cs) === JSON.stringify(['Locate Hotel', 'Locate Kopitiam'])
+      && mock.osm.searches.length === c1.srch + 3 && mock.osm.calls.length === c1.rev + 1 && mock.osm.calls[c1.rev].q.lat === '1.345000', JSON.stringify(cs));
     // An open-time fix arriving after Locate never takes over.
     await G.evaluate(() => { cap.located && fixAtOpen(cap.seq); });
     await G.evaluate((p) => { __geo.fix = p; const f = __geo.pending.pop(); f && f(); }, TAMP);
@@ -298,7 +311,7 @@ async function at(page, pos) { await page.evaluate((p) => { __geo.mode = 'grant'
     // Offline: the fix works, chips from own names only.
     await at(G, TAMP);
     await offline(true);
-    o0 = mock.overpass.calls.length; n0 = mock.osm.calls.length;
+    c1 = counts();
     await openNew(G);
     await settled(G);
     // 55 m north: a 50 m cell never looked up, with the saved "Tampines 1" still within 75 m.
@@ -309,7 +322,7 @@ async function at(page, pos) { await page.evaluate((p) => { __geo.mode = 'grant'
     cs = await chips(G);
     check('B8 offline in a cell never looked up: Locate gives a fix ("±20 m"), the chips are own names only, no request',
       (await G.getAttribute('#cap-place', 'placeholder')) === '1.3547, 103.9449 ±20 m' && cs.every((c) => c.src === 'own') && cs.some((c) => c.name === 'Tampines 1')
-      && mock.overpass.calls.length === o0 && mock.osm.calls.length === n0, JSON.stringify(cs));
+      && mock.osm.all.length === c1.all, JSON.stringify(cs));
     await close(G);
     await G.evaluate(() => idb.del('drafts', 'new'));
     await offline(false);

@@ -5,9 +5,70 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ---
 
+## 0.16.1 Place you are in, from Nominatim search (SPEC.md 7C.4; 7C.7 item 4a)
+
+**Status 30/10/26: 0.16.1 built (Gary's decisions 30/10/26); automated checks below; device steps to run by 05/11/26.** Client only, no migration; `tb-journal` unchanged. Why: overpass-api.de answers the Pixel's Chrome with 406 Not Acceptable (Gary, 30/10/26 0227 hrs, the `is_in` query opened directly), as it did through Apify, so 0.16.0's place-you-are-in chip never showed on the phone. Nominatim answers the phone (step 9's "Atrix" came from it). The chip now comes from Nominatim search: a viewbox about 150 m each side, bounded, one query each for mall, station and hotel; a result counts only if its kind matches and its box holds the point; the smallest box wins. Locate (0.16.0) is unchanged.
+
+### Live Nominatim, 30/10/26 (through Apify, at the step 9 point 1.35417, 103.94492)
+
+The three searches exactly as 0.16.1 sends them, viewbox `103.943572,1.355517,103.946268,1.352823`, `bounded=1`, `limit=10`, `accept-language=en`, one at a time.
+
+| Query | HTTP | Results (category, type, bounding box lat, lon) | Holds the point? |
+|---|---|---|---|
+| `mall` | 200 | Tampines 1, way 166194476 (shop, mall; 1.3536385 to 1.3547970, 103.9445343 to 103.9454900). Eastlink Mall, way 1167087012 (shop, mall; 1.3540190 to 1.3547032, 103.9439447 to 103.9446259) | Tampines 1 yes; Eastlink no (the point's longitude 103.94492 is east of 103.9446259) |
+| `station` | 200 | Tampines, way 397901195 (railway, station; 1.3526267 to 1.3558318, 103.9424512 to 103.9457151), a box round the whole interchange | Yes, but about ten times the area of Tampines 1's box |
+| `hotel` | 200 | none | |
+
+By the 0.16.1 rule the chip is "Tampines 1": both the mall and the station hold the point, and the mall's box is the smaller. These answers are the fixtures of `m13b.test.cjs`.
+
+### Automated results, 30/10/26 (0.16.1)
+
+| Check | Result | Evidence |
+|---|---|---|
+| `checks/static.cjs` | PASS, 137 of 137 | The four Overpass checks of 0.16.0 replaced by six: no Overpass left in the app code; Nominatim search bounded to a viewbox of 150 m with English names; mall, station, hotel in that order, each result of its kind; only boxes that hold the point, the smallest winning; cached under `p:` in the same cell, online only, failures not cached, both lookups on the one Nominatim line; every Nominatim request a second apart with a timeout, the reverse lookup queued first. The harness check now looks for the `/search` mock and no Overpass. Each new check was seen to fail against a copy of `trip.html` with that rule broken (the one-a-second check after it was tightened). |
+| `checks/smoke.sql` | PASS, 165 of 165 | Live project `travelboard` (ref `nnnnonspfljdkrxstslw` checked first), one rolled-back transaction, through the connector; test body as in the file, final SELECT shortened to a pass count. Regression run; no migration. No smoke rows, users or messages left afterwards. |
+| `fn.test.cjs` | Not run | `tb-journal` unchanged; no Deno in this sandbox. Last pass 62 of 62 on 26/10/26. |
+| `m1`, `m2`, `m11`, `m12`, `m13`, `m14` | PASS, 107, 80, 59, 64, 113, 34 of each, two runs | m13 unchanged: its reverse-request counts still hold, since the harness logs searches apart; its openings now also send three searches each on the shared line. |
+| `m13b.test.cjs` (rewritten) | PASS, 46 of 46, two runs (four in all) | Below. |
+| Deploy 0.16.1 | @@DEPLOY@@ | |
+
+Headless groups (`m13b.test.cjs`, Nominatim mocked with the live answers above, the mock returning only results whose centre lies in the viewbox, as `bounded=1` does):
+
+| Group | What it checks |
+|---|---|
+| A0 | The version; no `OVERPASS_URL` and no `areaQuery` left in the page |
+| A1 to A4 | At the step 9 point the chips read "Tampines 1" (area) then "Atrix" (nearest), with the credit, nothing filled; the station's box holds the point too and the smaller box wins; four Nominatim requests, reverse first, then search mall, station, hotel, each `jsonv2`, `bounded=1`, `limit=10`, English, with viewbox `103.943572,1.355517,103.946268,1.352823`; at least a second between every two of the four; the answer cached under `p:` in the same cell as the reverse key; a tap fills "Tampines 1", saved as `place_name` |
+| A5 | A second capture at the same spot makes no request; "Tampines 1" leads as an own name and is not repeated |
+| A6 | A point inside Eastlink Mall only (and the station's box): the saved "Tampines 1" within 75 m as an own name, then "Eastlink Mall", then its nearest name |
+| A7 | Tampines 1 and a food court come back, but no mall, station or hotel box holds the point: no area chip, the nearest name alone; the empty answer cached |
+| A8 | A hotel inside a mall: the hotel's smaller box wins, across kinds |
+| A9 | A search failing (HTTP 503, then network): the nearest name alone with the credit, no error shown, nothing cached under `p:`; the next opening asks the three searches again (no second reverse) and gets the mall |
+| A10 to A12 | An area and a nearest name differing only in case give one chip; three own names in range: three own chips, no request; two own names, one the area's: own, own, nearest; offline no request of either kind |
+| B1 to B10 | Locate, as in 0.16.0; B3 now sees the new position's hotel and nearest name, three searches and one reverse for it |
+
+### Device steps (both phones), 0.16.1
+
+SPEC 7C.7 item 4a again (it failed on 0.16.0), and item 4b (Locate, 0.16.0 steps 4 to 8 and 10, still to run). Note the time of each step, the ± figures and anything that looks wrong.
+
+1. **Update both phones.** Each: open travelboard, tap "Update ready, tap to reload". Tap the stamp: Version reads 0.16.1. Close with the X.
+2. **Inside a mall (item 4a).** Gary, inside Tampines 1 (or any mall), with signal: Capture. Within a few seconds the shop chip shows first (for example "Atrix"), then, about three seconds later, the mall chip ("Tampines 1") takes the first place; both dashed terracotta, with "Map suggestion © OpenStreetMap contributors" under them. Nothing is filled in. Tap the mall chip: the field reads the mall's name. Type `0.16.1 mall`, Save. If no mall chip comes within about ten seconds, note it and take a screenshot.
+3. **The journal names it (item 6).** Later, Journal: send `Where was I at lunch today?`. The reply names the mall.
+4. **Locate (item 4b).** Run steps 4 to 8 and 10 of the 0.16.0 device steps below on 0.16.1: Locate indoors and outdoors (note the ± figures), not on an edit, airplane mode, Eric's phone, light and dark.
+5. **Days still work.** Either phone: Captures, Days: today's row counts the captures above; tap it, then Days and Today.
+
+Report the times, the ± figures and anything that looks wrong. Claude then checks the rows on the server.
+
+### Open items (30/10/26, 0.16.1)
+
+1. Device steps 1 to 5 above, by 05/11/26.
+2. Gary to say whether 0.15.0 steps 4 and 7 used existing captures (M1.4 device results below): the server holds no `Days test` or `Days offline` capture.
+3. `fn.test.cjs` not run (no Deno here); `tb-journal` unchanged.
+
+---
+
 ## 0.16.0 Place you are in, and Locate (SPEC.md 7.2, 7C.4; 7C.7 items 4a, 4b)
 
-**Status 27/10/26: 0.16.0 built (Gary's decisions 27/10/26, after step 9 inside Tampines 1 offered the shop "Atrix"); automated checks below; device steps for both phones to run by 05/11/26.** Client only, no migration; `tb-journal` unchanged. The 0.15.0 device steps (M1.4, below) are unchanged and can run on 0.16.0.
+**Status 30/10/26: the mall chip FAILS on the phone: overpass-api.de answers the Pixel's Chrome with 406 (Gary, 30/10/26 0227 hrs), so the place-you-are-in chip never showed. Replaced in 0.16.1 by Nominatim search (section above); device steps 1 to 3 below are superseded by 0.16.1's step 2 and 3. Locate (steps 4 to 8 and 10) not yet run; it runs on 0.16.1.** (Status 27/10/26: 0.16.0 built (Gary's decisions 27/10/26, after step 9 inside Tampines 1 offered the shop "Atrix"); automated checks below; device steps for both phones to run by 05/11/26.) Client only, no migration; `tb-journal` unchanged. The 0.15.0 device steps (M1.4, below) are unchanged and can run on 0.16.0.
 
 Service for the place you are in: the Overpass API's `is_in` on the main instance `overpass-api.de`, a form POST to `/api/interpreter`. Why: Nominatim's reverse lookup returns the nearest feature, never the enclosing one, and has no containment query; Overpass answers "which named areas contain this point" directly, needs no key, and sends CORS headers so the phone can call it. Use stays far inside the main instance's guideline (under 10,000 requests and 1 GB a day): two phones, at most one request per 50 m cell ever, one at a time.
 
@@ -61,15 +122,15 @@ Report the times, the ± figures from steps 4, 5, 7 and 8, and anything that loo
 
 ### Open items (27/10/26, 0.16.0)
 
-1. Device steps 1 to 10 above, by 05/11/26.
-2. Overpass from the phone: unconfirmed until step 2 (the Live Overpass row). If the phone is turned away too, the fallback is to point `OVERPASS_URL` at another public instance; that is a one-line change, but a second service's policy and reliability would need checking first, so it waits for Gary's call.
+1. Steps 1 to 3 superseded by 0.16.1; steps 4 to 8 and 10 (Locate) run on 0.16.1, by 05/11/26.
+2. Closed 30/10/26: Overpass turns the phone away too (406, Gary 30/10/26 0227 hrs). Gary chose Nominatim search instead of another Overpass instance; built in 0.16.1.
 3. `fn.test.cjs` not run (no Deno here); `tb-journal` unchanged.
 
 ---
 
 ## M1.4 Capture days (SPEC.md 7D)
 
-**Status 26/10/26: 0.15.0 built (Gary's decision 26/10/26); automated checks below; device steps for both phones to run by 05/11/26.** Client only, no migration; `tb-journal` unchanged. Step 9 of the M1.3 combined run (named place, 27/10/26) stays as written and can run on 0.15.0.
+**Status 30/10/26: device steps 1 to 8 PASS (Gary, by 30/10/26; results below). SPEC 7D.3 items 1 to 6 pass on the phones, item 7 automated.** (Status 26/10/26: 0.15.0 built (Gary's decision 26/10/26); automated checks below.) Client only, no migration; `tb-journal` unchanged. Step 9 of the M1.3 combined run (named place, 27/10/26) stays as written and can run on 0.15.0.
 
 ### Automated results, 26/10/26 (0.15.0)
 
@@ -113,9 +174,18 @@ SPEC 7D.3 items 1 to 6 (item 7 is automated, above). Gary on the Pixel, Eric on 
 
 Report the times, the counts you compared in step 3, and anything that looks wrong. Claude then checks the rows on the server.
 
+### Device results, 0.15.0 (both phones), by 30/10/26
+
+From Gary's report (30/10/26) and the server rows (checked 30/10/26).
+
+| Step | Result |
+|---|---|
+| 1 to 8 | PASS (Gary). Update, Days opens the list, counts and places match a day checked by hand, a shared capture of Eric's counted on Gary's list, tap a day, Today returns, airplane mode still shows the list, light and dark. |
+| 4, 7 (server) | The server holds no capture with `Days test` (step 4) or `Days offline` (step 7) in its text. Asked Gary 30/10/26 whether those steps used existing captures; his answer to be added here. |
+
 ### Open items (26/10/26, 0.15.0)
 
-1. Device steps 1 to 8 above, both phones, by 05/11/26.
+1. Done 30/10/26: device steps 1 to 8 PASS (results above); Gary's answer on steps 4 and 7 to add.
 2. `fn.test.cjs` not run this session (no Deno here; a downloaded binary was refused). `tb-journal` is unchanged, so its 26/10/26 pass stands; run it in the next session with Deno available.
 3. Intermittent headless checks, seen once each in 13 runs: m1 A14 "offline edit queued" (also on unchanged 0.14.3 code) and m13 N11 (failed map lookup). Both read state before the app has settled; neither touches 7D. Left as they are for the freeze; worth an `until()` wait after Bangkok.
 
