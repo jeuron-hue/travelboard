@@ -30,7 +30,7 @@ By the 0.16.1 rule the chip is "Tampines 1": both the mall and the station hold 
 | `fn.test.cjs` | Not run | `tb-journal` unchanged; no Deno in this sandbox. Last pass 62 of 62 on 26/10/26. |
 | `m1`, `m2`, `m11`, `m12`, `m13`, `m14` | PASS, 107, 80, 59, 64, 113, 34 of each, two runs | m13 unchanged: its reverse-request counts still hold, since the harness logs searches apart; its openings now also send three searches each on the shared line. |
 | `m13b.test.cjs` (rewritten) | PASS, 46 of 46, two runs (four in all) | Below. |
-| Deploy 0.16.1 | @@DEPLOY@@ | |
+| Deploy 0.16.1 | PASS | `main` at `6d1f2c8`; Pages build and deploy succeeded. Live `sw.js` reads `const CACHE_VERSION = '0.16.1';` (Last-Modified 30/10/26 0253 hrs SGT), fetched through Apify. |
 
 Headless groups (`m13b.test.cjs`, Nominatim mocked with the live answers above, the mock returning only results whose centre lies in the viewbox, as `bounded=1` does):
 
