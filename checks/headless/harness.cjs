@@ -192,7 +192,7 @@ function addStorage(m) {
 // The simulated tb-journal builds its prompt with the function's own context.mjs.
 let context = null;
 async function loadContext() {
-  if (!context) context = await import(path.join(ROOT, 'supabase', 'functions', 'tb-journal', 'context.mjs'));
+  if (!context) context = await import(require('url').pathToFileURL(path.join(ROOT, 'supabase', 'functions', 'tb-journal', 'context.mjs')).href);
   return context;
 }
 function addJournal(m) {

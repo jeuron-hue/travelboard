@@ -10,7 +10,7 @@
 'use strict';
 const { until, launch, startServer, makeMock, attachMock, newContext, UID } = require('./harness.cjs');
 
-const PORT = 8733;
+const PORT = 8738;   // not 8733: something on the rig holds it
 const BASE = `http://127.0.0.1:${PORT}/`;
 const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok }); console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail && !ok ? '  [' + detail + ']' : '')); };
@@ -392,7 +392,9 @@ async function save(page) {
   await page.click('#cap-photo-claude');
   await save(page);
   const r19 = (await caps(page)).find((r) => r.id === off.id);
-  check('P19 turning it on in an edit bumps updated_at and queues the capture', r19.photo_to_claude === true && r19.dirty === 1 && r19.updated_at > before19);
+  // Queued, or already sent: on a fast machine the save's own sync can finish before this read.
+  check('P19 turning it on in an edit bumps updated_at and queues the capture', r19.photo_to_claude === true && r19.updated_at > before19
+    && (r19.dirty === 1 || mock.rows.get(off.id).photo_to_claude === true));
   await settle(page);
   await syncIdle(page);
   check('P19 the change reaches the server', mock.rows.get(off.id).photo_to_claude === true);

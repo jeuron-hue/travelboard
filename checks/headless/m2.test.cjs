@@ -352,7 +352,7 @@ const settle = (page) => page.waitForFunction(() => !syncing, null, { timeout: 1
   await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: BASE.replace(/\/$/, '') });
   await page.click('#j-share');
   await page.waitForFunction(() => !document.getElementById('toast').hidden, null, { timeout: 3000 }).catch(() => {});
-  const clip = await page.evaluate(() => navigator.clipboard.readText().catch(() => ''));
+  const clip = await page.evaluate(() => navigator.clipboard.readText().then((t) => t.replace(/\r\n/g, '\n'), () => ''));
   check('K15 no share sheet: copied to the clipboard, toast "Mon 09/11/26 copied"', clip === st
     && (await text(page, '#toast-text')) === 'Mon 09/11/26 copied');
   await page.click('#j-days');
