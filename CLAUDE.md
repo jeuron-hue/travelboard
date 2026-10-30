@@ -25,10 +25,19 @@ travelboard is Gary Chan's personal travel app: a phone PWA (`trip.html`) for ca
 ## Conventions
 
 - Single-file pages (`trip.html`, later `planner.html`) with markup, styles and script inline. `sw.js` and `manifest.webmanifest` are separate files by necessity.
-- Each HTML file opens with a comment block: "SOURCE OF RECORD", what it does, then a dated change log, newest first (same convention as weatherboard's `index.html`).
+- Each HTML file opens with a comment block: "SOURCE OF RECORD", what it does, then a line pointing to CHANGELOG.md, which holds the change history (moved out of the headers 30/10/26; see Versions and changes).
 - Styling: travelboard's own field-notebook identity from M1.3 (`SPEC.md` 7C): a vendored serif for headings, IBM Plex Sans for body and UI, colour tokens on `:root` with light and dark sets, `data-theme` on `documentElement`, theme choice in `localStorage`. Reuse weatherboard's token names where they exist; exact values come from the approved mockup.
 - UI: dates dd/mm/yy, times 24-hour (for example 0901 hrs), SI units, no em dashes in UI copy.
 - Phone-first layout: primary actions in thumb reach at the bottom, large tap targets, works one-handed.
+
+## Versions and changes
+The same rule runs in every app repo (retouch, filter, travelboard, icantell), agreed with Gary 30/10/26. The full method is in the version-release skill.
+- Numbers run x.y.z. Patch (z): a fix or retuning, nothing new to learn. Minor (y): something new Gary can do, a finished module, or a visible redesign; the patch goes back to 0. Major (x): 1.0.0 only when Gary declares the app finished after real use; after that x moves only when something old stops working (saved data, a file format). Until then the app stays on 0.x.
+- One version per release. A release is any change to the app that reaches main. Docs-only and test-only work carries no bump and is listed in the next version's entry. A work-in-progress checkpoint does not bump the version; the bump goes in the commit that completes the release.
+- The bump changes APP_VERSION in trip.html and CACHE_VERSION in sw.js together, in the release commit, and the commit subject ends with (vX.Y.Z).
+- CHANGELOG.md gets the version's entry in the same commit, at the top (newest first): a heading `## vX.Y.Z, dd/mm/yy HHMM hrs`, optionally followed by `, <phase>`, giving the date and time the release commit is made, in Singapore time; then one or more `- ` lines saying what changed, in plain words. Reasons and phone results stay in SPEC.md (with its own change log of decisions) and TESTS.md. A released entry is changed only to correct a fact.
+- checks/static.cjs fails if a heading lacks the version, date or time, the newest entry is not the current version, versions or times are out of order, or an entry has no change line.
+- Each release is built on its own branch and merged by Gary through a pull request; the branch is deleted after the merge. Once merged, the release is tagged vX.Y.Z on its commit in main; a session that finds a merged release without a tag adds it.
 
 ## Definition of done
 

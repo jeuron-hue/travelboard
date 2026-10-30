@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // travelboard static checks (SPEC.md 11). Run from the repo root: node checks/static.cjs
 // - every inline <script> in the root HTML files parses
-// - each HTML file opens with a SOURCE OF RECORD comment block; no em dashes in HTML
+// - each HTML file opens with a SOURCE OF RECORD comment block that points to CHANGELOG.md;
+//   no em dashes in HTML
+// - CHANGELOG.md: version, release date and time, change; newest entry is APP_VERSION
 // - manifest.webmanifest is valid and its icons exist at the declared sizes
 // - sw.js parses; its precache list matches the files on disk; cache name tb-shell-v<N>
 //   matches APP_VERSION in trip.html
@@ -62,7 +64,7 @@ for (const f of htmlFiles) {
   const src = read(f);
   const head = src.slice(0, 400);
   check(/^<!doctype html>\s*<!--\s*\n?\s*SOURCE OF RECORD/i.test(head), `${f}: opens with SOURCE OF RECORD comment`);
-  check(/Change log \(newest first\)/.test(src.slice(0, 3000)), `${f}: has a change log`);
+  check(/Change history: CHANGELOG\.md/.test(src.slice(0, 3000)), `${f}: points to CHANGELOG.md for its change history`);
   check(!src.includes('—'), `${f}: no em dashes`);
   const re = /<script(\s[^>]*)?>([\s\S]*?)<\/script>/gi;
   let m, n = 0;
@@ -121,6 +123,45 @@ check(!!ver, 'sw.js: CACHE_VERSION declared as 0.<minor>.<patch>');
 check(/const CACHE = 'tb-shell-v' \+ CACHE_VERSION;/.test(sw), 'sw.js: cache name tb-shell-v<N>');
 const appVer = read('trip.html').match(/const APP_VERSION = '(\d+\.\d+\.\d+)';/);
 check(!!(ver && appVer && ver[1] === appVer[1]), `sw.js CACHE_VERSION (${ver && ver[1]}) equals trip.html APP_VERSION (${appVer && appVer[1]})`);
+
+// ---------- CHANGELOG.md (versioning rule, 30/10/26) ----------
+// Every heading is "## <version>, dd/mm/yy HHMM hrs" with an optional ", <label>"; the
+// version is vX.Y.Z, a legacy vN, or Brief. Newest first: the top entry is the current
+// APP_VERSION, x.y.z versions strictly fall, times never rise going down, and every entry
+// has at least one "- " change line.
+function changelogProblems(text, appVersion) {
+  const probs = [];
+  const heads = [];
+  const lines = text.split('\n');
+  lines.forEach((l, i) => { if (l.startsWith('## ')) heads.push(i); });
+  if (!heads.length) return ['no entries'];
+  const cmp = (a, b) => { for (let k = 0; k < 3; k++) if (a[k] !== b[k]) return a[k] - b[k]; return 0; };
+  let prevVer = null, prevStamp = null;
+  heads.forEach((h, n) => {
+    const m = lines[h].match(/^## (v\d+\.\d+\.\d+|v\d+|Brief), (\d\d)\/(\d\d)\/(\d\d) (\d\d)(\d\d) hrs(, .+)?$/);
+    if (!m) { probs.push(`heading not "## vX.Y.Z, dd/mm/yy HHMM hrs": ${lines[h]}`); return; }
+    const [, label, dd, mo, yy, hh, mi] = m;
+    if (+dd < 1 || +dd > 31 || +mo < 1 || +mo > 12 || +hh > 23 || +mi > 59) probs.push(`bad date or time: ${lines[h]}`);
+    if (n === 0 && label !== 'v' + appVersion) probs.push(`newest entry ${label} is not the current version v${appVersion}`);
+    const stamp = yy + mo + dd + hh + mi;
+    if (prevStamp && stamp > prevStamp) probs.push(`${label} is later than the entry above it`);
+    prevStamp = stamp;
+    const xyz = label.match(/^v(\d+)\.(\d+)\.(\d+)$/);
+    if (xyz) {
+      const v = xyz.slice(1).map(Number);
+      if (prevVer && cmp(v, prevVer) >= 0) probs.push(`${label} is not below the version above it`);
+      prevVer = v;
+    }
+    const body = lines.slice(h + 1, heads[n + 1] ?? lines.length);
+    if (!body.some((l) => l.startsWith('- '))) probs.push(`${label} has no "- " change line`);
+  });
+  return probs;
+}
+check(exists('CHANGELOG.md'), 'CHANGELOG.md exists');
+if (exists('CHANGELOG.md') && appVer) {
+  const probs = changelogProblems(read('CHANGELOG.md'), appVer[1]);
+  check(!probs.length, `CHANGELOG.md: version, release date and time, change; newest first${probs.length ? ' (' + probs.join('; ') + ')' : ''}`);
+}
 check(!/skipWaiting\(\)/.test(sw.replace(/if \(event\.data && event\.data\.type === 'SKIP_WAITING'\) self\.skipWaiting\(\);/, '')),
   'sw.js: skipWaiting only on the SKIP_WAITING message');
 const pre = sw.match(/const PRECACHE = \[([\s\S]*?)\];/);
