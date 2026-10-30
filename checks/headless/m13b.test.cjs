@@ -265,6 +265,9 @@ async function at(page, pos) { await page.evaluate((p) => { __geo.mode = 'grant'
     check('B3 the hint shows the new coordinates with the accuracy ("±8 m"); the Locating line goes',
       (await G.getAttribute('#cap-place', 'placeholder')) === '1.3450, 103.9530 ±8 m' && (await text(G, '#cap-locate-msg')) === '' && !(await G.isDisabled('#cap-locate')),
       await G.getAttribute('#cap-place', 'placeholder'));
+    // The chips for the located fix are looked up after it lands: wait for that reverse lookup to be asked.
+    for (const end = Date.now() + 5000; mock.osm.calls.length === c1.rev && Date.now() < end;) await G.waitForTimeout(50);
+    await settled(G);
     cs = await names(G);
     check('B3 the chips reload for the new position (its hotel and nearest name; Tampines gone)', JSON.stringify(cs) === JSON.stringify(['Locate Hotel', 'Locate Kopitiam'])
       && mock.osm.searches.length === c1.srch + 3 && mock.osm.calls.length === c1.rev + 1 && mock.osm.calls[c1.rev].q.lat === '1.345000', JSON.stringify(cs));
