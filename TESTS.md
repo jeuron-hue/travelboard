@@ -81,7 +81,7 @@ From Gary's report and screenshots (06/11/26 1404 to 1408 hrs) and the server ro
 
 1. Done 06/11/26: every device step passes (results above).
 2. Not needed (06/11/26): item 4a passed on Eric's phone. Was: inside Tampines Mall (way 166194030, `shop=mall`, live in Nominatim 06/11/26, box 1.3519708 to 1.3531100, 103.9441668 to 103.9452798; Gary's nearest named capture 185 m away, so no own name hides it), open a new capture: a dashed "Tampines Mall" chip should come within about 5 s, before the nearest-name chip.
-4. Closed 06/11/26: Gary does not recall what was used for 0.15.0 steps 4 and 7; the server holds no `Days test` or `Days offline` capture. Results stand as Gary reported them; 0.16.1 step 10 shows the Days list counting a shared capture of Eric's on Gary's phone.
+4. Dropped 06/11/26 (Claude's question was unclear and is not needed): which captures 0.15.0 steps 4 and 7 used; the server holds no `Days test` or `Days offline` capture. Results stand as Gary reported them; 0.16.1 step 10 shows the Days list counting a shared capture of Eric's on Gary's phone.
 5. Pre-flight (Claude, 06/11/26): keep-alive committed daily to 05/11/26; database 11 MB of 500 MB; `tb-photos` 12 objects, 1.5 MB of 1 GB.
 3. `fn.test.cjs` not run (no Deno here); `tb-journal` unchanged.
 
@@ -202,7 +202,7 @@ From Gary's report (30/10/26) and the server rows (checked 30/10/26).
 | Step | Result |
 |---|---|
 | 1 to 8 | PASS (Gary). Update, Days opens the list, counts and places match a day checked by hand, a shared capture of Eric's counted on Gary's list, tap a day, Today returns, airplane mode still shows the list, light and dark. |
-| 4, 7 (server) | The server holds no capture with `Days test` (step 4) or `Days offline` (step 7) in its text. Asked Gary 30/10/26 whether those steps used existing captures; not recalled (Gary, 06/11/26); results stand as reported, and 0.16.1 step 10 shows the shared-capture count on 06/11/26. |
+| 4, 7 (server) | The server holds no capture with `Days test` (step 4) or `Days offline` (step 7) in its text. Asked Gary 30/10/26 whether those steps used existing captures; question dropped 06/11/26 as not needed; results stand as reported, and 0.16.1 step 10 shows the shared-capture count on 06/11/26. |
 
 ### Open items (26/10/26, 0.15.0)
 
