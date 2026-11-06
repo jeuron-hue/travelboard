@@ -1,7 +1,7 @@
 # travelboard: specification
 
 Owner: Gary Chan. Repo: `jeuron-hue/travelboard` (public). Written 04/10/26.
-Status: M0 Foundation done 04/10/26. M1 Capture done 10/10/26. M2 Journal done 23/10/26. Move to own project (6.8) done 24/10/26. M1.1 Photo capture done 24/10/26. M1.2 Two travellers built 24/10/26; its two-phone test runs with M1.3's. M1.3 Look and place (7C) from 24/10/26: sessions A and B built 24/10/26; the combined M1.2 and M1.3 phone run passed 26/10/26 apart from step 9 (named place). M1.4 Capture days (7D) added 26/10/26, client 0.15.0. Place chips inside buildings and a Locate button (7.2, 7C.4) added 27/10/26, client 0.16.0; the inside-buildings chip from Nominatim search from 0.16.1 (30/10/26). All pass on the phones by 05/11/26; freeze 06/11/26.
+Status: M0 Foundation done 04/10/26. M1 Capture done 10/10/26. M2 Journal done 23/10/26. Move to own project (6.8) done 24/10/26. M1.1 Photo capture done 24/10/26. M1.2 Two travellers built 24/10/26; its two-phone test runs with M1.3's. M1.3 Look and place (7C) from 24/10/26: sessions A and B built 24/10/26; the combined M1.2 and M1.3 phone run passed 26/10/26 apart from step 9 (named place). M1.4 Capture days (7D) added 26/10/26, client 0.15.0. Place chips inside buildings and a Locate button (7.2, 7C.4) added 27/10/26, client 0.16.0; the inside-buildings chip from Nominatim search from 0.16.1 (30/10/26). M1.2, M1.3 (with 0.16.x) and M1.4 pass on both phones, last steps 06/11/26 (TESTS.md); freeze 06/11/26.
 
 This file is the source of record for what travelboard is and how it is built. M0, M1 and M2 are specified in full because they ship before Bangkok (09/11/26). M3 to M8 are skeletons, to be expanded one at a time after Bangkok using the friction log from that trip.
 

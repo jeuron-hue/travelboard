@@ -7,7 +7,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ## 0.16.1 Place you are in, from Nominatim search (SPEC.md 7C.4; 7C.7 item 4a)
 
-**Status 06/11/26: Locate (item 4b) passes on both phones; the mall capture saved with "Tampines 1"; one check left for item 4a (the place-you-are-in chip itself, at Tampines Mall), plus Days and light theme (results below).** (Status 30/10/26: 0.16.1 built (Gary's decisions 30/10/26); automated checks below.) Client only, no migration; `tb-journal` unchanged. Why: overpass-api.de answers the Pixel's Chrome with 406 Not Acceptable (Gary, 30/10/26 0227 hrs, the `is_in` query opened directly), as it did through Apify, so 0.16.0's place-you-are-in chip never showed on the phone. Nominatim answers the phone (step 9's "Atrix" came from it). The chip now comes from Nominatim search: a viewbox about 150 m each side, bounded, one query each for mall, station and hotel; a result counts only if its kind matches and its box holds the point; the smallest box wins. Locate (0.16.0) is unchanged.
+**Status 06/11/26 1420 hrs: every 0.16.1 device step passes. Item 4a on Eric's phone (the place-you-are-in chip "Tampines 1", then "Atrix"), item 4b on both phones. With it SPEC 7C.7 passes in full, and M1.2, M1.3 and M1.4 are done on the phones before the freeze.** (Status 30/10/26: 0.16.1 built (Gary's decisions 30/10/26); automated checks below.) Client only, no migration; `tb-journal` unchanged. Why: overpass-api.de answers the Pixel's Chrome with 406 Not Acceptable (Gary, 30/10/26 0227 hrs, the `is_in` query opened directly), as it did through Apify, so 0.16.0's place-you-are-in chip never showed on the phone. Nominatim answers the phone (step 9's "Atrix" came from it). The chip now comes from Nominatim search: a viewbox about 150 m each side, bounded, one query each for mall, station and hotel; a result counts only if its kind matches and its box holds the point; the smallest box wins. Locate (0.16.0) is unchanged.
 
 ### Live Nominatim, 30/10/26 (through Apify, at the step 9 point 1.35417, 103.94492)
 
@@ -71,15 +71,18 @@ From Gary's report and screenshots (06/11/26 1404 to 1408 hrs) and the server ro
 | 5 Not on an edit (item 4b) | 06/11 1408 | PASS. Edit sheets of today's and a 26/10 capture have no Locate button. |
 | 6 Airplane mode | | Dropped by Gary 06/11. Eric's `Locate offline` (02/11 2105, accuracy 30.1 m) exists on the server. |
 | 7 Eric (item 4b) | 02/11 2106 | PASS. `Eric locate` saved 2106:25, accuracy 20.3 m, `updated_at` equal to `captured_at`. |
-| 8 Journal | | Gary's not run (item 6 passed 27/10/26; optional). Eric asked 02/11 2106; the reply said, correctly, that his notes held no lunch capture. |
-| 9 Light and dark | 06/11 | Dark seen in the screenshots; light to look at. |
+| 2a Place-you-are-in chip (item 4a) | 06/11 1415 | PASS on Eric's phone. His edit sheet for `Eric Locate` (1415:14, accuracy 11.5 m, at the Tampines 1 point) shows two dashed map chips, "Tampines 1" then "Atrix", with the credit. Eric has no own capture named "Tampines 1", so the first chip is the Nominatim search result, not an own name. |
+| 8 Journal | 06/11 1411, 1416 | PASS. Gary's `Where was I for lunch today` reply places him "inside Tampines 1 itself" at 1407 from the capture's place name; Eric's reply cites Gary's shared 1408 capture and Tampines 1. Both say, correctly, that no note mentions lunch. |
+| 9 Light and dark | 06/11 1418 | PASS. Day view and edit sheet in both themes. |
+| 10 Days | 06/11 | PASS. Today's row "4 captures" (Gary's three plus Eric's shared one), place line "Tampines 1"; 02/11 "2 captures" (Eric's, shared); 29/10 and 27/10 with their photo counts. |
 | 13 Linked, signed in | 06/11 | PASS (server): links live both ways; all of both phones' rows synced and shared. |
 
 ### Open items (30/10/26, 0.16.1)
 
-1. 06/11/26: see device results above. Left: item 4a at Tampines Mall (open item 2 below), Days, light theme.
-2. Item 4a: inside Tampines Mall (way 166194030, `shop=mall`, live in Nominatim 06/11/26, box 1.3519708 to 1.3531100, 103.9441668 to 103.9452798; Gary's nearest named capture 185 m away, so no own name hides it), open a new capture: a dashed "Tampines Mall" chip should come within about 5 s, before the nearest-name chip.
-4. Gary to say whether 0.15.0 steps 4 and 7 used existing captures (M1.4 device results below): the server holds no `Days test` or `Days offline` capture.
+1. Done 06/11/26: every device step passes (results above).
+2. Not needed (06/11/26): item 4a passed on Eric's phone. Was: inside Tampines Mall (way 166194030, `shop=mall`, live in Nominatim 06/11/26, box 1.3519708 to 1.3531100, 103.9441668 to 103.9452798; Gary's nearest named capture 185 m away, so no own name hides it), open a new capture: a dashed "Tampines Mall" chip should come within about 5 s, before the nearest-name chip.
+4. Closed 06/11/26: Gary does not recall what was used for 0.15.0 steps 4 and 7; the server holds no `Days test` or `Days offline` capture. Results stand as Gary reported them; 0.16.1 step 10 shows the Days list counting a shared capture of Eric's on Gary's phone.
+5. Pre-flight (Claude, 06/11/26): keep-alive committed daily to 05/11/26; database 11 MB of 500 MB; `tb-photos` 12 objects, 1.5 MB of 1 GB.
 3. `fn.test.cjs` not run (no Deno here); `tb-journal` unchanged.
 
 ---
@@ -199,7 +202,7 @@ From Gary's report (30/10/26) and the server rows (checked 30/10/26).
 | Step | Result |
 |---|---|
 | 1 to 8 | PASS (Gary). Update, Days opens the list, counts and places match a day checked by hand, a shared capture of Eric's counted on Gary's list, tap a day, Today returns, airplane mode still shows the list, light and dark. |
-| 4, 7 (server) | The server holds no capture with `Days test` (step 4) or `Days offline` (step 7) in its text. Asked Gary 30/10/26 whether those steps used existing captures; his answer to be added here. |
+| 4, 7 (server) | The server holds no capture with `Days test` (step 4) or `Days offline` (step 7) in its text. Asked Gary 30/10/26 whether those steps used existing captures; not recalled (Gary, 06/11/26); results stand as reported, and 0.16.1 step 10 shows the shared-capture count on 06/11/26. |
 
 ### Open items (26/10/26, 0.15.0)
 
