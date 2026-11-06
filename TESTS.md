@@ -7,7 +7,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ## 0.16.1 Place you are in, from Nominatim search (SPEC.md 7C.4; 7C.7 item 4a)
 
-**Status 30/10/26: 0.16.1 built (Gary's decisions 30/10/26); automated checks below; device steps to run by 05/11/26.** Client only, no migration; `tb-journal` unchanged. Why: overpass-api.de answers the Pixel's Chrome with 406 Not Acceptable (Gary, 30/10/26 0227 hrs, the `is_in` query opened directly), as it did through Apify, so 0.16.0's place-you-are-in chip never showed on the phone. Nominatim answers the phone (step 9's "Atrix" came from it). The chip now comes from Nominatim search: a viewbox about 150 m each side, bounded, one query each for mall, station and hotel; a result counts only if its kind matches and its box holds the point; the smallest box wins. Locate (0.16.0) is unchanged.
+**Status 06/11/26: Locate (item 4b) passes on both phones; the mall capture saved with "Tampines 1"; one check left for item 4a (the place-you-are-in chip itself, at Tampines Mall), plus Days and light theme (results below).** (Status 30/10/26: 0.16.1 built (Gary's decisions 30/10/26); automated checks below.) Client only, no migration; `tb-journal` unchanged. Why: overpass-api.de answers the Pixel's Chrome with 406 Not Acceptable (Gary, 30/10/26 0227 hrs, the `is_in` query opened directly), as it did through Apify, so 0.16.0's place-you-are-in chip never showed on the phone. Nominatim answers the phone (step 9's "Atrix" came from it). The chip now comes from Nominatim search: a viewbox about 150 m each side, bounded, one query each for mall, station and hotel; a result counts only if its kind matches and its box holds the point; the smallest box wins. Locate (0.16.0) is unchanged.
 
 ### Live Nominatim, 30/10/26 (through Apify, at the step 9 point 1.35417, 103.94492)
 
@@ -58,10 +58,28 @@ SPEC 7C.7 item 4a again (it failed on 0.16.0), and item 4b (Locate, 0.16.0 steps
 
 Report the times, the ± figures and anything that looks wrong. Claude then checks the rows on the server.
 
+### Device results, 0.16.1 (both phones), 02/11/26 and 06/11/26
+
+From Gary's report and screenshots (06/11/26 1404 to 1408 hrs) and the server rows (checked 06/11/26). Step numbers are those of the consolidated pre-Bangkok list (02/11/26). Gary 06/11/26: no more airplane-mode testing.
+
+| Step | Time | Result |
+|---|---|---|
+| 1 Update | | PASS. Both phones on 0.16.1 (Locate button present; Eric's rows from 02/11 made with it). |
+| 2 Mall (item 4a) | 06/11 1404, 1407 | PASS for what it shows, item 4a not yet shown. Inside Tampines 1 the chips read "Tampines 1 7 m" (blue, an own name from Gary's earlier Tampines 1 captures) then "Atrix" (dashed, nearest name), with the credit. `0.16.1 mall inside` saved 1407 with place "Tampines 1". The place-you-are-in chip did not show as its own chip because it equals an own name, and duplicates are dropped (7C.4), so the Nominatim search on the phone is not yet seen. Check at Tampines Mall (open item 2). |
+| 3 Locate indoors (item 4b) | 06/11 1407 to 1408 | PASS. Hint "1.3542, 103.9450 ±25 m"; `Locate indoors` saved 1408:11 at 1.35421, 103.94498, accuracy 25.1 m, `updated_at` equal to `captured_at` (no fix after Save); edit sheet reads "GPS 25 m". |
+| 4 Locate outdoors (item 4b) | 06/11 1400 | PASS (Gary). `Between 239 and 508 and Tampines 1 open sky` saved 1400:29 at 1.35452, 103.94652, accuracy 17.5 m (text edited 1402). |
+| 5 Not on an edit (item 4b) | 06/11 1408 | PASS. Edit sheets of today's and a 26/10 capture have no Locate button. |
+| 6 Airplane mode | | Dropped by Gary 06/11. Eric's `Locate offline` (02/11 2105, accuracy 30.1 m) exists on the server. |
+| 7 Eric (item 4b) | 02/11 2106 | PASS. `Eric locate` saved 2106:25, accuracy 20.3 m, `updated_at` equal to `captured_at`. |
+| 8 Journal | | Gary's not run (item 6 passed 27/10/26; optional). Eric asked 02/11 2106; the reply said, correctly, that his notes held no lunch capture. |
+| 9 Light and dark | 06/11 | Dark seen in the screenshots; light to look at. |
+| 13 Linked, signed in | 06/11 | PASS (server): links live both ways; all of both phones' rows synced and shared. |
+
 ### Open items (30/10/26, 0.16.1)
 
-1. Device steps 1 to 5 above, by 05/11/26.
-2. Gary to say whether 0.15.0 steps 4 and 7 used existing captures (M1.4 device results below): the server holds no `Days test` or `Days offline` capture.
+1. 06/11/26: see device results above. Left: item 4a at Tampines Mall (open item 2 below), Days, light theme.
+2. Item 4a: inside Tampines Mall (way 166194030, `shop=mall`, live in Nominatim 06/11/26, box 1.3519708 to 1.3531100, 103.9441668 to 103.9452798; Gary's nearest named capture 185 m away, so no own name hides it), open a new capture: a dashed "Tampines Mall" chip should come within about 5 s, before the nearest-name chip.
+4. Gary to say whether 0.15.0 steps 4 and 7 used existing captures (M1.4 device results below): the server holds no `Days test` or `Days offline` capture.
 3. `fn.test.cjs` not run (no Deno here); `tb-journal` unchanged.
 
 ---
