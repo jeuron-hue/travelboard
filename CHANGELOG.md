@@ -2,6 +2,12 @@
 
 What changed in each version, newest first. Each heading gives the version, the date and time it was released (Singapore time, 24-hour) and what changed. Versions before 0.13.0 were numbered v1 to v13 (SPEC.md 6.4). The reasons and Gary's decisions are in SPEC.md, its own change log included; the Pixel runs are in TESTS.md.
 
+## v0.17.0, 09/11/26 2159 hrs
+- Photos to Claude per day from 30 to 120, own and shared together (SPEC.md D15, 7A.4; Gary's decision mid-trip). tb-journal only: base64 from a lookup table (well inside the Edge Function's 2 s CPU limit at 120 photos), photos downloaded 8 at a time within 20 s. tb-journal v7.
+- A tap on a row's photo opens the large photo view for your own captures as for shared ones; a tap elsewhere on your own row still opens edit. On the capture and edit sheet, a tap on the photo opens the same view (SPEC.md 7A.2, 7B.3).
+- A photo from the in-app Camera (not Gallery) is also saved untouched to the phone's Download folder as travelboard_YYYYMMDD_HHMMSS.jpg, through a download link, before the shrink and without waiting. If it cannot start, one line under the photo says the original was not saved; the capture saves as normal (SPEC.md 7A.2).
+- Checks: new headless suite m17; fn.test.cjs at 121 photos, base64 against Node's, at most 8 downloads at a time; static checks for the three changes.
+
 ## v0.16.1, 30/10/26 0253 hrs
 - The place-you-are-in chip comes from Nominatim search, not Overpass (overpass-api.de answers the phone's Chrome with 406, so 0.16.0's chip never showed). For the position, one search per kind (mall, station, hotel; Gary's scope 30/10/26) bounded to about 150 m each side; a result counts only if its kind matches and its bounding box holds the point; the smallest box wins. Reverse and search share one line: one request at a time, a second apart. Cached by the same 50 m cell under "p:"; a failure is not cached. The Overpass code is gone. Chip order and limits unchanged.
 

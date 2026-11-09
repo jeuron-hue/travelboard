@@ -7,19 +7,25 @@
 // travelboard) and never leaves this function.
 //
 // Steps: store the user turn (idempotent) -> if a reply exists, return it with no API
-// call -> else download the day's switched-on photos as the user (most recent 30, 7A.4,
-// own and shared together) -> build the system prompt (the caller's own: his custom text
-// when set in the app, 7C.5, else prompts/<key>.md, key from travel.people.journal_prompt,
-// 7B.4), the day's context block (own captures and those a live partner shared, each
-// labelled with whose it is and its place name or coordinates, and photos, with a
-// prompt-cache breakpoint after the last one) and the thread (last 40 turns, the caller's
-// own) -> Claude -> store the reply once, with token and cache counts -> return it.
+// call -> else download the day's switched-on photos as the user (most recent 120, 7A.4,
+// own and shared together; at most 8 at a time, all within 20 s) -> build the system
+// prompt (the caller's own: his custom text when set in the app, 7C.5, else
+// prompts/<key>.md, key from travel.people.journal_prompt, 7B.4), the day's context block
+// (own captures and those a live partner shared, each labelled with whose it is and its
+// place name or coordinates, and photos, with a prompt-cache breakpoint after the last one)
+// and the thread (last 40 turns, the caller's own) -> Claude -> store the reply once, with
+// token and cache counts -> return it.
 //
 // Responses: 200 { user, reply, cached }. Errors: { error, message } with 400 bad request,
 // 401 not signed in, 502 Anthropic or database failure, 503 Anthropic busy. The client
 // keeps the user turn and offers Retry.
 //
 // Change log (newest first)
+// - 09/11/26 Photos to Claude per day from 30 to 120 (SPEC.md D15, 7A.4; Gary's decision mid-trip).
+//   Base64 from a lookup table instead of String.fromCharCode and btoa (120 photos of 300 KB took
+//   about 1.3 s of CPU that way, against the 2 s Edge Function limit; now about 0.13 s). Photos
+//   download at most 8 at a time, all within 20 s; one not started or not finished by then is
+//   listed as could not be loaded.
 // - 24/10/26 M1.3 Look and place (SPEC.md 7C.2a, 7C.4, 7C.5, migration 0009). The system prompt
 //   is the caller's journal_prompt_custom when set (tb_journal_turn me), otherwise the bundled
 //   prompts/<key>.md as before; with custom text set, an unknown key no longer matters. Each
@@ -47,6 +53,8 @@ const MODEL = 'claude-sonnet-5-5';
 const MAX_TOKENS = 1500;          // SPEC.md 8.3 step 6, 8.6
 const API_TIMEOUT_MS = 90_000;    // the client waits 120 s for the whole call
 const PHOTO_TIMEOUT_MS = 15_000;  // per photo download; a slow one is listed as not loaded
+const PHOTO_BUDGET_MS = 20_000;   // all of a turn's downloads; 20 s + 90 s stays inside the client's 120 s
+const PHOTO_PARALLEL = 8;         // downloads at a time, so 120 photos never sit in memory twice over
 const BUCKET = 'tb-photos';
 
 const CORS: Record<string, string> = {
@@ -61,11 +69,25 @@ const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
 const fail = (status: number, error: string, message: string) => json(status, { error, message });
 
-// Uint8Array -> base64, in chunks so a 300 KB photo never overflows the argument list.
+// Uint8Array -> base64 through a lookup table (09/11/26). The old String.fromCharCode-and-btoa
+// route cost about 11 ms of CPU per 300 KB photo; this one about 1 ms, so 120 photos stay far
+// inside the 2 s CPU limit. Output is the same standard base64 with padding.
+const B64 = new TextEncoder().encode('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/');
+const ASCII = new TextDecoder();
 function toBase64(bytes: Uint8Array): string {
-  let bin = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(bin);
+  const n = bytes.length;
+  const out = new Uint8Array(Math.ceil(n / 3) * 4);
+  let o = 0, i = 0;
+  for (; i + 2 < n; i += 3) {
+    const v = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
+    out[o++] = B64[v >> 18]; out[o++] = B64[(v >> 12) & 63]; out[o++] = B64[(v >> 6) & 63]; out[o++] = B64[v & 63];
+  }
+  if (i < n) {
+    const v = (bytes[i] << 16) | ((i + 1 < n ? bytes[i + 1] : 0) << 8);
+    out[o++] = B64[v >> 18]; out[o++] = B64[(v >> 12) & 63];
+    out[o++] = i + 1 < n ? B64[(v >> 6) & 63] : 61; out[o++] = 61;   // 61 is '='
+  }
+  return ASCII.decode(out);
 }
 
 class RpcError extends Error {
@@ -127,21 +149,30 @@ Deno.serve(async (req) => {
     if (!prompt) return fail(502, 'no_prompt', `No journal prompt "${promptKey}" in this deploy of tb-journal.`);
 
     // Step 4 (7A.4): the day's photos, downloaded as the caller, so Storage applies the
-    // tb_photos_select policy. A failure is null: listed as "could not be loaded".
+    // tb_photos_select policy. A failure is null: listed as "could not be loaded". At most
+    // PHOTO_PARALLEL at a time, all within PHOTO_BUDGET_MS; past it, the rest are null too.
     const storage = Deno.env.get('SUPABASE_URL') + '/storage/v1/object/' + BUCKET + '/';
     const captures = turn.captures || [];
     const images = new Map<string, string | null>();
-    await Promise.all(photosToSend(captures).map(async (id: string) => {
+    const queue = photosToSend(captures);
+    const deadline = Date.now() + PHOTO_BUDGET_MS;
+    async function download(id: string) {
       const c = captures.find((x: { id: string }) => x.id === id);
       try {
+        const left = deadline - Date.now();
+        if (left <= 0) throw new Error('photo time budget used up');
         const r = await fetch(storage + c.photo_path, {
-          headers: { apikey, Authorization: auth }, signal: AbortSignal.timeout(PHOTO_TIMEOUT_MS) });
+          headers: { apikey, Authorization: auth }, signal: AbortSignal.timeout(Math.min(PHOTO_TIMEOUT_MS, left)) });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         images.set(id, toBase64(new Uint8Array(await r.arrayBuffer())));
       } catch (e) {
         console.error('photo download failed', c.photo_path, (e as Error).message || String(e));
         images.set(id, null);
       }
+    }
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(PHOTO_PARALLEL, queue.length) }, async () => {
+      while (next < queue.length) await download(queue[next++]);
     }));
 
     // Steps 5 and 6.

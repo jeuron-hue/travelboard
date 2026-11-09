@@ -27,7 +27,7 @@ export function fmtLocalTime(iso, tz) {
   return `${p.hour}${p.minute} hrs ${city} time`;
 }
 
-export const MAX_PHOTOS = 30;      // SPEC.md 7A.4: the most recent 30 switched-on photos of the day go in as images
+export const MAX_PHOTOS = 120;     // SPEC.md 7A.4: the most recent 120 switched-on photos of the day go in as images (30 until 09/11/26)
 export const CACHE_TTL = '1h';     // an evening's turns can be more than 5 min apart (SPEC.md 7A.4)
 
 // System prompt: the caller's own text when he has set one in the app (journal_prompt_custom,
@@ -51,7 +51,7 @@ const placeName = (c) => (typeof c.place_name === 'string' && c.place_name.trim(
 const forClaude = (c) => !!c.photo_path && c.photo_to_claude !== false;
 
 // Which of the day's photos go in as images: the most recent MAX_PHOTOS switched-on photos by
-// captured_at, own and shared together (the 30 are combined across both travellers, D15).
+// captured_at, own and shared together (the 120 are combined across both travellers, D15).
 // captures: the day's live captures, oldest first. Returns ids, oldest first.
 export function photosToSend(captures) {
   return (captures || []).filter(forClaude).map((c) => c.id).slice(-MAX_PHOTOS);
@@ -59,11 +59,11 @@ export function photosToSend(captures) {
 
 // The day's context as content blocks, placed before the thread (SPEC.md 7A.4, 7B.4, 7C.4): the
 // day, every capture with its local time, place and text, then each photo sent as an image,
-// labelled with its capture. A photo beyond the 30 is listed as "not shown"; one that failed
+// labelled with its capture. A photo beyond the 120 is listed as "not shown"; one that failed
 // to download as "could not be loaded". The last block carries the cache breakpoint, so the
 // later turns of the evening read the images from cache.
 // images: Map capture id -> base64 JPEG, or null when the download failed. Ids missing from
-// the map were not sent (beyond the 30). A switched-off photo leaves no trace: its capture is
+// the map were not sent (beyond the 120). A switched-off photo leaves no trace: its capture is
 // listed like one without a photo.
 // name: the caller's display name (tb_journal_turn me.display_name). From M1.2 the captures can
 // include those a live partner shared (own false, owner_name the partner's name); then every

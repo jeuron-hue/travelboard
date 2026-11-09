@@ -311,9 +311,11 @@
     flex: none; width: 112px; height: 84px; border: 5px solid var(--print); background: var(--photo);
     box-shadow: 0 1px 3px var(--shadow); transform: rotate(-1.5deg); overflow: hidden;
   }
+  #cap-photo .bigprint[data-view] { cursor: pointer; }
   #cap-photo-img { width: 100%; height: 100%; object-fit: cover; display: block; }
   #cap-photo .side { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-  #cap-photo-info { font-size: 13px; color: var(--muted); }
+  #cap-photo-info, #cap-photo-orig { font-size: 13px; color: var(--muted); }
+  #cap-photo-orig:empty { display: none; }
   #cap-photo-remove { text-decoration: none; color: var(--muted); font-weight: 400; text-align: left; }
   /* With the keyboard up the ruled area gives way first, so the switches stay in view. */
   #cap-body {
@@ -624,9 +626,10 @@
       <span id="cap-osm" hidden>Map suggestion &copy; OpenStreetMap contributors</span>
     </div>
     <div id="cap-photo" hidden>
-      <div class="bigprint"><img id="cap-photo-img" alt="Photo on this capture"></div>
+      <div class="bigprint" id="cap-photo-view" role="button" tabindex="0" aria-label="Show the photo large"><img id="cap-photo-img" alt="Photo on this capture"></div>
       <div class="side">
         <span id="cap-photo-info"></span>
+        <span id="cap-photo-orig" role="status"></span>
         <button class="link" id="cap-photo-remove" type="button">Remove</button>
       </div>
     </div>
@@ -662,12 +665,12 @@
   </div>
 </dialog>
 
-<dialog id="view-dlg" aria-label="Shared capture">
+<dialog id="view-dlg" aria-label="Capture">
   <div class="sheet">
     <div class="grabber" aria-hidden="true"></div>
     <div class="sheethead"><h2 id="view-head">-</h2></div>
     <p class="meta-line" id="view-meta"></p>
-    <img id="view-img" alt="Photo on this shared capture" hidden>
+    <img id="view-img" alt="Photo on this capture" hidden>
     <p class="meta-line" id="view-nophoto" hidden>Photo not on this phone yet; it downloads on the next sync.</p>
     <div id="view-body"></div>
     <div class="sheetbar"><button class="btn2" id="view-close" type="button">Close</button></div>
@@ -811,7 +814,7 @@
 'use strict';
 
 // Bump together with CACHE_VERSION in sw.js on every release.
-const APP_VERSION = '0.16.1';     // 0.<minor>.<patch> from 0.13.0 (was 13), Gary 24/10/26
+const APP_VERSION = '0.17.0';     // 0.<minor>.<patch> from 0.13.0 (was 13), Gary 24/10/26
 
 const PROJECT_REF = 'nnnnonspfljdkrxstslw';           // Supabase project travelboard (SPEC.md D3, 6.8)
 const SUPABASE_URL = 'https://' + PROJECT_REF + '.supabase.co';
@@ -1469,6 +1472,7 @@ function setPhoto(p) {
       $('cap-photo-img').removeAttribute('src');
       $('cap-photo-img').hidden = true;
     }
+    $('cap-photo-view').toggleAttribute('data-view', !!cap.photo.blob);
     $('cap-photo-info').textContent = cap.photo.blob
       ? `${cap.photo.w} x ${cap.photo.h}, ${Math.round(cap.photo.bytes / 1024)} KB${cap.photo.state === 'new' ? ', not saved yet' : ''}`
       : 'Photo not on this phone yet; it downloads on the next sync.';
@@ -1520,6 +1524,38 @@ function writeDraft() {
   return idb.put('drafts', draftRecord(true)).catch((e) => console.warn('draft write failed', e));
 }
 
+// A photo from the in-app Camera exists nowhere else: the camera app hands it to Chrome and
+// keeps no copy. Before the shrink, the untouched file is saved to the phone through a download
+// link, which on Android Chrome lands in the Download folder (Google Photos, device folders) with
+// no prompt (SPEC.md 7A.2, 09/11/26). Fire and forget: nothing waits on it, and the capture
+// never depends on it. The page cannot see whether Chrome finished the download; a failure it
+// can see (no download support, the link throwing) shows one line under the photo.
+const ORIGINAL_URL_MS = 60000;      // the download link's object URL is freed after a minute
+function originalName(file, d) {
+  const two = (n) => String(n).padStart(2, '0');
+  const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic', 'image/heif': 'heif' }[file.type]
+    || ((/\.([a-z0-9]{1,5})$/i.exec(file.name || '') || [])[1] || 'jpg').toLowerCase();
+  return `travelboard_${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}_${two(d.getHours())}${two(d.getMinutes())}${two(d.getSeconds())}.${ext}`;
+}
+function keepOriginal(file) {
+  try {
+    if (!('download' in HTMLAnchorElement.prototype)) throw new Error('downloads not supported');
+    const url = URL.createObjectURL(file);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = originalName(file, new Date());
+    a.hidden = true;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), ORIGINAL_URL_MS);
+    return true;
+  } catch (e) {
+    console.warn('original not saved', e);
+    return false;
+  }
+}
+
 async function attachPhoto(file) {
   if (!cap.open) return;
   try {
@@ -1534,6 +1570,7 @@ function removePhoto() {
   if (!cap.open) return;
   const saved = cap.mode === 'edit' && cap.row && (cap.row.photo_path || cap.savedPhoto);
   cap.toClaude = true;               // a photo attached later starts switched on again
+  $('cap-photo-orig').textContent = '';
   setPhoto({ state: saved ? 'removed' : 'none' });
   writeDraft();
 }
@@ -1588,6 +1625,7 @@ async function openCapture(mode, row, draft) {
   $('cap-share').hidden = !linkedNow();
   $('cap-share-on').checked = cap.share;
   $('cap-share-label').textContent = 'Share with ' + partnerNames();
+  $('cap-photo-orig').textContent = '';
   if (draft && draft.photo) setPhoto(Object.assign({ state: 'new' }, draft.photo));
   else if (draft && draft.photo === null && mode === 'edit') setPhoto({ state: 'removed' });
   else if (mode === 'edit' && (cap.savedPhoto || row.photo_path)) {
@@ -2064,16 +2102,19 @@ function dayPlaces(rows) {
 // A photo print's tilt, steady per capture: 2, -2, 1.5 or -1.5 degrees (SPEC.md 7C.8).
 const tiltOf = (id) => [2, -2, 1.5, -1.5][parseInt(String(id).replace(/-/g, '').slice(-2), 16) % 4 || 0];
 
-// The other person's shared capture, read-only: text, photo, time, place. No Edit, no
-// Delete, no switches (SPEC.md 7B.3).
+// A capture, read-only: text, photo, time, place. No Edit, no Delete, no switches. The other
+// person's shared capture opens here on any tap (SPEC.md 7B.3); from 0.17.0 an own capture
+// opens here too when its photo is tapped (7A.2), so the photo can be seen large.
 let viewUrl = null;
-async function openPartnerView(id) {
-  const r = await idb.get('partner', id);
-  if (!r) return;
-  const ph = await idb.get('pphotos', id);
+async function openPartnerView(id) { return openCaptureView(id, true); }
+async function openCaptureView(id, partner) {
+  const r = await idb.get(partner ? 'partner' : 'captures', id);
+  if (!r || r.deleted_at) return;
+  const ph = await idb.get(partner ? 'pphotos' : 'photos', id);
   if (viewUrl) { URL.revokeObjectURL(viewUrl); viewUrl = null; }
   const city = r.tz !== deviceTz() ? ' ' + cityOf(r.tz) : '';
-  $('view-head').textContent = `${r.owner_name || 'Shared'}, ${fmtDayLabel(r.local_date)}`;
+  const who = partner ? r.owner_name || 'Shared' : (me && me.display_name) || 'You';
+  $('view-head').textContent = `${who}, ${fmtDayLabel(r.local_date)}`;
   // Time and place; no kind (SPEC.md 7C.2a). The place is the owner's name for it, else coordinates.
   $('view-meta').textContent = [`${fmtTime(r.captured_at, r.tz)}${city}`,
     placeText(r) + (!hasPlaceName(r) && r.lat != null && r.accuracy_m != null ? ` (${Math.round(r.accuracy_m)} m)` : '')].join(', ');
@@ -2083,6 +2124,21 @@ async function openPartnerView(id) {
   $('view-nophoto').hidden = !!ph || !r.photo_path;
   $('view-body').textContent = r.body || '';
   $('view-dlg').dataset.id = id;
+  $('view-dlg').showModal();
+}
+// The photo on the capture and edit sheet, large: the attached or saved photo as it is now,
+// saved or not, in the same view (0.17.0).
+function openSheetPhotoView() {
+  if (!cap.open || !cap.photo || !cap.photo.blob || $('view-dlg').open) return;
+  if (viewUrl) URL.revokeObjectURL(viewUrl);
+  viewUrl = URL.createObjectURL(cap.photo.blob);
+  $('view-head').textContent = 'Photo';
+  $('view-meta').textContent = $('cap-photo-info').textContent;
+  $('view-img').src = viewUrl;
+  $('view-img').hidden = false;
+  $('view-nophoto').hidden = true;
+  $('view-body').textContent = '';
+  $('view-dlg').dataset.id = cap.row ? cap.row.id : '';
   $('view-dlg').showModal();
 }
 
@@ -3297,15 +3353,24 @@ for (const id of ['cap-camera', 'cap-file']) {
   $(id).addEventListener('change', () => {
     const f = $(id).files && $(id).files[0];
     $(id).value = '';
-    if (f) attachPhoto(f);
+    if (!f) return;
+    // Camera only: the original goes to the phone first, without waiting (0.17.0).
+    const kept = id === 'cap-camera' ? keepOriginal(f) : true;
+    $('cap-photo-orig').textContent = kept ? '' : 'Original not saved to the phone.';
+    attachPhoto(f);
   });
 }
+$('cap-photo-view').addEventListener('click', () => { openSheetPhotoView(); });
+$('cap-photo-view').addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openSheetPhotoView(); }
+});
 $('cap-photo-remove').addEventListener('click', () => { removePhoto(); });
 $('cap-photo-claude').addEventListener('change', () => { cap.toClaude = $('cap-photo-claude').checked; writeDraft(); });
 $('records').addEventListener('click', (ev) => {
   const row = ev.target.closest('.row');
   if (!row || cap.open) return;
-  if (row.dataset.partner) openPartnerView(row.dataset.id).catch(fail('Could not open capture'));
+  // The photo opens the large view, own or shared (0.17.0); elsewhere an own row opens edit.
+  if (row.dataset.partner || ev.target.closest('.print')) openCaptureView(row.dataset.id, !!row.dataset.partner).catch(fail('Could not open capture'));
   else openEdit(row.dataset.id).catch(fail('Could not open capture'));
 });
 $('view-close').addEventListener('click', () => $('view-dlg').close());

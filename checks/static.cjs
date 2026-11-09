@@ -231,7 +231,7 @@ if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(
   check(!/storage\.from\([^)]*\)\.remove\(/.test(trip) && !/method: 'DELETE'/.test(trip), 'photos: the client never deletes a file (rule 8)');
   if (exists(`${FN}/context.mjs`)) {
     const ctx = read(`${FN}/context.mjs`);
-    check(/export const MAX_PHOTOS = 30;/.test(ctx) && /export const CACHE_TTL = '1h';/.test(ctx) && /photo_to_claude !== false/.test(ctx), 'photos: tb-journal sends at most 30 switched-on photos, cache breakpoint 1 h');
+    check(/export const MAX_PHOTOS = 120;/.test(ctx) && /export const CACHE_TTL = '1h';/.test(ctx) && /photo_to_claude !== false/.test(ctx), 'photos: tb-journal sends at most 120 switched-on photos (30 until 09/11/26), cache breakpoint 1 h');
   }
   const m6 = exists('supabase/migrations/0006_tb_photos_bucket.sql') ? read('supabase/migrations/0006_tb_photos_bucket.sql') : '';
   check(/values \('tb-photos', 'tb-photos', false, 2097152, array\['image\/jpeg'\]\)/.test(m6)
@@ -385,6 +385,28 @@ if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(
   const pkg = JSON.parse(read('checks/headless/package.json'));
   check(exists('checks/headless/m13b.test.cjs') && /node m13b\.test\.cjs/.test(pkg.scripts.test) && /u\.pathname === '\/search'/.test(read('checks/headless/harness.cjs'))
     && !/overpass/i.test(read('checks/headless/harness.cjs')), '0.16.1: headless suite m13b runs with the others; the harness mocks Nominatim search, no Overpass');
+}
+
+// ---------- 0.17.0 mid-trip release (SPEC.md D15, 7A.2, 7A.4, 7B.3; 09/11/26) ----------
+{
+  const trip = read('trip.html');
+  const fn = read('supabase/functions/tb-journal/index.ts').replace(/^\s*\/\/.*$/gm, '');
+  const fnBody = (name) => { const i = trip.indexOf(`function ${name}(`); if (i < 0) return ''; const j = trip.indexOf('\n}\n', i); return trip.slice(i, j); };
+  const keep = fnBody('keepOriginal'), name = fnBody('originalName');
+  check(/const PHOTO_BUDGET_MS = 20_000;/.test(fn) && /const PHOTO_PARALLEL = 8;/.test(fn) && /Math\.min\(PHOTO_PARALLEL, queue\.length\)/.test(fn)
+    && !/String\.fromCharCode|btoa\(/.test(fn) && /new TextDecoder\(\)/.test(fn),
+    '0.17.0: tb-journal downloads at most 8 photos at a time within 20 s, base64 from a lookup table (no fromCharCode, no btoa)');
+  check(/if \(row\.dataset\.partner \|\| ev\.target\.closest\('\.print'\)\) openCaptureView\(row\.dataset\.id, !!row\.dataset\.partner\)/.test(trip)
+    && /else openEdit\(row\.dataset\.id\)/.test(trip) && /idb\.get\(partner \? 'partner' : 'captures', id\)/.test(trip),
+    '0.17.0: a row\'s photo opens the view, own or shared; elsewhere an own row opens edit');
+  check(/\$\('cap-photo-view'\)\.addEventListener\('click', \(\) => \{ openSheetPhotoView\(\); \}\);/.test(trip) && /id="cap-photo-view" role="button"/.test(trip),
+    '0.17.0: the photo on the capture and edit sheet opens the same view');
+  check(/const kept = id === 'cap-camera' \? keepOriginal\(f\) : true;/.test(trip) && /'Original not saved to the phone\.'/.test(trip)
+    && /a\.download = originalName\(file, new Date\(\)\);/.test(keep) && !/await/.test(keep) && /catch \(e\)/.test(keep)
+    && /`travelboard_\$\{d\.getFullYear\(\)\}/.test(name),
+    '0.17.0: a Camera photo (not Gallery) is saved untouched through a download link before the shrink, never awaited; a failure is one line');
+  const pkg = JSON.parse(read('checks/headless/package.json'));
+  check(exists('checks/headless/m17.test.cjs') && /node m17\.test\.cjs/.test(pkg.scripts.test), '0.17.0: headless suite m17 exists and runs with the others');
 }
 
 // ---------- keep-alive workflow (SPEC.md 6.8 step 5) ----------

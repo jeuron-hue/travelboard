@@ -5,6 +5,77 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ---
 
+## 0.17.0 Mid-trip release, Bangkok (SPEC.md D15, 7A.2, 7A.4, 7B.3; Gary's decisions 09/11/26)
+
+**Status 09/11/26: built and checked headless; `tb-journal` v7 deployed 09/11/26 2158 hrs; client 0.17.0 waits for Gary's merge. Device steps below, both phones.**
+
+Three changes: (1) photos to Claude per day from 30 to 120 (server only); (2) a row's photo opens the large photo view for own rows too, and the photo on the capture and edit sheet opens it; (3) a photo from the in-app Camera is also saved untouched to the phone's Download folder.
+
+### Limits for 120 photos, checked 09/11/26 before the deploy
+
+| Limit | Value (source) | At 120 photos |
+|---|---|---|
+| Context window, `claude-sonnet-5-5` | 1M tokens, standard pricing across it (Claude models overview and pricing pages) | About 193,000 image tokens (1,610 per 1280 x 960 photo; 1,196 for 16:9) plus captures, prompt and up to 40 turns, about 225,000 in all |
+| Images per request | 600 for models over 200k context, 100 for 200k models (vision page) | 120 |
+| Request size | 128 MB on the Claude API (vision page) | About 49 MB of base64 at 300 KB a photo; the largest stored photo is 254 KB, the mean 134 KB (29 photos on the server, 09/11/26) |
+| Image size above 20 images | A stricter limit per image; under 3,000 px a side is inside it on every platform (vision page) | Photos are at most 1280 px |
+| Edge Function memory | 256 MB (Supabase limits page) | About 150 MB of strings and buffers at 300 KB a photo (base64, request body, its encoded copy), about 70 MB at the mean size. Downloads 8 at a time, so raw files never pile up |
+| Edge Function CPU | 2 s per request, async I/O not counted | The old base64 (`String.fromCharCode` then `btoa`) took 1,288 ms for 120 x 300 KB under Deno 2.9.6; the new lookup table 125 ms, same output. Body build and encode 145 ms |
+| Edge Function wall clock | 150 s, and 150 s request idle timeout (free plan) | Downloads capped at 20 s in all (8 at a time, 15 s each), Claude 90 s; the client waits 120 s |
+| Cost | Sonnet 5.5: USD 2 input, USD 4 1 h cache write, USD 0.10 cache read per million (pricing page) | A 120-photo evening: about USD 0.77 for the first turn, about USD 0.02 for each later turn |
+
+120 fits with margin once the base64 is fast, so no lower number was needed.
+
+### Automated results, 09/11/26 (0.17.0)
+
+| Check | Result | Evidence |
+|---|---|---|
+| `checks/static.cjs` | PASS, 144 of 144 | Adds 5: the 120 cap (the 30 check changed); tb-journal downloads 8 at a time within 20 s and has no `fromCharCode` or `btoa`; a row's photo opens the view, own or shared, elsewhere an own row opens edit; the sheet's photo opens the same view; a Camera photo (not Gallery) saved through a download link before the shrink, never awaited, a failure as one line; suite m17 runs with the others. |
+| `fn.test.cjs` | PASS, 64 of 64 | Deno 2.9.6 (npm package `deno`, installed in this session). F13 now 121 switched-on photos: 120 images, the oldest listed as not shown; new: every image's base64 equals Node's for the same bytes (6, 7 and 8 byte files for the three padding cases, and 264 bytes through all 256 values); never more than 8 downloads at a time. G6 now 110 of Eric's and 15 of Gary's: 120 images, 5 listed. F13 and G6 ids moved to their own ranges (the larger days overlapped F15's and G2's). |
+| `m1`, `m2`, `m11`, `m12`, `m13`, `m13b`, `m14` | PASS, 107, 80, 59, 64, 113, 46, 34 of each | Unchanged suites. |
+| `m17.test.cjs` (new) | PASS, 19 of 19 | Below. A mutated copy (row photo opens edit, Camera original off) fails the suite. |
+| `checks/smoke.sql` | Not run | No database change. Last pass 165 of 165. |
+| Deploy `tb-journal` | PASS | Project `travelboard`, ref `nnnnonspfljdkrxstslw` checked first. v6 read back first and matched the repo before the change. v7 deployed 09/11/26 2158 hrs, `verify_jwt` on, files `index.ts`, `context.mjs`, `prompt.ts` read back and matching the repo (`MAX_PHOTOS = 120`). The function host is not reachable from this sandbox, so the first live call is device step 9. |
+| Deploy 0.17.0 | After the merge | GitHub Pages is not reachable from this sandbox; the live `sw.js` is checked after Gary merges. |
+
+Headless groups (`m17.test.cjs`, Gary's and Eric's phones on one mock, Asia/Bangkok):
+
+| Group | What it checks |
+|---|---|
+| V0 | The version |
+| V1, V2 | Own row: its photo opens the view (photo at full size, text, "Gary, <day>", no controls, no edit screen); a tap on its text still opens edit |
+| V3, V4 | Edit sheet: the photo is marked tappable and opens the same view over the sheet with its size line; closing it leaves the sheet open, text, place and photo unchanged |
+| V5 | Eric's shared row: its photo opens the view; a tap elsewhere opens the view as before |
+| V6 | Own row without a photo: a tap opens edit, no photo to view |
+| V7 | A new capture's photo, not saved yet, opens in the view |
+| O1 | Camera: one download named `travelboard_YYYYMMDD_HHMMSS.jpg` in phone time, byte for byte the 3000 x 2250 original; the photo still attaches at 1280 px; no "not saved" line; the capture saves with its photo |
+| O2 | Gallery: no download |
+| O3, O4 | The download cannot start (object URL for the file throws): "Original not saved to the phone." under the photo, the photo attaches and the capture saves; the line is gone at the next sheet |
+| O5 | The save is synchronous and returns before the shrink |
+
+### Camera original on Android Chrome: what was chosen and why
+
+A download link (`<a download>` on an object URL of the untouched camera file), clicked in the Camera input's change handler before the shrink starts. Android Chrome saves a download to the Download folder, which Android's media store indexes, so Google Photos lists it under device folders. Nothing else saves without asking: Android Chrome has no save-file picker (the File System Access API is desktop only), sharing the file opens the share sheet every time, and a camera app called from a web page keeps no copy. Chrome shows its own "Downloaded" message at the foot each time; that is a message, not a prompt. Chrome's guard against many automatic downloads asks only when a page downloads again with no tap in between; each Camera shot follows taps on Photo and Camera, so it is not expected to ask. Not yet seen on the Pixel: steps 4 and 5 confirm it. The page cannot see whether Chrome finished the download, so the "not saved" line covers only failures the page can see.
+
+### Device steps (both phones), 0.17.0
+
+Run after Gary merges the pull request and Claude confirms the live `sw.js` reads 0.17.0. Note the time of each step and anything that looks wrong, especially any prompt or dialog in steps 4 and 5.
+
+1. **Update both phones.** Each: open travelboard, tap "Update ready, tap to reload". Tap the stamp: Version reads 0.17.0. Close with the X.
+2. **Your own photo, large.** Gary: Captures, a day with one of your own photos. Tap the small photo on the row: the large view opens with "Gary, <date>", the time and place, the photo large and the text, and no Edit or Delete. Close. Tap the text of the same row: the edit sheet opens as before.
+3. **The photo on the sheet.** In that edit sheet, tap the photo: the same large view opens, headed "Photo", with the size line. Close: you are back in the edit sheet with nothing changed. Close the sheet with the X.
+4. **Camera original.** Capture, Photo, Camera, take a photo, confirm it. Expected: Chrome shows a short "Downloaded" message at the foot; no question, no dialog; under the photo no "Original not saved" line. Type `Original test 1`, Save. Report anything Chrome asked.
+5. **A second shot straight after.** Capture, Photo, Camera, take another photo. Does Chrome ask anything (for example about downloading multiple files)? If it does, tap Allow and report the wording. Type `Original test 2`, Save.
+6. **In Google Photos.** Open Google Photos, Collections (or Library), "On this device" (or Photos on device), Download. The two photos from steps 4 and 5 are there, named `travelboard_YYYYMMDD_HHMMSS.jpg` with today's date and the times of the shots. Open one, swipe up for details: full camera size (for example 4080 x 3072, a few MB), not 1280 px. If the Download folder is missing, check the Files app, Downloads, and report.
+7. **Gallery makes no copy.** Capture, Photo, Gallery, pick any photo. No "Downloaded" message, and no new file in Download. Close the sheet with the X (the draft is kept; discard it if you like).
+8. **Airplane mode.** Airplane mode on: Capture, Photo, Camera, take a photo, type `Original offline`, Save. The capture saves as before and the original still appears in Download (step 6). Airplane mode off.
+9. **Journal with more than 30 photos.** On a day with more than 30 photos switched on for Claude (yours and Eric's shared ones together), Journal: ask about one of the day's earliest photos, for example `What was in my first photo this morning?`. Note the seconds from Send to the reply. Claude should describe it; before 0.17.0 the earliest ones past 30 were listed as not shown. Send one more turn the same evening. Claude then checks the stored token and cache counts on the server.
+10. **Eric's phone.** Eric: steps 2, 4, 6 and 7 on his phone, and step 2 also on a row Gary shared (its photo opens the view as before, with Gary's name).
+
+Report the times, any prompt in steps 4, 5 and 8, and anything that looks wrong.
+
+---
+
 ## 0.16.1 Place you are in, from Nominatim search (SPEC.md 7C.4; 7C.7 item 4a)
 
 **Status 06/11/26 1420 hrs: every 0.16.1 device step passes. Item 4a on Eric's phone (the place-you-are-in chip "Tampines 1", then "Atrix"), item 4b on both phones. With it SPEC 7C.7 passes in full, and M1.2, M1.3 and M1.4 are done on the phones before the freeze.** (Status 30/10/26: 0.16.1 built (Gary's decisions 30/10/26); automated checks below.) Client only, no migration; `tb-journal` unchanged. Why: overpass-api.de answers the Pixel's Chrome with 406 Not Acceptable (Gary, 30/10/26 0227 hrs, the `is_in` query opened directly), as it did through Apify, so 0.16.0's place-you-are-in chip never showed on the phone. Nominatim answers the phone (step 9's "Atrix" came from it). The chip now comes from Nominatim search: a viewbox about 150 m each side, bounded, one query each for mall, station and hotel; a result counts only if its kind matches and its box holds the point; the smallest box wins. Locate (0.16.0) is unchanged.
