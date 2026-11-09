@@ -5,10 +5,10 @@
 // Anthropic Messages API (records every request). Needs deno on PATH or DENO=/path/to/deno.
 // Checks the request it sends to Claude, idempotent retries, error mapping and the 40-turn cap;
 // from M1.1 (SPEC.md 7A.4) also a fake of Storage: the day's photos as labelled images (most
-// recent 20, the rest listed), a failed download listed, the cache breakpoint, cache counts.
+// recent 20, the rest listed; 120 from 09/11/26), a failed download listed, the cache breakpoint, cache counts.
 // From M1.2 (SPEC.md 7B.4, 7B.5 item 10), G1 to G7: Eric's calls (his own JWT): his prompt
 // (prompts/journal-eric.md), Gary's captures only when linked and shared, labelled by name,
-// an unshared one absent from the whole request, the photos combined to 30, unknown prompt.
+// an unshared one absent from the whole request, the photos combined to 120 (30 until 09/11/26), unknown prompt.
 // From M1.3 (SPEC.md 7C.2a, 7C.4, 7C.5, 7C.7 items 6 and 7), H1 to H6: no kind label anywhere;
 // each capture labelled with its place name when set, coordinates otherwise; the caller's own
 // custom prompt when set, the bundled file otherwise, and the captures always in the context.
@@ -40,6 +40,7 @@ const cacheUsage = (body) => {
   return hit ? { cache_creation_input_tokens: 0, cache_read_input_tokens: 3000 } : { cache_creation_input_tokens: 3000, cache_read_input_tokens: 0 };
 };
 const storageGets = [];
+const storageLive = { now: 0, max: 0 };   // downloads in flight (09/11/26: at most 8 at a time)
 function fake(req, res) {
   let data = '';
   req.on('data', (c) => { data += c; });
@@ -58,6 +59,8 @@ function fake(req, res) {
     const st = /^\/storage\/v1\/object\/tb-photos\/(.+)$/.exec(req.url);
     if (st && req.method === 'GET') {
       storageGets.push({ path: decodeURIComponent(st[1]), auth: req.headers.authorization, apikey: req.headers.apikey });
+      storageLive.now++; storageLive.max = Math.max(storageLive.max, storageLive.now);
+      res.on('close', () => { storageLive.now--; });
       const o = m.objects.get(decodeURIComponent(st[1]));
       const who = uidOf(req.headers.authorization);
       if (!who || !o || !m.canRead(decodeURIComponent(st[1]), who)) return send(400, { statusCode: '404', error: 'not_found', message: 'Object not found' });
@@ -195,23 +198,28 @@ const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
     check('F10 51-message thread capped to 40, starts with a user turn, ends with "last"', cap.length <= 40 && cap.length >= 39
       && cap[0].role === 'user' && cap[cap.length - 1].content === 'last', cap.length);
 
-    // F13 photos (SPEC.md 7A.4, 7A.6 item 11): on 11/11, 31 switched-on photos, 2 switched-off
-    // photos and 1 capture without a photo. The most recent 30 switched-on photos go in as
-    // images, the oldest switched-on one is listed as not shown, the switched-off ones are not
-    // fetched, sent, listed or mentioned.
+    // F13 photos (SPEC.md 7A.4, 7A.6 item 11; 120 from 09/11/26): on 11/11, 121 switched-on
+    // photos, 2 switched-off photos and 1 capture without a photo, 5 min apart from 0800 hrs
+    // Bangkok. The most recent 120 switched-on photos go in as images, the oldest switched-on
+    // one is listed as not shown, the switched-off ones are not fetched, sent, listed or
+    // mentioned. The newest photo's bytes run through all 256 values, so the base64 is checked
+    // on real binary; the others' lengths (6 to 8 bytes) cover all three padding cases.
     const P = '11111111-2222-4333-8444-555555555555';
     const day = [];
     const OFF = new Set([10, 20]), NOPHOTO = 5;
-    for (let i = 0; i < 34; i++) {
-      const id = uid(500 + i);
+    const at5 = (d, i) => new Date(Date.parse(`${d}T01:00:00Z`) + i * 5 * 60000).toISOString().replace('.000Z', 'Z');
+    const BIN = Buffer.concat([Buffer.from('JPEG-123'), Buffer.from([...Array(256).keys()])]);
+    for (let i = 0; i < 124; i++) {
+      const id = uid(2000 + i);
       const withPhoto = i !== NOPHOTO;
       day.push({ id, body: i === 7 ? '' : `Stop ${i}` + (OFF.has(i) ? ' private' : ''), kind: i % 4 === 0 ? 'journal' : 'note', tz: 'Asia/Bangkok', local_date: '2026-11-11',
-        captured_at: `2026-11-11T${String(1 + Math.floor(i / 4)).padStart(2, '0')}:${String((i % 4) * 15).padStart(2, '0')}:00Z`,
+        captured_at: at5('2026-11-11', i),
         updated_at: '2026-11-11T12:00:00Z', photo_path: withPhoto ? `${P}/${id}.jpg` : null, photo_to_claude: !OFF.has(i) });
-      if (withPhoto) m.objects.set(`${P}/${id}.jpg`, { bytes: Buffer.from('JPEG-' + i), contentType: 'image/jpeg' });
+      if (withPhoto) m.objects.set(`${P}/${id}.jpg`, { bytes: i === 123 ? BIN : Buffer.from('JPEG-' + i), contentType: 'image/jpeg' });
     }
     m.upsertBatch(day);
     const g0 = storageGets.length, n13 = anth.calls.length;
+    storageLive.max = 0;
     r = await call(turn(uid(300), 'What did you see in the photos?', '2026-11-11T14:00:00Z', '2026-11-11'));
     const c13 = anth.calls[n13] && anth.calls[n13].body;
     const blocks = c13 ? c13.messages[0].content : [];
@@ -220,21 +228,24 @@ const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
     const all13 = JSON.stringify(c13 || {});
     const gets13 = storageGets.slice(g0).map((g) => g.path);
     check('F13 200 and a reply', r.status === 200 && !!r.body.reply, JSON.stringify(r.body));
-    check('F13 31 switched-on photos: the 30 most recent fetched as the user, the oldest not fetched', gets13.length === 30
-      && storageGets.slice(g0).every((g) => g.auth === JWT && g.apikey === 'pk_test') && !gets13.some((x) => x.endsWith(uid(500) + '.jpg')), gets13.length);
-    check('F13 30 images, JPEG base64 of the stored bytes, oldest first', imgs.length === 30
+    check('F13 121 switched-on photos: the 120 most recent fetched as the user, the oldest not fetched', gets13.length === 120
+      && storageGets.slice(g0).every((g) => g.auth === JWT && g.apikey === 'pk_test') && !gets13.some((x) => x.endsWith(uid(2000) + '.jpg')), gets13.length);
+    check('F13 120 images, JPEG base64 of the stored bytes, oldest first', imgs.length === 120
       && imgs.every((b) => b.source.type === 'base64' && b.source.media_type === 'image/jpeg')
-      && imgs[0].source.data === Buffer.from('JPEG-1').toString('base64') && imgs[29].source.data === Buffer.from('JPEG-33').toString('base64'), imgs.length);
+      && imgs[0].source.data === Buffer.from('JPEG-1').toString('base64') && imgs[119].source.data === BIN.toString('base64'), imgs.length);
+    const want13 = [...Array(124).keys()].filter((i) => i > 0 && i !== NOPHOTO && !OFF.has(i)).map((i) => (i === 123 ? BIN : Buffer.from('JPEG-' + i)).toString('base64'));
+    check('F13 every image\'s base64 equals Node\'s for the same bytes (all three padding cases and binary)', imgs.every((b, k) => b.source.data === want13[k]));
+    check('F13 at most 8 downloads at a time', storageLive.max >= 1 && storageLive.max <= 8, storageLive.max);
     // M1.3 (7C.2a): the label no longer carries the kind, though a quarter of these rows are journal-kind.
     const labelOk = blocks.every((b, i) => b.type !== 'image' || (blocks[i - 1].type === 'text' && /^Photo from capture \d+, \d{4} hrs Bangkok time: /.test(blocks[i - 1].text)));
     check('F13 each image follows a label with its capture\'s time and text, no kind', labelOk
-      && blocks.some((b) => b.type === 'text' && b.text.includes('Stop 33')) && blocks.some((b) => b.type === 'text' && / time: \(no text\)$/.test(b.text))
+      && blocks.some((b) => b.type === 'text' && b.text.includes('Stop 123')) && blocks.some((b) => b.type === 'text' && / time: \(no text\)$/.test(b.text))
       && !blocks.some((b) => b.type === 'text' && /(note|journal): /.test(b.text)));
     check('F13 the oldest switched-on photo listed as not shown, nothing listed as could not be loaded',
       (ctx13.match(/, not shown"/g) || []).length === 1 && ctx13.includes('photo="photo at 0800 hrs Bangkok, not shown"') && !/could not be loaded/.test(ctx13), ctx13.slice(0, 300));
     const offTag = (i) => (ctx13.match(new RegExp(`<capture n="${i + 1}"[^>]*>`)) || [''])[0];
     check('F13 switched-off photos (item 11): not fetched, not sent, not listed, no photo attribute; their capture text still there',
-      !gets13.some((x) => x.endsWith(uid(510) + '.jpg') || x.endsWith(uid(520) + '.jpg'))
+      !gets13.some((x) => x.endsWith(uid(2010) + '.jpg') || x.endsWith(uid(2020) + '.jpg'))
       && !all13.includes(Buffer.from('JPEG-10').toString('base64')) && !all13.includes(Buffer.from('JPEG-20').toString('base64'))
       && !/photo=/.test(offTag(10)) && !/photo=/.test(offTag(20)) && offTag(10) !== '' && ctx13.includes('Stop 10 private')
       && !blocks.some((b) => b.type === 'text' && /^Photo from capture (11|21),/.test(b.text)), offTag(10));
@@ -340,14 +351,14 @@ const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
     allG = JSON.stringify(anth.calls[nG] && anth.calls[nG].body || {});
     check('G5 link removed: none of Gary\'s captures reach Eric\'s request', r.status === 200 && !allG.includes('Gary shared') && !allG.includes('GARY-'));
 
-    // G6 the 30 photos are combined: Eric 20 switched-on, Gary 15 shared switched-on -> 30 images, 5 not shown
+    // G6 the 120 photos are combined: Eric 110 switched-on, Gary 15 shared switched-on -> 120 images, 5 not shown
     m.partnerAdd(G, EU);
     const day6 = [], dayG6 = [];
-    for (let i = 0; i < 35; i++) {
-      const who = dayG6.length < 15 && i % 2 === 1 ? G : EU;   // Gary's 15 spread among Eric's 20
-      const id = uid(950 + i);
+    for (let i = 0; i < 125; i++) {
+      const who = dayG6.length < 15 && i % 2 === 1 ? G : EU;   // Gary's 15 spread among Eric's 110
+      const id = uid(3000 + i);
       const row = { id, body: `${who === G ? 'G' : 'E'}${i}`, kind: 'note', tz: 'Asia/Bangkok', local_date: '2026-11-14',
-        captured_at: `2026-11-14T${String(1 + Math.floor(i / 4)).padStart(2, '0')}:${String((i % 4) * 15).padStart(2, '0')}:00Z`,
+        captured_at: at5('2026-11-14', i),
         updated_at: '2026-11-14T12:00:00Z', shared: true, photo_path: `${who}/${id}.jpg` };
       (who === G ? dayG6 : day6).push(row);
       m.objects.set(`${who}/${id}.jpg`, { bytes: Buffer.from('P' + i), contentType: 'image/jpeg' });
@@ -357,10 +368,10 @@ const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
     r = await call(turn(uid(806), 'All those photos.', '2026-11-14T14:00:00Z', '2026-11-14'), E);
     const b6 = anth.calls[nG] ? anth.calls[nG].body.messages[0].content : [];
     const img6 = b6.filter((b) => b.type === 'image');
-    check('G6 ' + dayG6.length + ' of Gary\'s and ' + day6.length + ' of Eric\'s photos: 30 images, the most recent across both, 5 listed not shown, all fetched as Eric',
-      r.status === 200 && dayG6.length === 15 && img6.length === 30 && img6[0].source.data === Buffer.from('P5').toString('base64')
-      && img6[29].source.data === Buffer.from('P34').toString('base64') && (b6[0].text.match(/, not shown"/g) || []).length === 5
-      && storageGets.slice(gG).length === 30 && storageGets.slice(gG).every((g) => g.auth === ERIC_JWT)
+    check('G6 ' + dayG6.length + ' of Gary\'s and ' + day6.length + ' of Eric\'s photos: 120 images, the most recent across both, 5 listed not shown, all fetched as Eric',
+      r.status === 200 && dayG6.length === 15 && img6.length === 120 && img6[0].source.data === Buffer.from('P5').toString('base64')
+      && img6[119].source.data === Buffer.from('P124').toString('base64') && (b6[0].text.match(/, not shown"/g) || []).length === 5
+      && storageGets.slice(gG).length === 120 && storageGets.slice(gG).every((g) => g.auth === ERIC_JWT)
       && storageGets.slice(gG).some((g) => g.path.startsWith(G + '/')), `${img6.length} ${dayG6.length}`);
 
     // G7 a person whose prompt key is not in this deploy: 502 no_prompt, no Claude call
