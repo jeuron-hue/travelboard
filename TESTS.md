@@ -7,7 +7,7 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ## 0.17.0 Mid-trip release, Bangkok (SPEC.md D15, 7A.2, 7A.4, 7B.3; Gary's decisions 09/11/26)
 
-**Status 09/11/26: built and checked headless; `tb-journal` v7 deployed 09/11/26 2158 hrs; client 0.17.0 waits for Gary's merge. Device steps below, both phones.**
+**Status 10/11/26: released. Gary merged 09/11/26 2208 hrs (`main` at `872f166`); the live `sw.js` reads 0.17.0. `tb-journal` v7 has served a real journal turn with 19 photos (below). The device steps wait until after the trip (Gary 10/11/26: not practical mid-trip); until then 0.17.0's client changes are checked headless only.**
 
 Three changes: (1) photos to Claude per day from 30 to 120 (server only); (2) a row's photo opens the large photo view for own rows too, and the photo on the capture and edit sheet opens it; (3) a photo from the in-app Camera is also saved untouched to the phone's Download folder.
 
@@ -36,7 +36,7 @@ Three changes: (1) photos to Claude per day from 30 to 120 (server only); (2) a 
 | `m17.test.cjs` (new) | PASS, 19 of 19 | Below. A mutated copy (row photo opens edit, Camera original off) fails the suite. |
 | `checks/smoke.sql` | Not run | No database change. Last pass 165 of 165. |
 | Deploy `tb-journal` | PASS | Project `travelboard`, ref `nnnnonspfljdkrxstslw` checked first. v6 read back first and matched the repo before the change. v7 deployed 09/11/26 2158 hrs, `verify_jwt` on, files `index.ts`, `context.mjs`, `prompt.ts` read back and matching the repo (`MAX_PHOTOS = 120`). The function host is not reachable from this sandbox, so the first live call is device step 9. |
-| Deploy 0.17.0 | After the merge | GitHub Pages is not reachable from this sandbox; the live `sw.js` is checked after Gary merges. |
+| Deploy 0.17.0 | PASS | Merged by Gary 09/11/26 2208 hrs, `main` at `872f166`; Pages build and deploy succeeded (run 81). Live `sw.js` reads `const CACHE_VERSION = '0.17.0';` (Last-Modified 09/11/26 2209 hrs SGT), fetched through Apify at 2210 hrs. |
 
 Headless groups (`m17.test.cjs`, Gary's and Eric's phones on one mock, Asia/Bangkok):
 
@@ -57,9 +57,20 @@ Headless groups (`m17.test.cjs`, Gary's and Eric's phones on one mock, Asia/Bang
 
 A download link (`<a download>` on an object URL of the untouched camera file), clicked in the Camera input's change handler before the shrink starts. Android Chrome saves a download to the Download folder, which Android's media store indexes, so Google Photos lists it under device folders. Nothing else saves without asking: Android Chrome has no save-file picker (the File System Access API is desktop only), sharing the file opens the share sheet every time, and a camera app called from a web page keeps no copy. Chrome shows its own "Downloaded" message at the foot each time; that is a message, not a prompt. Chrome's guard against many automatic downloads asks only when a page downloads again with no tap in between; each Camera shot follows taps on Photo and Camera, so it is not expected to ask. Not yet seen on the Pixel: steps 4 and 5 confirm it. The page cannot see whether Chrome finished the download, so the "not saved" line covers only failures the page can see.
 
+### Live use, checked on the server 10/11/26 1630 hrs
+
+From `travel.journal_messages`, `travel.captures` and the Edge Function logs, 09/11/26 2155 hrs to 10/11/26 1630 hrs. This is what the server can show; it cannot show the phones' app version, the photo view or the Camera originals (those stay on the phone).
+
+| What | Result |
+|---|---|
+| `tb-journal` v7, first real call | PASS. 10/11/26 1326 hrs, Gary's thread for 09/11: booted in 47 ms, 19 photos sent as images (Gary's 10 and the 9 Eric shared, all switched on), none failed to download, `end_turn`, reply stored (1,482 input, 293 output, 28,363 cache write tokens, about 1,490 per photo). No error, limit or `photo download failed` line in the function logs for the whole window. |
+| More than 30 photos in a day, live | Not yet seen: the busiest day so far is 09/11 with 19 switched-on photos across both. Covered headless (F13, G6). |
+| Second turn the same evening (cache read) | Not yet seen: one turn so far on v7. |
+| Photos kept syncing | Gary's 2 photo captures of 10/11 and one of Eric's for 09/11 synced after 0.17.0 went live; sizes as before (largest 254 KB). |
+
 ### Device steps (both phones), 0.17.0
 
-Run after Gary merges the pull request and Claude confirms the live `sw.js` reads 0.17.0. Note the time of each step and anything that looks wrong, especially any prompt or dialog in steps 4 and 5.
+**Deferred to after the trip (Gary 10/11/26: UAT is not practical mid-trip).** Run them back in Singapore. Step 9 needs a day with more than 30 switched-on photos; if no trip day reached that, make one at home. Note the time of each step and anything that looks wrong, especially any prompt or dialog in steps 4 and 5.
 
 1. **Update both phones.** Each: open travelboard, tap "Update ready, tap to reload". Tap the stamp: Version reads 0.17.0. Close with the X.
 2. **Your own photo, large.** Gary: Captures, a day with one of your own photos. Tap the small photo on the row: the large view opens with "Gary, <date>", the time and place, the photo large and the text, and no Edit or Delete. Close. Tap the text of the same row: the edit sheet opens as before.
