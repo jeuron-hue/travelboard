@@ -392,7 +392,7 @@ if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(
   const trip = read('trip.html');
   const fn = read('supabase/functions/tb-journal/index.ts').replace(/^\s*\/\/.*$/gm, '');
   const fnBody = (name) => { const i = trip.indexOf(`function ${name}(`); if (i < 0) return ''; const j = trip.indexOf('\n}\n', i); return trip.slice(i, j); };
-  const keep = fnBody('keepOriginal'), name = fnBody('originalName');
+  const keep = fnBody('keepOriginal'), name = fnBody('originalName'), dl = fnBody('downloadOriginal');
   check(/const PHOTO_BUDGET_MS = 20_000;/.test(fn) && /const PHOTO_PARALLEL = 8;/.test(fn) && /Math\.min\(PHOTO_PARALLEL, queue\.length\)/.test(fn)
     && !/String\.fromCharCode|btoa\(/.test(fn) && /new TextDecoder\(\)/.test(fn),
     '0.17.0: tb-journal downloads at most 8 photos at a time within 20 s, base64 from a lookup table (no fromCharCode, no btoa)');
@@ -401,10 +401,16 @@ if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(
     '0.17.0: a row\'s photo opens the view, own or shared; elsewhere an own row opens edit');
   check(/\$\('cap-photo-view'\)\.addEventListener\('click', \(\) => \{ openSheetPhotoView\(\); \}\);/.test(trip) && /id="cap-photo-view" role="button"/.test(trip),
     '0.17.0: the photo on the capture and edit sheet opens the same view');
-  check(/const kept = id === 'cap-camera' \? keepOriginal\(f\) : true;/.test(trip) && /'Original not saved to the phone\.'/.test(trip)
-    && /a\.download = originalName\(file, new Date\(\)\);/.test(keep) && !/await/.test(keep) && /catch \(e\)/.test(keep)
-    && /`travelboard_\$\{d\.getFullYear\(\)\}/.test(name),
-    '0.17.0: a Camera photo (not Gallery) is saved untouched through a download link before the shrink, never awaited; a failure is one line');
+  check(/if \(id === 'cap-camera'\) keepOriginal\(f\);\n    else \{ origSeq\+\+;/.test(trip) && /const ORIG_NOT_SAVED = 'Original not saved to the phone\.';/.test(trip)
+    && /a\.download = name;/.test(dl) && /\(async \(\) => \{/.test(keep) && /\}\)\(\);\n?$/.test(keep.trimEnd() + '\n') && /`travelboard_\$\{d\.getFullYear\(\)\}/.test(name),
+    '0.17.0, 0.18.0: a Camera photo (not Gallery) is saved untouched before the shrink, fire and forget (an async block not awaited); a failure is one line');
+  check(/queryPermission\(\{ mode: 'readwrite' \}\)\) === 'granted'/.test(keep) && /getFileHandle\(name, \{ create: true \}\)/.test(keep)
+    && /downloadOriginal\(file, name\) \? `Original saved to Download instead: \$\{why\}\.`/.test(keep) && !/requestPermission/.test(keep)
+    && /showDirectoryPicker\(\{ id: 'tb-originals', mode: 'readwrite', startIn: 'pictures' \}\)/.test(trip) && /await meta\.set\('orig_dir', dir\);/.test(trip),
+    '0.18.0: with a folder chosen in Settings the original is written there when access is granted, never asking at capture; otherwise Download, with one line saying why');
+  check(/<button class="link" id="cap-discard" type="button" hidden>Discard<\/button>/.test(trip) && /\$\('cap-discard'\)\.hidden = mode !== 'new';/.test(trip)
+    && /askConfirm\('Discard this capture\?'/.test(fnBody('discardCapture')) && /idb\.del\('drafts', 'new'\)/.test(fnBody('discardCapture')),
+    '0.18.0: a new capture has Discard, which asks in the app\'s sheet and then drops the draft');
   const pkg = JSON.parse(read('checks/headless/package.json'));
   check(exists('checks/headless/m17.test.cjs') && /node m17\.test\.cjs/.test(pkg.scripts.test), '0.17.0: headless suite m17 exists and runs with the others');
 }

@@ -5,6 +5,52 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ---
 
+## 0.18.0 Originals folder and Discard (SPEC.md 7.2, 7A.2; Gary's decisions 10/11/26)
+
+**Status 10/11/26: built and checked headless; waits for Gary's merge. Device steps below; Gary runs them when convenient, and the full run is after the trip with 0.17.0's.**
+
+Gary's report 10/11/26 1909 to 1910 hrs (screenshots, Bangkok): 0.17.0 on his phone; a Camera shot showed Chrome's "File downloaded (913.61 KB) jeuron-hue.github.io" with Open, no prompt, and the original went to Download (0.17.0 device steps 4 and 6 in part). He asked for the camera roll or a travelboard folder instead, and found no way to abandon a capture once a photo is taken (X keeps the draft).
+
+### Why a chosen folder, not the camera roll directly
+
+Chrome removes any folder from a download's file name, so a download always lands in Download. The only way for a web app to write elsewhere is the File System Access API: Chrome for Android has it from 132 (MDN compatibility data: `showDirectoryPicker` chrome_android 132; Chrome 132 release notes, "File System Access for Android and WebView", read 10/11/26). Android lets Gary pick (or make) the folder once: a `travelboard` folder, or DCIM/Camera for the camera roll. Chrome's persistent permissions (keeping access across restarts, automatic for installed apps) are documented for desktop from 122; for Android the pages read say nothing, so the app checks access at every shot and falls back to Download, with one line and Allow in Settings, when it is not there.
+
+### Automated results, 10/11/26 (0.18.0)
+
+| Check | Result | Evidence |
+|---|---|---|
+| `checks/static.cjs` | PASS, 146 of 146 | The 0.17.0 Camera check rewritten for the async save; new: with a folder, the original is written only when access is granted and never asked for at capture, otherwise Download with a line; Discard asks in the app's sheet and drops the draft. |
+| `m17.test.cjs` | PASS, 35 of 35 | 19 as in 0.17.0, plus D1 to D4 and F1 to F7 below. |
+| `m1`, `m2`, `m11`, `m12`, `m13b`, `m14` | PASS, 107, 80, 59, 64, 46, 34 of each | Unchanged. |
+| `m13.test.cjs` | PASS, 113 of 113, two runs | N19 now expects the Photos group in Settings. A first run also failed N11 (a Nominatim retry after a network failure, timing); it passed in both reruns and in the 0.17.0 runs. |
+| `fn.test.cjs`, `checks/smoke.sql` | Not run | No server or database change. |
+
+Headless groups added to `m17.test.cjs`:
+
+| Group | What it checks |
+|---|---|
+| D1, D4 | A new capture has Discard at the foot and no Delete; an edit keeps Delete and has no Discard |
+| D2 | Discard asks in the app's sheet ("Discard this capture?"); Cancel keeps the sheet, text and photo |
+| D3 | Discard closes the sheet, keeps no draft, adds no capture, no "draft kept"; the next capture opens empty |
+| F1, F2 | Settings, Photos: "Saved to Download", Choose folder; a folder chosen (picker stubbed with a real OPFS folder handle): "Saved to the folder travelboard", Change, handle kept |
+| F3 | Camera with the folder: the untouched original written there byte for byte, no download, no line; discarding the capture leaves it there |
+| F4 | After a reload the folder is still chosen |
+| F5, F6 | Access not granted (`queryPermission` answering "prompt"): the original goes to Download, no prompt at capture, the line "Original saved to Download instead: allow the folder again in Settings, Photos."; Settings shows Allow, which asks again and the row recovers |
+| F7 | The folder write failing: Download, with "the folder could not be written" |
+
+The F groups run on a normal browser profile (`newPersistentContext` in the harness): in Playwright's default incognito contexts Chromium stops (SIGTRAP) when a folder handle stored in IndexedDB is read back. Reproduced on a bare page with an OPFS handle in both Chromium builds here; on a normal profile it works. The installed app always runs in a normal profile.
+
+### Device steps (Gary's phone), 0.18.0
+
+1. **Update.** Open travelboard, tap "Update ready, tap to reload". Settings: Version reads 0.18.0.
+2. **Choose the folder.** Settings, Photos, Camera originals, Choose folder. In Android's picker, either open DCIM, then Camera (the camera roll), or open Pictures and make a new folder `travelboard` (the picker's menu or the new-folder button). Tap "Use this folder", then Allow. The row reads "Saved to the folder Camera" (or travelboard). Report anything Android refused.
+3. **A Camera shot.** Capture, Photo, Camera, take a photo. Expected: no "File downloaded" message and no line under the photo. Save.
+4. **In Google Photos.** DCIM/Camera: the photo is in the main Photos timeline at the shot's time. A travelboard folder: Collections, On this device, travelboard. Full size, named `travelboard_YYYYMMDD_HHMMSS.jpg`.
+5. **After a restart.** Swipe travelboard away from recents, open it again, take another Camera shot. Report which: no message (Chrome kept the folder access), or the line "Original saved to Download instead: allow the folder again in Settings, Photos." If the line shows, Settings, Photos reads Allow; tap it, allow, and the row reads "Saved to the folder ...". This step answers whether Chrome on Android keeps the access.
+6. **Discard.** Capture, Photo, Camera, take a photo, type a word. Tap Discard at the foot: "Discard this capture?". Cancel keeps it; Discard again, then Discard in the sheet: the sheet closes, no "draft kept" under Capture, and the next Capture opens empty. The original from this shot stays in the folder.
+
+---
+
 ## 0.17.0 Mid-trip release, Bangkok (SPEC.md D15, 7A.2, 7A.4, 7B.3; Gary's decisions 09/11/26)
 
 **Status 10/11/26: released. Gary merged 09/11/26 2208 hrs (`main` at `872f166`); the live `sw.js` reads 0.17.0. `tb-journal` v7 has served a real journal turn with 19 photos (below). The device steps wait until after the trip (Gary 10/11/26: not practical mid-trip); until then 0.17.0's client changes are checked headless only.**
@@ -54,6 +100,8 @@ Headless groups (`m17.test.cjs`, Gary's and Eric's phones on one mock, Asia/Bang
 | O5 | The save is synchronous and returns before the shrink |
 
 ### Camera original on Android Chrome: what was chosen and why
+
+Correction 10/11/26: the claim below that Android Chrome has no save-file picker is wrong; the File System Access API, folder picker included, reached Chrome for Android in 132. 0.18.0 uses it (section above).
 
 A download link (`<a download>` on an object URL of the untouched camera file), clicked in the Camera input's change handler before the shrink starts. Android Chrome saves a download to the Download folder, which Android's media store indexes, so Google Photos lists it under device folders. Nothing else saves without asking: Android Chrome has no save-file picker (the File System Access API is desktop only), sharing the file opens the share sheet every time, and a camera app called from a web page keeps no copy. Chrome shows its own "Downloaded" message at the foot each time; that is a message, not a prompt. Chrome's guard against many automatic downloads asks only when a page downloads again with no tap in between; each Camera shot follows taps on Photo and Camera, so it is not expected to ask. Not yet seen on the Pixel: steps 4 and 5 confirm it. The page cannot see whether Chrome finished the download, so the "not saved" line covers only failures the page can see.
 

@@ -525,10 +525,12 @@ async function chipsSettled(page) {
       && panel.bg === 'rgb(251, 248, 241)' && /Newsreader/.test(panel.title) && /28px/.test(panel.title) && panel.x === 'Close panel', JSON.stringify(panel));
     check('N19 status block: the stamp as the pill shows it, Sync now, then Sync, Last sync, Last error, Storage, Version', panel.stamp === panel.pill
       && panel.stampColor === panel.pillColor && panel.syncNow && panel.dt.join() === 'Sync,Last sync,Last error,Storage,Version', JSON.stringify(panel));
-    check('N19 groups: Travelling with (Eric, Remove); Journal (My journal prompt, Edit; Export); Account (email, Sign out; Password, Change); no sign-in form',
+    // Photos (Camera originals) from 0.18.0, where the browser can pick a folder (headless Chromium can).
+    check('N19 groups: Travelling with (Eric, Remove); Journal (My journal prompt, Edit; Export); Photos (Camera originals, Choose folder); Account (email, Sign out; Password, Change); no sign-in form',
       JSON.stringify(panel.groups) === JSON.stringify([
         { title: 'Travelling with', rows: [{ label: 'Eric', action: 'Remove' }] },
         { title: 'Journal', rows: [{ label: 'My journal prompt', action: 'Edit' }, { label: 'Export', action: 'Export' }] },
+        { title: 'Photos', rows: [{ label: 'Camera originals', action: 'Choose folder' }] },
         { title: 'Account', rows: [{ label: 'gary@travelboard.local', action: 'Sign out' }, { label: 'Password', action: 'Change' }] }]) && !panel.signin,
       JSON.stringify(panel.groups));
     check('N19 the linked state reads in ink blue; Remove in the accent', await G.evaluate(() => getComputedStyle(document.querySelector('#partners .partner-state')).color === 'rgb(47, 85, 119)'

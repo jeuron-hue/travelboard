@@ -2,6 +2,12 @@
 
 What changed in each version, newest first. Each heading gives the version, the date and time it was released (Singapore time, 24-hour) and what changed. Versions before 0.13.0 were numbered v1 to v13 (SPEC.md 6.4). The reasons and Gary's decisions are in SPEC.md, its own change log included; the Pixel runs are in TESTS.md.
 
+## v0.18.0, 10/11/26 2021 hrs
+- Camera originals can go to a folder you choose once in Settings, Photos, Camera originals: for example a travelboard folder, or DCIM/Camera for the camera roll (SPEC.md 7A.2; Gary's decision 10/11/26). Without a chosen folder they still go to Download. When Chrome has not kept access to the folder, or the write fails, the original goes to Download and one line under the photo says why; Settings then offers Allow. The app never asks for access while you take a photo.
+- A new capture has Discard at the foot (an edit keeps Delete). It asks once, then drops the draft with its text and photo; nothing is saved or sent (SPEC.md 7.2; Gary's decision 10/11/26).
+- Correction in SPEC.md: Chrome for Android has had the folder picker since 132; 0.17.0's note said it was desktop only.
+- Docs and checks: TESTS.md records 0.17.0 live (sw.js 0.17.0; tb-journal v7 served a 19-photo turn cleanly on 10/11/26) and defers its device steps to after the trip; m17 adds Discard and folder checks on a normal browser profile (newPersistentContext in the harness); m13's Settings check includes Photos.
+
 ## v0.17.0, 09/11/26 2159 hrs
 - Photos to Claude per day from 30 to 120, own and shared together (SPEC.md D15, 7A.4; Gary's decision mid-trip). tb-journal only: base64 from a lookup table (well inside the Edge Function's 2 s CPU limit at 120 photos), photos downloaded 8 at a time within 20 s. tb-journal v7.
 - A tap on a row's photo opens the large photo view for your own captures as for shared ones; a tap elsewhere on your own row still opens edit. On the capture and edit sheet, a tap on the photo opens the same view (SPEC.md 7A.2, 7B.3).

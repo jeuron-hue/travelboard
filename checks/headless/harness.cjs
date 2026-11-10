@@ -465,6 +465,21 @@ async function newContext(browser, { tz, session, swBlock = true, uid = UID }) {
   return ctx;
 }
 
+// The same phone set-up on a normal (persistent) profile in its own browser, in a fresh
+// temporary profile folder. Playwright's newContext is an incognito profile, where Chromium
+// stops (SIGTRAP) when a File System Access handle stored in IndexedDB is read back; the
+// installed app runs in a normal profile, where it works (found 10/11/26, 0.18.0).
+// Close with ctx.close(), which also ends the browser.
+async function newPersistentContext({ tz, session, swBlock = true, uid = UID }) {
+  const dir = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'tb-profile-'));
+  const ctx = await chromium.launchPersistentContext(dir, Object.assign({ timezoneId: tz, locale: 'en-GB', serviceWorkers: swBlock ? 'block' : 'allow',
+    viewport: { width: 412, height: 860 }, acceptDownloads: true }, process.env.TB_CHROMIUM ? { executablePath: process.env.TB_CHROMIUM } : {}));
+  await ctx.addInitScript(GEO_INIT);
+  await ctx.addInitScript('window.__tbIdleSyncMs = 0;');
+  if (session) await ctx.addInitScript(`try { if (!localStorage.getItem('tb-auth')) localStorage.setItem('tb-auth', ${JSON.stringify(sessionJson(uid))}); } catch (e) {}`);
+  return ctx;
+}
+
 // Waits until fn(arg), evaluated in the page, gives a truthy value; throws after timeout ms, like
 // page.waitForFunction. Use it for any condition that needs a Promise (IndexedDB): Playwright 1.56's
 // waitForFunction does not await a returned Promise, which is truthy, so such a wait returned at
@@ -481,4 +496,4 @@ async function until(page, fn, arg, { timeout = 5000, every = 50 } = {}) {
 // TB_CHROMIUM=/path/to/chrome runs against an installed Chromium instead of Playwright's own.
 const launch = () => chromium.launch(process.env.TB_CHROMIUM ? { executablePath: process.env.TB_CHROMIUM } : {});
 
-module.exports = { until, chromium, launch, startServer, makeMock, attachMock, newContext, sessionJson, loadContext, SUPA, UID, ERIC_UID, ROOT };
+module.exports = { until, chromium, launch, startServer, makeMock, attachMock, newContext, newPersistentContext, sessionJson, loadContext, SUPA, UID, ERIC_UID, ROOT };
