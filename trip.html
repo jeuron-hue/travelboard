@@ -346,7 +346,7 @@
   .capfoot { display: flex; align-items: center; gap: 12px; padding: 6px 0 2px; color: var(--muted); font-size: 13px; }
   .capfoot[hidden] { display: none; }
   .capfoot .info { flex: 1; }
-  #cap-delete { color: var(--crit); }
+  #cap-delete, #cap-discard { color: var(--crit); }
   .capbar {
     display: flex; gap: 10px; padding: 12px 16px calc(env(safe-area-inset-bottom) + 22px);
     border-top: 1px solid var(--line); background: var(--ground);
@@ -643,6 +643,7 @@
     <div class="capfoot" id="cap-foot" hidden>
       <span class="info" id="cap-info"></span>
       <button class="link" id="cap-delete" type="button">Delete</button>
+      <button class="link" id="cap-discard" type="button" hidden>Discard</button>
     </div>
   </div>
   <div class="capbar">
@@ -731,6 +732,15 @@
       <p class="ok" id="prompt-row-ok" aria-live="polite"></p>
     </section>
 
+    <section class="group" id="g-photos" hidden>
+      <h3 class="caps">Photos</h3>
+      <div class="prow">
+        <div class="ptext"><span class="lbl">Camera originals</span><span class="detail" id="orig-detail">Saved to Download</span></div>
+        <button class="link" id="orig-pick" type="button">Choose folder</button>
+      </div>
+      <p class="err" id="orig-err" aria-live="polite"></p>
+    </section>
+
     <section class="group">
       <h3 class="caps">Account</h3>
       <div class="prow" id="acct-row" hidden>
@@ -814,7 +824,7 @@
 'use strict';
 
 // Bump together with CACHE_VERSION in sw.js on every release.
-const APP_VERSION = '0.17.0';     // 0.<minor>.<patch> from 0.13.0 (was 13), Gary 24/10/26
+const APP_VERSION = '0.18.0';     // 0.<minor>.<patch> from 0.13.0 (was 13), Gary 24/10/26
 
 const PROJECT_REF = 'nnnnonspfljdkrxstslw';           // Supabase project travelboard (SPEC.md D3, 6.8)
 const SUPABASE_URL = 'https://' + PROJECT_REF + '.supabase.co';
@@ -1525,25 +1535,28 @@ function writeDraft() {
 }
 
 // A photo from the in-app Camera exists nowhere else: the camera app hands it to Chrome and
-// keeps no copy. Before the shrink, the untouched file is saved to the phone through a download
-// link, which on Android Chrome lands in the Download folder (Google Photos, device folders) with
-// no prompt (SPEC.md 7A.2, 09/11/26). Fire and forget: nothing waits on it, and the capture
-// never depends on it. The page cannot see whether Chrome finished the download; a failure it
-// can see (no download support, the link throwing) shows one line under the photo.
+// keeps no copy. Before the shrink, the untouched file is saved to the phone (SPEC.md 7A.2):
+// into the folder chosen in Settings, Photos (0.18.0; the File System Access API, Chrome 132+
+// on Android), or, with no folder chosen, through a download link to the Download folder
+// (0.17.0). Fire and forget: nothing waits on it, and the capture never depends on it. When
+// the folder is chosen but cannot be written now (access not allowed this session, or the
+// write failing), the original goes to Download instead and one line says why. A failure the
+// page can see on the download (no download support, the link throwing) is one line too.
 const ORIGINAL_URL_MS = 60000;      // the download link's object URL is freed after a minute
+const ORIG_NOT_SAVED = 'Original not saved to the phone.';
 function originalName(file, d) {
   const two = (n) => String(n).padStart(2, '0');
   const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic', 'image/heif': 'heif' }[file.type]
     || ((/\.([a-z0-9]{1,5})$/i.exec(file.name || '') || [])[1] || 'jpg').toLowerCase();
   return `travelboard_${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}_${two(d.getHours())}${two(d.getMinutes())}${two(d.getSeconds())}.${ext}`;
 }
-function keepOriginal(file) {
+function downloadOriginal(file, name) {
   try {
     if (!('download' in HTMLAnchorElement.prototype)) throw new Error('downloads not supported');
     const url = URL.createObjectURL(file);
     const a = document.createElement('a');
     a.href = url;
-    a.download = originalName(file, new Date());
+    a.download = name;
     a.hidden = true;
     document.body.append(a);
     a.click();
@@ -1554,6 +1567,63 @@ function keepOriginal(file) {
     console.warn('original not saved', e);
     return false;
   }
+}
+const canPickFolder = () => typeof window.showDirectoryPicker === 'function';
+let origSeq = 0;                     // only the newest Camera shot's outcome writes the line
+function keepOriginal(file) {
+  const seq = ++origSeq;
+  const name = originalName(file, new Date());
+  const say = (t) => { if (seq === origSeq) $('cap-photo-orig').textContent = t; };
+  say('');
+  (async () => {
+    let dir = null;
+    try { dir = canPickFolder() ? await meta.get('orig_dir') : null; } catch (e) { dir = null; }
+    if (!dir) { if (!downloadOriginal(file, name)) say(ORIG_NOT_SAVED); return; }
+    let why = 'the folder could not be written';
+    try {
+      if ((await dir.queryPermission({ mode: 'readwrite' })) === 'granted') {
+        const fh = await dir.getFileHandle(name, { create: true });
+        const w = await fh.createWritable();
+        await w.write(file);
+        await w.close();
+        return;
+      }
+      why = 'allow the folder again in Settings, Photos';
+    } catch (e) {
+      console.warn('original not written to the folder', e);
+    }
+    say(downloadOriginal(file, name) ? `Original saved to Download instead: ${why}.` : ORIG_NOT_SAVED);
+  })();
+}
+
+// Settings, Photos: the folder for Camera originals (0.18.0). Shown only where the browser can
+// pick a folder. The folder's handle is kept in meta (orig_dir); Chrome decides whether its
+// access lasts beyond the session. Allow asks again (a tap is the gesture it needs).
+async function renderOrigRow() {
+  $('g-photos').hidden = !canPickFolder();
+  if (!canPickFolder()) return;
+  const dir = await meta.get('orig_dir');
+  let perm = null;
+  if (dir) { try { perm = await dir.queryPermission({ mode: 'readwrite' }); } catch (e) { perm = null; } }
+  $('orig-detail').textContent = !dir ? 'Saved to Download' : perm === 'granted' ? `Saved to the folder ${dir.name}`
+    : `Folder ${dir.name}: allow it again; Download until then`;
+  $('orig-pick').textContent = !dir ? 'Choose folder' : perm === 'granted' ? 'Change' : 'Allow';
+  $('orig-pick').dataset.action = dir && perm !== 'granted' ? 'allow' : 'pick';
+}
+async function pickOrigFolder() {
+  $('orig-err').textContent = '';
+  try {
+    if ($('orig-pick').dataset.action === 'allow') {
+      const dir = await meta.get('orig_dir');
+      if (dir) await dir.requestPermission({ mode: 'readwrite' });
+    } else {
+      const dir = await window.showDirectoryPicker({ id: 'tb-originals', mode: 'readwrite', startIn: 'pictures' });
+      await meta.set('orig_dir', dir);
+    }
+  } catch (e) {
+    if (!(e && e.name === 'AbortError')) $('orig-err').textContent = 'Could not use that folder: ' + ((e && e.message) || String(e));
+  }
+  await renderOrigRow();
 }
 
 async function attachPhoto(file) {
@@ -1638,7 +1708,11 @@ async function openCapture(mode, row, draft) {
     parts.push(row.lat != null ? `GPS ${Math.round(row.accuracy_m || 0)} m` : 'no GPS');
     $('cap-info').textContent = parts.join(', ');
   }
-  $('cap-foot').hidden = mode !== 'edit';
+  // The foot: Delete and the capture's details on an edit; Discard on a new capture (0.18.0).
+  $('cap-foot').hidden = false;
+  $('cap-delete').hidden = mode !== 'edit';
+  $('cap-discard').hidden = mode !== 'new';
+  if (mode !== 'edit') $('cap-info').textContent = '';
   // Time line: the capture's own time in an edit, now for a new capture.
   const whenIso = mode === 'edit' ? row.captured_at : new Date().toISOString();
   const whenTz = mode === 'edit' ? row.tz : deviceTz();
@@ -1777,6 +1851,18 @@ async function saveCapture() {
     updateSaveEnabled();
     notice('Save failed', (e && e.message) || String(e));
   }
+}
+
+// Discard a new capture (0.18.0): its draft, text and photo go, after one confirm. Nothing was
+// saved or sent, so nothing reaches the server. A Camera original already saved to the phone
+// stays there.
+async function discardCapture() {
+  if (!cap.open || cap.mode !== 'new' || cap.busy) return;
+  const ok = await askConfirm('Discard this capture?', 'The text and photo are not kept. A Camera original already saved to the phone stays there.', 'Discard');
+  if (!ok || !cap.open || cap.mode !== 'new') return;
+  await closeCapture('discarded');
+  await idb.del('drafts', 'new');
+  await updateDraftNote();
 }
 
 async function deleteCapture() {
@@ -3324,6 +3410,7 @@ $('suffix-dlg').addEventListener('close', async () => {
 $('cap-close').addEventListener('click', () => { closeCapture('close').catch(fail('Close failed')); });
 $('cap-save').addEventListener('click', () => { saveCapture(); });
 $('cap-delete').addEventListener('click', () => { deleteCapture(); });
+$('cap-discard').addEventListener('click', () => { discardCapture().catch(fail('Discard failed')); });
 $('cap-body').addEventListener('input', () => { updateSaveEnabled(); writeDraft(); });
 $('cap-place').addEventListener('input', () => { updatePlaceField(); writeDraft(); refreshPlaceChips().catch(() => {}); });
 $('cap-place').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); $('cap-place').blur(); } });
@@ -3354,9 +3441,9 @@ for (const id of ['cap-camera', 'cap-file']) {
     const f = $(id).files && $(id).files[0];
     $(id).value = '';
     if (!f) return;
-    // Camera only: the original goes to the phone first, without waiting (0.17.0).
-    const kept = id === 'cap-camera' ? keepOriginal(f) : true;
-    $('cap-photo-orig').textContent = kept ? '' : 'Original not saved to the phone.';
+    // Camera only: the original goes to the phone first, without waiting (0.17.0, 0.18.0).
+    if (id === 'cap-camera') keepOriginal(f);
+    else { origSeq++; $('cap-photo-orig').textContent = ''; }
     attachPhoto(f);
   });
 }
@@ -3413,6 +3500,7 @@ $('day-list').addEventListener('click', (ev) => {
   render();
 });
 $('export').addEventListener('click', () => { exportCaptures().catch(fail('Export failed')); });
+$('orig-pick').addEventListener('click', () => { pickOrigFolder(); });
 // "Today" rolls over at 0400 while the app sits open.
 setInterval(() => {
   if (document.visibilityState !== 'visible') return;
@@ -3423,8 +3511,9 @@ setInterval(() => {
 // Opening Settings also syncs, so TRAVELLING WITH shows the link as it is now; the sheet
 // re-renders when the sync ends (renderAuth in sync's finally) (0.14.3).
 $('status').addEventListener('click', () => {
-  for (const id of ['pw-ok', 'pw-err', 'prompt-row-err', 'prompt-row-ok']) $(id).textContent = '';
+  for (const id of ['pw-ok', 'pw-err', 'prompt-row-err', 'prompt-row-ok', 'orig-err']) $(id).textContent = '';
   renderAuth();
+  renderOrigRow().catch(() => {});
   $('settings').showModal();
   sync();
 });

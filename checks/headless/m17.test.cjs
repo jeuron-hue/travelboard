@@ -9,10 +9,18 @@
 //   travelboard_YYYYMMDD_HHMMSS.jpg before the shrink; a Gallery photo is not; when the
 //   download cannot start, the photo still attaches and saves and one line says the original
 //   was not saved; the line is gone at the next sheet.
+// 0.18.0 (Gary 10/11/26, SPEC.md 7.2, 7A.2):
+// - D: a new capture has Discard (an edit keeps Delete); Discard asks in the app's sheet;
+//   Cancel keeps everything; Discard drops the draft, text and photo, adds no capture.
+// - F: Settings, Photos, Camera originals: Choose folder (showDirectoryPicker stubbed with a real
+//   OPFS folder handle, so storing it and its permission checks are real). With a folder, a
+//   Camera original is written there, no download; the folder survives a reload; when access
+//   is not granted, or the write fails, the original goes to Download and one line says why;
+//   Allow asks again and the row recovers.
 // Exit code 0 only when every check passes.
 'use strict';
 const fs = require('fs');
-const { launch, startServer, makeMock, attachMock, newContext, UID, ERIC_UID } = require('./harness.cjs');
+const { launch, startServer, makeMock, attachMock, newContext, newPersistentContext, UID, ERIC_UID } = require('./harness.cjs');
 
 const PORT = 8739;
 const BASE = `http://127.0.0.1:${PORT}/`;
@@ -63,6 +71,27 @@ async function closeView(page) {
   await page.waitForFunction(() => !document.getElementById('view-dlg').open);
 }
 const rowSel = (id) => `#records .row[data-id="${id}"]`;
+// The files in the OPFS folder 'travelboard' (the stubbed chosen folder): name -> base64.
+const folderFiles = (page) => page.evaluate(async () => {
+  const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('travelboard', { create: true });
+  const out = {};
+  for await (const [name, h] of dir.entries()) {
+    const b = new Uint8Array(await (await h.getFile()).arrayBuffer());
+    let s = ''; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
+    out[name] = btoa(s);
+  }
+  return out;
+});
+const STUB_PICKER = () => { window.showDirectoryPicker = async () => (await navigator.storage.getDirectory()).getDirectoryHandle('travelboard', { create: true }); };
+async function openSettings(page) {
+  await page.click('#status');
+  await page.waitForFunction(() => document.getElementById('settings').open);
+  await page.waitForFunction(() => document.getElementById('orig-pick').dataset.action);
+}
+async function closeSettings(page) {
+  await page.click('#close');
+  await page.waitForFunction(() => !document.getElementById('settings').open);
+}
 
 (async () => {
   const srv = await startServer(PORT);
@@ -222,6 +251,125 @@ const rowSel = (id) => `#records .row[data-id="${id}"]`;
     await waitCap(G, false);
     check('O5 the original never waits on anything: keepOriginal is synchronous and returns before the shrink', await G.evaluate(() =>
       keepOriginal.constructor.name === 'Function' && attachPhoto.constructor.name === 'AsyncFunction'), String(Date.now() - t0));
+
+    // ---------- D: Discard a new capture (0.18.0) ----------
+    const nCaps = async () => G.evaluate(async () => (await idb.all('captures')).length);
+    const n0 = await nCaps();
+    await G.click('#capture');
+    await waitCap(G, true);
+    await attach(G, jpg, 'gallery.jpg', 'gallery');
+    await G.fill('#cap-body', 'Not this one');
+    check('D1 a new capture shows Discard at the foot, no Delete', await shown(G, '#cap-discard') && !(await shown(G, '#cap-delete'))
+      && (await text(G, '#cap-discard')) === 'Discard');
+    await G.click('#cap-discard');
+    await G.waitForFunction(() => document.getElementById('confirm-dlg').open);
+    check('D2 Discard asks first, in the app\'s sheet', (await text(G, '#confirm-head')) === 'Discard this capture?' && (await text(G, '#confirm-ok')) === 'Discard');
+    await G.click('#confirm-cancel');
+    await G.waitForFunction(() => !document.getElementById('confirm-dlg').open);
+    check('D2 Cancel keeps the sheet, the text and the photo', (await G.evaluate(() => cap.open && cap.photo.state === 'new'))
+      && (await G.$eval('#cap-body', (t) => t.value)) === 'Not this one');
+    await G.click('#cap-discard');
+    await G.waitForFunction(() => document.getElementById('confirm-dlg').open);
+    await G.click('#confirm-ok');
+    await waitCap(G, false);
+    await G.waitForFunction(() => !popWait);
+    check('D3 Discard closes the sheet, keeps no draft, adds no capture; the Capture button has no "draft kept"',
+      !(await G.evaluate(() => idb.get('drafts', 'new'))) && (await nCaps()) === n0 && !(await shown(G, '#draft-note')));
+    await G.click('#capture');
+    await waitCap(G, true);
+    check('D3 the next capture opens empty, no photo', (await G.$eval('#cap-body', (t) => t.value)) === '' && (await G.$eval('#cap-photo', (e) => e.hidden)));
+    await G.click('#cap-close');
+    await waitCap(G, false);
+    await G.click(rowSel(OWN) + ' .line2');
+    await waitCap(G, true);
+    check('D4 an edit keeps Delete, no Discard', await shown(G, '#cap-delete') && !(await shown(G, '#cap-discard')));
+    await G.click('#cap-close');
+    await waitCap(G, false);
+
+    // ---------- F: a folder for Camera originals (0.18.0) ----------
+    // On a normal profile (newPersistentContext): in Playwright's incognito contexts Chromium
+    // stops when a stored folder handle is read back, which the installed app never meets.
+    {
+    const pctx = await newPersistentContext({ tz: 'Asia/Bangkok', session: true, uid: UID });
+    await attachMock(pctx, mock, { offline: false, name: 'gary-normal-profile' });
+    const G = pctx.pages()[0] || await pctx.newPage();
+    G.on('pageerror', (e) => console.log('PAGEERROR gary-normal-profile', e.message));
+    G.on('dialog', (d) => { check('no browser dialog (normal profile): ' + d.message(), false); d.dismiss(); });
+    const downloads = [];
+    G.on('download', (d) => downloads.push(d));
+    await G.goto(BASE + 'trip.html');
+    await G.waitForFunction(() => document.getElementById('day-label').textContent !== '-');
+    try {
+    await openSettings(G);
+    check('F1 Settings, Photos: Camera originals, saved to Download, Choose folder', await shown(G, '#g-photos')
+      && (await text(G, '#orig-detail')) === 'Saved to Download' && (await text(G, '#orig-pick')) === 'Choose folder');
+    await G.evaluate(STUB_PICKER);
+    await G.click('#orig-pick');
+    await G.waitForFunction(() => document.getElementById('orig-pick').textContent === 'Change');
+    check('F2 a folder chosen: the row names it, Change; the handle is kept', (await text(G, '#orig-detail')) === 'Saved to the folder travelboard'
+      && await G.evaluate(async () => !!(await meta.get('orig_dir'))));
+    await closeSettings(G);
+    let dlBefore = downloads.length;
+    await G.click('#capture');
+    await waitCap(G, true);
+    await attach(G, big, 'image.jpg', 'camera');
+    await G.waitForTimeout(800);
+    let files = await folderFiles(G);
+    let names = Object.keys(files);
+    check('F3 Camera with a folder: the untouched original is written there, no download, no line', names.length === 1 && /^travelboard_\d{8}_\d{6}\.jpg$/.test(names[0])
+      && Buffer.from(files[names[0]], 'base64').equals(big) && downloads.length === dlBefore && (await text(G, '#cap-photo-orig')) === '', JSON.stringify(names));
+    await G.click('#cap-discard');
+    await G.waitForFunction(() => document.getElementById('confirm-dlg').open);
+    await G.click('#confirm-ok');
+    await waitCap(G, false);
+    check('F3 discarding the capture leaves the original in the folder', Object.keys(await folderFiles(G)).length === 1);
+
+    await G.reload();
+    await G.waitForFunction(() => document.getElementById('day-label').textContent !== '-');
+    await openSettings(G);
+    check('F4 after a reload the folder is still chosen', (await text(G, '#orig-detail')) === 'Saved to the folder travelboard');
+    await closeSettings(G);
+    // Access not granted this session: what Chrome reports when it has not kept the permission.
+    await G.evaluate(() => {
+      window.__q = FileSystemHandle.prototype.queryPermission;
+      window.__r = FileSystemHandle.prototype.requestPermission;
+      FileSystemHandle.prototype.queryPermission = async () => 'prompt';
+      FileSystemHandle.prototype.requestPermission = async () => { FileSystemHandle.prototype.queryPermission = window.__q; return 'granted'; };
+    });
+    dlBefore = downloads.length;
+    await G.click('#capture');
+    await waitCap(G, true);
+    const dl5 = G.waitForEvent('download', { timeout: 10000 }).catch(() => null);
+    await attach(G, big, 'image.jpg', 'camera');
+    const d5 = await dl5;
+    await G.waitForFunction(() => document.getElementById('cap-photo-orig').textContent !== '', null, { timeout: 5000 }).catch(() => {});
+    check('F5 access not granted: the original goes to Download, never a prompt at capture, and one line says why',
+      !!d5 && fs.readFileSync(await d5.path()).equals(big) && Object.keys(await folderFiles(G)).length === 1
+      && (await text(G, '#cap-photo-orig')) === 'Original saved to Download instead: allow the folder again in Settings, Photos.', await text(G, '#cap-photo-orig'));
+    check('F5 the capture still attaches its photo', await G.evaluate(() => cap.photo.state === 'new' && cap.photo.w === 1280));
+    await G.click('#cap-close');
+    await waitCap(G, false);
+    await openSettings(G);
+    check('F6 Settings says to allow the folder again, with Allow', (await text(G, '#orig-pick')) === 'Allow' && /allow it again; Download until then/.test(await text(G, '#orig-detail')));
+    await G.click('#orig-pick');
+    await G.waitForFunction(() => document.getElementById('orig-pick').textContent === 'Change');
+    check('F6 Allow asks again and the row recovers', (await text(G, '#orig-detail')) === 'Saved to the folder travelboard');
+    await closeSettings(G);
+    // The write failing: Download instead, with the reason.
+    await G.evaluate(() => { window.__g = FileSystemDirectoryHandle.prototype.getFileHandle; FileSystemDirectoryHandle.prototype.getFileHandle = async () => { throw new Error('disk full for the test'); }; });
+    await G.click('#capture');
+    await waitCap(G, true);
+    const dl7 = G.waitForEvent('download', { timeout: 10000 }).catch(() => null);
+    await attach(G, big, 'image.jpg', 'camera');
+    const d7 = await dl7;
+    await G.waitForFunction(() => document.getElementById('cap-photo-orig').textContent !== '', null, { timeout: 5000 }).catch(() => {});
+    check('F7 the folder write failing: the original goes to Download and one line says so', !!d7
+      && (await text(G, '#cap-photo-orig')) === 'Original saved to Download instead: the folder could not be written.', await text(G, '#cap-photo-orig'));
+    await G.evaluate(() => { FileSystemDirectoryHandle.prototype.getFileHandle = window.__g; });
+    await G.click('#cap-close');
+    await waitCap(G, false);
+    } finally { await pctx.close(); }
+    }
   } catch (e) {
     check('suite ran to the end', false, (e && e.stack) || String(e));
   } finally {
