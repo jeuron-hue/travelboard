@@ -8,6 +8,8 @@
 -- real link between Gary and Eric is never touched or relied on. U1 to U14 cover M1.3 (migration
 -- 0009, SPEC.md 7C.4, 7C.5, 7C.7 item 7): place_name through every route, and each traveller's
 -- journal prompt readable and settable by its owner only, with the same users A, B and C.
+-- K1 and K2 cover the keep-alive ping (migration 0010, SPEC.md 6.8 step 5): anon can call
+-- tb_ping, and it is the only tb_ function anon can call.
 -- Everything runs in one transaction that is rolled back: no rows are left behind.
 -- Acts as Gary's auth user (the single user, gary@travelboard.local) by setting
 -- role and request.jwt.claims the way PostgREST does.
@@ -1094,6 +1096,25 @@ begin
    where e->>'id' = '00000000-0000-4000-8000-0000000000c5' and (e->>'lat')::float = 1.3525 and (e->>'lng')::float = 103.9447;
   r := r || jsonb_build_object('test', 'U14 coordinates still go with the name', 'pass', v_n = 1, 'detail', v_n);
   reset role;
+
+  -- K1. keep-alive: anon can call tb_ping, which returns only the server time
+  begin
+    set local role anon;
+    perform set_config('request.jwt.claims', '', true);
+    v := to_jsonb(public.tb_ping());
+    reset role;
+    r := r || jsonb_build_object('test', 'K1 anon can call tb_ping and gets the server time', 'pass', (v #>> '{}')::timestamptz = now(), 'detail', v);
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate;
+    reset role;
+    r := r || jsonb_build_object('test', 'K1 anon can call tb_ping and gets the server time', 'pass', false, 'detail', v_state || ' ' || sqlerrm);
+  end;
+
+  -- K2. tb_ping is the only tb_ function anon can execute (CLAUDE.md rule 3 and its one exception)
+  select string_agg(p.proname, ',' order by p.proname) into v_ca
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and p.proname like 'tb\_%' and has_function_privilege('anon', p.oid, 'execute');
+  r := r || jsonb_build_object('test', 'K2 tb_ping is the only tb_ function anon can execute', 'pass', v_ca = 'tb_ping', 'detail', v_ca);
 
   reset role;
   perform set_config('smoke.results', r::text, true);

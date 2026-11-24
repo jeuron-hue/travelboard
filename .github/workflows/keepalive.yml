@@ -1,10 +1,12 @@
 name: keep-alive
 # travelboard keep-alive (SPEC.md 4.1, 6.8 step 5). Modelled on weatherboard's keepalive.yml.
 # Supabase pauses a free project after about 7 days of low database activity (docs read
-# 23/10/26). Once a day this makes one anonymous call to rpc/tb_whoami with the publishable
-# key. travelboard grants anon nothing (CLAUDE.md rule 3), so the expected answer is
-# Postgres's own permission error 42501: proof the request reached the database. Anything
-# else (540 paused, 5xx, no answer) fails the run.
+# 23/10/26). Once a day this calls rpc/tb_ping with the publishable key and no sign-in.
+# tb_ping (migration 0010) is the one function anon may call: it reads one row of
+# travel.captures, so a real query runs, and returns only the server time. Until 24/11/26 this
+# called rpc/tb_whoami and passed on Postgres's 42501 denial; Supabase still warned of a pause,
+# so a refused call does not count as activity. The run passes only on HTTP 200 with a timestamp;
+# anything else (540 paused, 4xx, 5xx, no answer) fails it.
 # The stamp commit keeps GitHub from switching the schedule off after 60 days without a commit.
 on:
   schedule:
@@ -25,12 +27,12 @@ jobs:
       - name: Ping the travelboard database
         run: |
           code=$(curl -sS -o "$RUNNER_TEMP/ping.json" -w '%{http_code}' -X POST \
-            "https://nnnnonspfljdkrxstslw.supabase.co/rest/v1/rpc/tb_whoami" \
+            "https://nnnnonspfljdkrxstslw.supabase.co/rest/v1/rpc/tb_ping" \
             -H "apikey: sb_publishable_uvuGUpCgEIMgWzDSBwOi8Q_56z6Us-_" \
             -H "Content-Type: application/json" -d '{}')
           echo "HTTP $code"; cat "$RUNNER_TEMP/ping.json"; echo
-          case "$code" in 401|403) ;; *) echo "expected 401 or 403 from Postgres"; exit 1;; esac
-          grep -q '"code":"42501"' "$RUNNER_TEMP/ping.json"
+          [ "$code" = 200 ] || { echo "expected 200 from tb_ping"; exit 1; }
+          grep -Eq '^"[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$RUNNER_TEMP/ping.json"
       - name: Touch stamp
         run: |
           date -u +%Y-%m-%dT%H:%M:%SZ > .keepalive

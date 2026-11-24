@@ -5,6 +5,28 @@ Acceptance lists are in `SPEC.md`; this file holds how each item is tested and t
 
 ---
 
+## Keep-alive ping, migration 0010 (SPEC.md 6.8 step 5; Gary's decision 24/11/26)
+
+**Status 24/11/26: migration applied and checked; the workflow change waits for Gary's merge. No client change, no version bump.**
+
+Why: Supabase emailed on 24/11/26 that project `travelboard` would be paused for low activity over 7 days. The project was `ACTIVE_HEALTHY` and the keep-alive had committed its stamp every day to 23/11/26, so its anonymous `rpc/tb_whoami`, refused with 42501, does not count as activity.
+
+| Check | Result | Detail |
+|---|---|---|
+| Catalogue before (`checks/catalogue_scoped.sql`) | Taken | OUTSIDE 542, hash `013b5e0e50b6` (518 at the 0009 baseline: Supabase's own schemas have grown since; not travelboard's). 61 travelboard rows. |
+| Migration 0010 | Applied 24/11/26 as `tb_0010_tb_ping` | `public.tb_ping()`: definer, `search_path = travel, public`, reads one row of `travel.captures`, returns `now()`. ACL `{postgres=X, anon=X, authenticated=X}`. |
+| Catalogue after | PASS | OUTSIDE 542, `013b5e0e50b6`, unchanged. The 61 travelboard rows match their before fingerprints one by one. Added: `func public.tb_ping()` only. |
+| Smoke K1, K2 (new) and anon table read | PASS, 3 of 3 | Run in a rolled-back transaction: anon calls `tb_ping` and gets the server time; `tb_ping` is the only `tb_` function anon can execute; anon still gets 42501 reading `travel.captures`. The rest of `checks/smoke.sql` was not rerun: the catalogue diff shows nothing else changed. |
+| `checks/static.cjs` | PASS, 148 of 148 | Adds: 0010 holds only `tb_ping` and its only anon grant; the workflow calls `tb_ping` and passes only on HTTP 200. |
+| Live workflow run | Waits for the merge | This sandbox cannot reach supabase.co over HTTPS. The edit to `keepalive.yml` starts a run on `main` by itself (its `push` trigger). |
+
+### Gary's step after the merge
+
+1. On github.com, `jeuron-hue/travelboard`, Actions, "keep-alive": the run started by the merge should be green within a minute, and its log shows `HTTP 200` and a timestamp such as `"2026-11-24T10:04:39.949205+00:00"`. A red run, or anything else in the log, report it.
+2. If Supabase sends a "paused" email anyway, unpause from the dashboard and tell Claude.
+
+---
+
 ## 0.18.0 Originals folder and Discard (SPEC.md 7.2, 7A.2; Gary's decisions 10/11/26)
 
 **Status 10/11/26: built and checked headless; waits for Gary's merge. Device steps below; Gary runs them when convenient, and the full run is after the trip with 0.17.0's.**

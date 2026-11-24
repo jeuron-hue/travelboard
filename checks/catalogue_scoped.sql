@@ -3,7 +3,7 @@
 -- tb_photos_* policies, bucket tb-photos) are listed one per row, and everything else is one row:
 -- OUTSIDE, its count and a 12-character hash. Run before and after a migration: the OUTSIDE row must
 -- not change, and the listed rows must change only as the migration says. Baseline after 0009:
--- OUTSIDE 518, 493804029b51 (24/10/26).
+-- OUTSIDE 518, 493804029b51 (24/10/26). Before and after 0010: OUTSIDE 542, 013b5e0e50b6 (24/11/26).
 with objs as (
   select 'schema' as kind, n.nspname as name,
          md5(concat_ws('|', pg_get_userbyid(n.nspowner), n.nspacl::text)) as fp
