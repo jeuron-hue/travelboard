@@ -415,6 +415,21 @@ if (exists(`${FN}/context.mjs`)) check(/export const MAX_TURNS = 40;/.test(read(
   check(exists('checks/headless/m17.test.cjs') && /node m17\.test\.cjs/.test(pkg.scripts.test), '0.17.0: headless suite m17 exists and runs with the others');
 }
 
+// ---------- migration 0010: keep-alive ping, the one anon function (SPEC.md 6.8 step 5) ----------
+{
+  const M10 = 'supabase/migrations/0010_tb_ping.sql';
+  const m10 = exists(M10) ? read(M10) : '';
+  const code10 = m10.replace(/^--.*$/gm, '');
+  const anonGrants = code10.match(/grant [^;]* to [^;]*\banon\b[^;]*;/gi) || [];
+  check(/^begin;$/m.test(m10) && /^commit;$/m.test(m10) && !/\bdrop\b|\balter\b|create or replace/i.test(code10)
+    && (code10.match(/create function public\.(\w+)/g) || []).join() === 'create function public.tb_ping'
+    && /security definer/.test(code10) && /set search_path = travel, public/.test(code10)
+    && /revoke all on function public\.tb_ping\(\) from public;/.test(code10)
+    && anonGrants.length === 1 && /on function public\.tb_ping\(\) to anon, authenticated;/.test(anonGrants[0])
+    && !/on (table|schema|all tables)/i.test(code10) && !/storage\.|auth\./.test(code10),
+    '0010: one transaction, only tb_ping, definer, the only anon grant in it is execute on tb_ping, no table grants');
+}
+
 // ---------- keep-alive workflow (SPEC.md 6.8 step 5) ----------
 const KA = '.github/workflows/keepalive.yml';
 check(exists(KA), 'keep-alive: workflow exists');
@@ -423,7 +438,8 @@ if (exists(KA)) {
   const trip = read('trip.html');
   const ref = (trip.match(/const PROJECT_REF = '([a-z0-9]+)';/) || [])[1];
   const key = (trip.match(/const SUPABASE_PUBLISHABLE_KEY = '([^']+)';/) || [])[1];
-  check(!!ref && ka.includes(`https://${ref}.supabase.co/rest/v1/rpc/tb_whoami`), `keep-alive: pings the project trip.html uses (${ref})`);
+  check(!!ref && ka.includes(`https://${ref}.supabase.co/rest/v1/rpc/tb_ping`), `keep-alive: calls tb_ping on the project trip.html uses (${ref})`);
+  check(/\[ "\$code" = 200 \]/.test(ka) && !/42501/.test(ka.replace(/^\s*#.*$/gm, '')), 'keep-alive: passes only on HTTP 200, no longer on a 42501 denial');
   check(!!key && ka.includes(`apikey: ${key}`), 'keep-alive: uses the same publishable key as trip.html');
   check(/schedule:\s*\n\s*- cron: '\d+ \d+ \* \* \*'/.test(ka), 'keep-alive: runs daily, well inside the 7-day pause window');
   check(!/secrets\./.test(ka), 'keep-alive: no secret beyond the publishable key');
